@@ -113,4 +113,4 @@ retained; conformist is released under the MIT license.
 
 # SEE ALSO
 
-*conformist*(1), *conformist.toml*(5)
+*conformist*(1), *conformist.toml*(5), *conformist-nix*(7)

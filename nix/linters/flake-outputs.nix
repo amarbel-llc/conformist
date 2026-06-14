@@ -1,9 +1,10 @@
-# conformist#9: a flake's `outputs` formal must name every declared input, or
-# use a `...` catch-all (Nix passes all inputs to outputs; a closed formal that
-# omits one is a hard eval error that only surfaces at eval time). Whole-tree
-# check (passes-files=false): reads flake.nix + flake.lock (committed, so it runs
-# in the sandboxed checks.formatting). Inputs come from flake.lock so no `nix`
-# invocation is needed inside the sandbox. See amarbel-llc/conformist#9.
+# conformist-nix(7) FLAKE OUTPUTS (conformist#9): a flake's `outputs` formal must
+# name every declared input, or use a `...` catch-all (Nix passes all inputs to
+# outputs; a closed formal that omits one is a hard eval error that only surfaces
+# at eval time). Whole-tree check (passes-files=false): reads flake.nix +
+# flake.lock (committed, so it runs in the sandboxed checks.formatting). Inputs
+# come from flake.lock so no `nix` invocation is needed inside the sandbox. See
+# conformist-nix(7) FLAKE OUTPUTS and amarbel-llc/conformist#9.
 {
   config,
   lib,
@@ -62,7 +63,7 @@ let
       done
 
       if [ -n "$missing" ]; then
-        echo "flake-outputs(#9): outputs formal omits declared input(s):$missing — add them or use '...'" >&2
+        echo "conformist-nix(7) FLAKE OUTPUTS (#9): outputs formal omits declared input(s):$missing — add them or use '...'" >&2
         exit 1
       fi
       echo "flake-outputs(#9): outputs formal names all declared inputs"

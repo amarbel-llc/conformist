@@ -134,7 +134,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   **eng-convention enforcers** conformist runs on itself: `eng-versioning`,
   `eng-versioning-deprecated-file` (flags `version.txt` / a flake.nix named
   version var, per eng-versioning(7) "Deprecated alternatives"),
-  `justfile-default`, `justfile-recipe-names`, `flake-outputs`, `golangci-dewey`
+  `justfile-default`, `justfile-recipe-names`, `flake-outputs` and `flake-lock`
+  (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
+  inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
   `.custom-gcl.yml`), `git-remotes`, `git-default-branch`, `sweatfile`,
   `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair).
@@ -190,7 +192,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   drift-gated by `just verify-godyn-graph`); it captures `cmd/init`'s `//go:embed`.
   See igloo#29 / `man 7 godyn`.
 - **Man pages** (`doc/`, `eng-manpages(7)`): hand-written scdoc for sections
-  2–9 (`doc/conformist.toml.5.scd`, `doc/conformist.7.scd`) plus the codegen
+  2–9 (`doc/conformist.toml.5.scd`, `doc/conformist.7.scd`,
+  `doc/conformist-nix.7.scd` — the normative home for the `flake-*` linters'
+  conventions) plus the codegen
   section-1 reference via `conformist gen-man`, all compiled by the `manpages`
   Nix derivation — the build is the man-page lint (PRINCIPLE 4), there is no
   justfile recipe. Note `doc/` (man-page sources) is distinct from `docs/`
