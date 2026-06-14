@@ -133,6 +133,7 @@
     "goFiles": [
       "check.go",
       "completions.go",
+      "conform.go",
       "genman.go",
       "root.go",
       "version.go"
@@ -144,6 +145,7 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
+      "github.com/amarbel-llc/conformist/cmd/conform",
       "github.com/amarbel-llc/conformist/cmd/format",
       "github.com/amarbel-llc/conformist/cmd/init",
       "github.com/amarbel-llc/conformist/config",
@@ -157,6 +159,33 @@
       "github.com/spf13/viper",
       "go.etcd.io/bbolt"
     ]
+  },
+  {
+    "importPath": "github.com/amarbel-llc/conformist/cmd/conform",
+    "dir": "cmd/conform",
+    "name": "conform",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "conform.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": [
+      "scaffold/conformist.nix",
+      "scaffold/flake-snippet.txt",
+      "scaffold/recipes.just",
+      "scaffold/version.env"
+    ],
+    "embedPatterns": [
+      "scaffold/conformist.nix",
+      "scaffold/flake-snippet.txt",
+      "scaffold/recipes.just",
+      "scaffold/version.env"
+    ],
+    "imports": null
   },
   {
     "importPath": "github.com/amarbel-llc/conformist/cmd/format",

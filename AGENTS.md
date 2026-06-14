@@ -85,7 +85,11 @@ message token).
   files the run changed — the pre/post `git status` delta — as
   `chore: conformist fmt+fix`; dirty-tree policy in `commitPreflight`);
   subcommands `check` (`check.go`) and `version` (`version.go`) dispatch
-  separately; a hidden `gen-man` (`genman.go`) renders the section-1 man pages
+  separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
+  eng shape — writes `conformist.nix`/`version.env` if absent (`//go:embed`-ed
+  `cmd/conform/scaffold/`), prints the flake.nix + justfile wiring to paste, never
+  edits existing files; idempotent, exits 3 when it scaffolds (`ErrScaffolded`);
+  a hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via
   `cmd/init`, `--completion` emits shell completions. Config flags live on
   **persistent** flags so `check` inherits tree-root/walk/excludes/config-file.

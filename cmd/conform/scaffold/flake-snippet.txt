@@ -1,0 +1,32 @@
+Add conformist to flake.nix and wire it into your per-system outputs
+(utils.lib.eachDefaultSystem or a flake-parts perSystem):
+
+  inputs = {
+    conformist.url = "github:amarbel-llc/conformist";
+    # follow conformist's pins so the closure is shared:
+    nixpkgs.follows = "conformist/nixpkgs-master";
+    utils.follows = "conformist/utils";
+  };
+
+  # per system, with `pkgs` and the `conformist` input in scope:
+  let
+    conformistPkg = conformist.packages.${system}.default;
+    eval = conformist.lib.evalModule pkgs {
+      imports = [
+        conformist.lib.presets.eng   # the eng-convention roster
+        ./conformist.nix             # this repo's overlay (written by `conform`)
+      ];
+      package = conformistPkg;
+    };
+  in {
+    formatter = eval.config.build.wrapper;             # `nix fmt`
+    checks.formatting = eval.config.build.check self;  # read-only `conformist check` gate
+
+    # impure git-state lane (git-remotes, sweatfile, agents-md) for `lint-worktree`:
+    packages.conformist-impure-config =
+      (conformist.lib.evalModule pkgs {
+        imports = [ conformist.lib.presets.eng-impure ];
+        package = conformistPkg;
+        projectRootFile = "flake.nix";
+      }).config.build.configFile;
+  }
