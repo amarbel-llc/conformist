@@ -72,6 +72,12 @@ type Formatter struct {
 	CheckCommand string `mapstructure:"check-command,omitempty" toml:"check-command,omitempty"`
 	// CheckOptions are the args passed to CheckCommand.
 	CheckOptions []string `mapstructure:"check-options,omitempty" toml:"check-options,omitempty"`
+	// ConfigFiles are filenames the formatter discovers by walking upward from
+	// each formatted file (e.g. rustfmt.toml, .editorconfig). In sandbox check
+	// mode they are copied from each matched file's ancestor directories into
+	// the sandbox at the same relative path, so the sandboxed tool sees the same
+	// config the real tree would (conformist#28).
+	ConfigFiles []string `mapstructure:"config-files,omitempty" toml:"config-files,omitempty"`
 	// Sandbox forces sandbox execution in check mode even when a native check
 	// command is available (RFC 0001 §3, §6).
 	Sandbox bool `mapstructure:"sandbox,omitempty" toml:"sandbox,omitempty"`

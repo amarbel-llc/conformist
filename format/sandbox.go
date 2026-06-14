@@ -116,6 +116,15 @@ func (f *Formatter) checkSandbox(ctx context.Context, treeRoot string, files []*
 		}
 	}
 
+	// Formatters discover config (rustfmt.toml, .editorconfig, …) by walking
+	// upward from each formatted file. Those config files are not matched files,
+	// so ship the declared ones into the sandbox at the same relative path,
+	// otherwise the sandboxed tool runs with its default config and check mode
+	// disagrees with repair mode (conformist#28).
+	if err := copyConfigFilesIntoSandbox(treeRoot, dir, files, f.config.ConfigFiles); err != nil {
+		return nil, err
+	}
+
 	maxBatch := len(files)
 	if f.HasNoPositionalArgSupport() {
 		maxBatch = 1
@@ -204,6 +213,56 @@ func copyIntoSandbox(treeRoot, dir string, file *walk.File) error {
 	// RelPath), not an externally-tainted path, so the traversal warning is moot.
 	if err := os.WriteFile(dst, content, mode); err != nil { //nolint:gosec
 		return fmt.Errorf("failed to write sandbox copy: %w", err)
+	}
+
+	return nil
+}
+
+// copyConfigFilesIntoSandbox ships the formatter's declared config files into
+// the sandbox so upward config discovery finds them there (conformist#28). For
+// each matched file it walks the ancestor directories from the file's directory
+// up to the tree root; any declared config-file name present in an ancestor is
+// copied into the sandbox at the same relative path. Copying every ancestor's
+// config is a superset of what discovery (e.g. .editorconfig's `root = true`)
+// would stop at, which is correct: extra config the tool would not consult is
+// harmless. Config files are read-only to the tool, but must be present at the
+// right relative path. Matched files are skipped — they are already copied.
+func copyConfigFilesIntoSandbox(treeRoot, dir string, files []*walk.File, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+
+	// relative paths already in the sandbox (matched files + config files copied
+	// on an earlier iteration), so we never copy the same path twice.
+	copied := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		copied[filepath.Clean(file.RelPath)] = struct{}{}
+	}
+
+	for _, file := range files {
+		for relDir := filepath.Dir(file.RelPath); ; relDir = filepath.Dir(relDir) {
+			for _, name := range names {
+				rel := filepath.Join(relDir, name)
+				if _, seen := copied[rel]; seen {
+					continue
+				}
+
+				abs := filepath.Join(treeRoot, rel)
+				if info, err := os.Lstat(abs); err != nil || info.IsDir() {
+					continue
+				}
+
+				if err := copyIntoSandbox(treeRoot, dir, &walk.File{Path: abs, RelPath: rel}); err != nil {
+					return err
+				}
+
+				copied[rel] = struct{}{}
+			}
+
+			if relDir == "." || relDir == string(os.PathSeparator) {
+				break
+			}
+		}
 	}
 
 	return nil

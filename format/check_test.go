@@ -173,6 +173,76 @@ func TestCompositeCheckerSandbox(tt *testing.T) {
 	as.Equal(string(before), string(after))
 }
 
+// TestCompositeCheckerSandboxConfigFiles verifies that a formatter's declared
+// config-files are shipped into the sandbox from the matched file's ancestor
+// directories, so a fix-only formatter discovers the same config in check mode
+// as in repair mode (conformist#28). Without config-files the sandbox runs the
+// tool with default behaviour and disagrees with the real tree — the guard
+// sub-case asserts exactly that, proving the mechanism is what carries the
+// config in.
+func TestCompositeCheckerSandboxConfigFiles(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	// stub fix-only formatter: uppercases each file only when a `cfg.ini` in its
+	// CWD (the sandbox root) declares `mode=upper`. With no cfg.ini it is a
+	// no-op, mirroring a real tool falling back to its default config.
+	const fixScript = "#!/usr/bin/env bash\n" +
+		"mode=\"\"\n" +
+		"[ -f cfg.ini ] && mode=$(sed -n 's/^mode=//p' cfg.ini)\n" +
+		"for f in \"$@\"; do\n" +
+		"  if [ \"$mode\" = upper ]; then tr '[:lower:]' '[:upper:]' < \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; fi\n" +
+		"done\n" +
+		"exit 0\n"
+
+	run := func(configFiles []string) []format.Finding {
+		t.Helper()
+		root := t.TempDir()
+
+		fix := writeFile(t, root, "fix.sh", fixScript, 0o755)
+		// config lives at the tree root, an ancestor of the matched file.
+		writeFile(t, root, "cfg.ini", "mode=upper\n", 0o644)
+		writeFile(t, root, "src/a.txt", "hello", 0o644)
+
+		statz := stats.New()
+		cfg := &config.Config{
+			TreeRoot:    root,
+			OnUnmatched: "info",
+			FormatterConfigs: map[string]*config.Formatter{
+				"stub": {Command: fix, Includes: []string{"*.txt"}, ConfigFiles: configFiles},
+			},
+		}
+
+		checker, err := format.NewCompositeChecker(cfg, &statz)
+		as.NoError(err)
+
+		findings, err := checker.Check(context.Background(), []*walk.File{
+			walkFile(t, root, "src/a.txt"),
+		})
+		as.NoError(err)
+
+		// the source must never be written by a check
+		after, err := os.ReadFile(filepath.Join(root, "src/a.txt"))
+		as.NoError(err)
+		as.Equal("hello", string(after))
+
+		return findings
+	}
+
+	// With config-files declared, cfg.ini reaches the sandbox; the formatter
+	// uppercases and the file is reported as needing formatting.
+	withConfig := run([]string{"cfg.ini"})
+	as.Len(withConfig, 1)
+	as.Equal(format.FindingFormat, withConfig[0].Kind)
+	as.Equal("src/a.txt", withConfig[0].Path)
+
+	// Without config-files, cfg.ini is absent in the sandbox; the formatter is a
+	// no-op and (incorrectly, vs. the real tree) reports nothing. This is the
+	// pre-fix bug behaviour the config-files mechanism corrects.
+	withoutConfig := run(nil)
+	as.Empty(withoutConfig)
+}
+
 // TestCompositeCheckerSandboxReadOnlySource is a regression test for the
 // writable-sandbox-copy fix (commit e58928e, issue #3): a read-only source
 // (mode 0444, e.g. a /nix/store path under `nix flake check`) must still be

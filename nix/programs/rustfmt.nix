@@ -38,6 +38,14 @@ in
         "--edition"
         cfg.edition
       ];
+      # rustfmt discovers rustfmt.toml/.editorconfig by walking upward from each
+      # formatted file. Ship them into the sandbox so check mode agrees with
+      # repair mode instead of formatting at rustfmt's defaults (conformist#28).
+      config-files = [
+        "rustfmt.toml"
+        ".rustfmt.toml"
+        ".editorconfig"
+      ];
     };
   };
 }
