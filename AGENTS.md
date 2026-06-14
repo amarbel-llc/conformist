@@ -134,7 +134,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   **eng-convention enforcers** conformist runs on itself: `eng-versioning`,
   `eng-versioning-deprecated-file` (flags `version.txt` / a flake.nix named
   version var, per eng-versioning(7) "Deprecated alternatives"),
-  `justfile-default`, `justfile-recipe-names`, `flake-outputs` and `flake-lock`
+  `justfile-default`, `justfile-recipe-names`, `justfile-debug-recipes`
+  (eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS: debug/explore recipes
+  carry a doc comment, #23), `flake-outputs` and `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via

@@ -27,6 +27,7 @@
   linters.flake-lock.enable = true; # conformist-nix(7) FLAKE HYGIENE (#11): flake.lock is committed
   linters.justfile-default.enable = true; # eng-design_patterns-justfile(7): default first
   linters.justfile-recipe-names.enable = true; # ...(7): verb-noun recipe naming
+  linters.justfile-debug-recipes.enable = true; # ...(7) RECIPE DESCRIPTIONS: debug/explore recipes documented (#23)
 
   # Prefer top-level `excludes` over the deprecated `global.excludes`. These
   # apply to formatters and linters alike, so the test/** fixtures (deliberately
