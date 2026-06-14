@@ -17,21 +17,16 @@
   # path end-to-end.
   linters.shellcheck.enable = true;
 
-  # Whole-tree checks (passes-files=false): conformist self-enforces eng-*
-  # conventions. These read only committed files, so they run in the sandboxed
-  # checks.formatting gate (the git-state checks live in nix/conformist-impure.nix).
-  linters.eng-versioning.enable = true; # eng-versioning(7): version.env key
-  linters.eng-versioning-deprecated-file.enable = true; # ...(7): no version.txt / flake.nix named var (#14)
-  linters.golangci-dewey.enable = true; # conformist#10: .custom-gcl.yml wires the dewey plugin
-  linters.flake-outputs.enable = true; # conformist-nix(7) FLAKE OUTPUTS (#9): outputs formal accepts all inputs
-  linters.flake-lock.enable = true; # conformist-nix(7) FLAKE HYGIENE (#11): flake.lock is committed
-  linters.justfile-default.enable = true; # eng-design_patterns-justfile(7): default first
-  linters.justfile-recipe-names.enable = true; # ...(7): verb-noun recipe naming
-  linters.justfile-debug-recipes.enable = true; # ...(7) RECIPE DESCRIPTIONS: debug/explore recipes documented (#23)
-  linters.justfile-recipe-descriptions.enable = true; # conformist-justfile(7): every leaf documented (#17)
-  linters.justfile-task-hierarchy.enable = true; # conformist-justfile(7) TASK HIERARCHY: pipeline-verb leaves in exactly one aggregate (#17)
-  linters.justfile-leaf-noun.enable = true; # conformist-justfile(7): leaves are verb-noun, not bare verbs (#17)
-  linters.justfile-aggregate-comments.enable = true; # conformist-justfile(7): aggregates carry no doc comment (#17)
+  # Whole-tree checks (passes-files=false): conformist self-enforces the eng-*
+  # conventions via the pure preset it ships — the same roster a downstream repo
+  # gets from `imports = [ conformist.lib.presets.eng ]`. These read only
+  # committed files, so they run in the sandboxed checks.formatting gate (the
+  # git-state checks live in nix/conformist-impure.nix, via the eng-impure preset).
+  imports = [ ./presets/eng.nix ];
+
+  # Go-specific, so not in the language-agnostic preset (conformist#10: a
+  # golangci-lint-gating repo must wire the dewey plugin via .custom-gcl.yml).
+  linters.golangci-dewey.enable = true;
 
   # Prefer top-level `excludes` over the deprecated `global.excludes`. These
   # apply to formatters and linters alike, so the test/** fixtures (deliberately

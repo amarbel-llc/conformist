@@ -146,9 +146,18 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
   `.custom-gcl.yml`), `git-remotes`, `git-default-branch`, `sweatfile`,
   `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair).
-- `nix/conformist.nix` — conformist's own self-config (sandboxed, file-based
-  checks). `nix/conformist-impure.nix` — the impure git-state checks (e.g.
-  `git-remotes`) that need a live `.git` and so run via `just lint-worktree`
+- `nix/presets/` — reusable rosters a consumer imports to enable the whole
+  eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the
+  seven `justfile-*`) and `eng-impure.nix` (git-state lane: `git-remotes`,
+  `git-default-branch`, `sweatfile`, `agents-md`). Exposed as
+  `conformist.lib.presets.{eng,eng-impure}`, so a downstream repo's roster is
+  `imports = [ conformist.lib.presets.eng ]`. conformist self-consumes them
+  (below), so the presets can't drift from what conformist itself runs.
+- `nix/conformist.nix` — conformist's own self-config: `imports = [
+  ./presets/eng.nix ]` + its formatters, `shellcheck`, the Go-specific
+  `golangci-dewey`, and excludes (sandboxed, file-based checks).
+  `nix/conformist-impure.nix` — `imports = [ ./presets/eng-impure.nix ]`; the
+  impure git-state checks need a live `.git` and so run via `just lint-worktree`
   against the working tree rather than the sandboxed `checks.formatting`.
 - `nix/checks.nix` — eval-only smoke test forcing module eval + config generation
   for every ported formatter/linter (`checks.<sys>.{formatter-*,linter-*}`).
@@ -219,8 +228,10 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   (the mkdocs prose site).
 - `formatter` (= `nix fmt` wrapper), `checks.formatting` (sandboxed read-only
   gate) + the `formatter-*`/`linter-*` registry smoke tests.
-- `lib` = the Nix module library (`conformist.lib.evalModule pkgs { … }`);
-  `flakeModule` = `flake-module.nix` (flake-parts `perSystem.conformist`).
+- `lib` = the Nix module library (`conformist.lib.evalModule pkgs { … }`), which
+  also carries `lib.presets.{eng,eng-impure}` (the one-import eng rosters, see
+  `nix/presets/`); `flakeModule` = `flake-module.nix` (flake-parts
+  `perSystem.conformist`).
   Downstream consumers MUST set `conformist.package` — conformist is not in
   nixpkgs, so the module's `package` option has no default.
 

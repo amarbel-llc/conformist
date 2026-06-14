@@ -323,4 +323,11 @@ in
     mkConfigFile
     mkWrapper
     ;
+
+  # Reusable config presets a consumer imports to enable a whole roster at once,
+  # e.g. `imports = [ conformist.lib.presets.eng ];`. See nix/presets/.
+  presets = {
+    eng = ./presets/eng.nix;
+    eng-impure = ./presets/eng-impure.nix;
+  };
 }

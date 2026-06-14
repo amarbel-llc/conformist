@@ -8,15 +8,11 @@
 {
   projectRootFile = "flake.nix";
 
-  # git-remotes / git-default-branch need a live .git; sweatfile runs
-  # `spinclass validate` (spinclass is profile-installed, not nixpkgs). These all
-  # need the working tree / host tools, so they live here, not in nix/conformist.nix.
-  linters.git-remotes.enable = true;
-  linters.git-default-branch.enable = true;
-  linters.sweatfile.enable = true;
-
-  # agents-md repair runs `git mv` (needs .git) and the check must see the real
-  # CLAUDE.md symlink in the working tree, not a /nix/store copy — so it lives in
-  # the impure lane. conformist is already migrated, so the check passes (#18).
-  linters.agents-md.enable = true;
+  # The impure eng roster (git-remotes / git-default-branch need a live .git;
+  # sweatfile runs `spinclass validate`; agents-md's repair runs `git mv` and the
+  # check must see the real CLAUDE.md symlink in the working tree, not a
+  # /nix/store copy). These need the working tree / host tools, so they run via
+  # `just lint-worktree`, not the sandboxed checks.formatting. Same roster a
+  # downstream repo gets from `imports = [ conformist.lib.presets.eng-impure ]`.
+  imports = [ ./presets/eng-impure.nix ];
 }
