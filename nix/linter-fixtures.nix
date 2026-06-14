@@ -214,6 +214,96 @@ let
       expectFail = true;
       expectToken = "no doc comment";
     })
+
+    # justfile-recipe-descriptions: every leaf recipe carries a doc comment
+    # (eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS, conformist#17).
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-descriptions";
+      label = "documented-pass";
+      files = {
+        "justfile" = ''
+          # builds the thing
+          build-thing:
+              echo hi
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-descriptions";
+      label = "undocumented-leaf-fail";
+      files = {
+        "justfile" = ''
+          build-thing:
+              echo hi
+        '';
+      };
+      expectFail = true;
+      expectToken = "no doc comment";
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-descriptions";
+      label = "exempts-aggregate-and-debug-pass";
+      files = {
+        # Aggregate (no body) is self-documenting; debug recipe is #23's job:
+        # both are exempt even when undocumented, so this passes.
+        "justfile" = ''
+          # documented leaf
+          build-thing:
+              echo hi
+
+          agg: build-thing
+
+          [group('debug')]
+          debug-thing:
+              echo hi
+        '';
+      };
+    })
+
+    # justfile-task-hierarchy: no leaf belongs to more than one aggregate
+    # (eng-design_patterns-justfile(7) TASK HIERARCHY, conformist#17).
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "single-aggregate-pass";
+      files = {
+        "justfile" = ''
+          build: build-go build-nix
+
+          build-go:
+              echo go
+
+          build-nix:
+              echo nix
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "orphan-leaf-pass";
+      files = {
+        # A leaf in no aggregate is a legitimate standalone recipe (release, tag,
+        # run-nix): the upper-bound rule must NOT flag it.
+        "justfile" = ''
+          release-thing:
+              echo release
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "multi-aggregate-fail";
+      files = {
+        "justfile" = ''
+          build: shared
+          verify: shared
+
+          shared:
+              echo hi
+        '';
+      };
+      expectFail = true;
+      expectToken = "at most one aggregate";
+    })
   ];
 in
 builtins.listToAttrs (

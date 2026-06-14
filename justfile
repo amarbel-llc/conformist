@@ -70,9 +70,11 @@ build-godyn-graph:
 build-go: build-gomod2nix
     nix develop --command go build -o build/conformist .
 
+# Full nix build of the default package (injects the real version/commit).
 build-nix:
     nix build --show-trace
 
+# Pass-through: `nix run` the conformist flake with ARGS.
 run-nix *ARGS:
     nix run . -- {{ ARGS }}
 
@@ -289,6 +291,7 @@ verify-godyn-graph:
 
 test: test-go
 
+# Run the Go test suite (-tags test); fail if the working tree mutates mid-run (#15).
 test-go:
     #!/usr/bin/env bash
     # Guard for conformist#15: the cmd integration tests run conformist against
@@ -313,18 +316,22 @@ test-go:
 
 codemod-fmt: codemod-fmt-conformist
 
+# Format conformist's own tree in place via `nix fmt` (repair mode).
 codemod-fmt-conformist:
     nix fmt
 
 # --- maintenance ---
 
+# `go mod tidy`, then regenerate gomod2nix.toml (the && dependency).
 update-go: && build-gomod2nix
     nix develop --command go mod tidy
 
+# Set CONFORMIST_VERSION in version.env (the single source of truth).
 [group("maintenance")]
 bump-version new_version:
     sed -E -i "s/^(export CONFORMIST_VERSION)=.*/\1={{ new_version }}/" version.env
 
+# Create, push, and verify a signed vX.Y.Z tag from version.env.
 [group("maintenance")]
 tag message:
     #!/usr/bin/env bash
@@ -337,6 +344,7 @@ tag message:
     echo "Pushed $tag"
     git tag -v "$tag"
 
+# Cut a release from master: changelog, bump-version commit, signed tag, gh release.
 [group("maintenance")]
 release new_version:
     #!/usr/bin/env bash
@@ -373,5 +381,6 @@ release new_version:
 
 clean: clean-build
 
+# Remove the nix `result` symlink and the build/ output dir.
 clean-build:
     rm -rf result build/
