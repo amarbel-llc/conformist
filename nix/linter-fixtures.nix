@@ -304,6 +304,88 @@ let
       expectFail = true;
       expectToken = "at most one aggregate";
     })
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "pipeline-orphan-fail";
+      files = {
+        # A pipeline-verb leaf (build) in no aggregate is unreachable from default
+        # — the tightened lower bound must flag it.
+        "justfile" = ''
+          build-go:
+              echo go
+        '';
+      };
+      expectFail = true;
+      expectToken = "exactly one aggregate";
+    })
+
+    # justfile-leaf-noun: a leaf must be verb-noun, not a bare verb
+    # (conformist-justfile(7) AGGREGATES AND LEAVES, conformist#17).
+    (mkLinterFixtureCheck {
+      name = "justfile-leaf-noun";
+      label = "verb-noun-pass";
+      files = {
+        "justfile" = ''
+          build-go:
+              echo hi
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-leaf-noun";
+      label = "bare-verb-fail";
+      files = {
+        "justfile" = ''
+          build:
+              echo hi
+        '';
+      };
+      expectFail = true;
+      expectToken = "bare verb";
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-leaf-noun";
+      label = "tag-exempt-pass";
+      files = {
+        # `tag` is a verb-noun-exempt release recipe even as a single-segment leaf.
+        "justfile" = ''
+          tag:
+              echo tag
+        '';
+      };
+    })
+
+    # justfile-aggregate-comments: an aggregate must not carry a doc comment
+    # (conformist-justfile(7) AGGREGATES AND LEAVES, conformist#17).
+    (mkLinterFixtureCheck {
+      name = "justfile-aggregate-comments";
+      label = "uncommented-pass";
+      files = {
+        "justfile" = ''
+          build: build-go
+
+          # compiles go
+          build-go:
+              echo hi
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-aggregate-comments";
+      label = "commented-fail";
+      files = {
+        "justfile" = ''
+          # builds everything
+          build: build-go
+
+          # compiles go
+          build-go:
+              echo hi
+        '';
+      };
+      expectFail = true;
+      expectToken = "doc comment";
+    })
   ];
 in
 builtins.listToAttrs (

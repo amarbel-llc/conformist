@@ -1,7 +1,8 @@
-# eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS: every leaf recipe carries a
+# conformist-justfile(7) RECIPE DESCRIPTIONS: every leaf recipe carries a
 # doc comment — the single comment line immediately above it, which `just --list`
 # shows as the recipe's description. Whole-tree check (passes-files=false): reads
 # recipe metadata from `just --dump --dump-format json`, takes no file arguments.
+# Prose origin: eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS.
 #
 # Scope: LEAF recipes only (those with a body). Aggregate recipes (no body, only
 # dependencies) are self-documenting via their dependency list and are exempt.

@@ -136,9 +136,11 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   version var, per eng-versioning(7) "Deprecated alternatives"),
   the justfile checks (`justfile-default`, `justfile-recipe-names`,
   `justfile-debug-recipes` #23, `justfile-recipe-descriptions` — every leaf
-  recipe documented, `justfile-task-hierarchy` — no leaf in >1 aggregate; the
-  latter two per eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS / TASK
-  HIERARCHY, #17), `flake-outputs` and `flake-lock`
+  documented, `justfile-task-hierarchy` — pipeline-verb leaves in exactly one
+  aggregate, `justfile-leaf-noun` — leaves are verb-noun not bare verbs,
+  `justfile-aggregate-comments` — aggregates carry no doc comment; all per
+  conformist-justfile(7), the normative home conformist owns for these rules,
+  #17), `flake-outputs` and `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
@@ -208,7 +210,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
 - **Man pages** (`doc/`, `eng-manpages(7)`): hand-written scdoc for sections
   2–9 (`doc/conformist.toml.5.scd`, `doc/conformist.7.scd`,
   `doc/conformist-nix.7.scd` — the normative home for the `flake-*` linters'
-  conventions) plus the codegen
+  conventions, `doc/conformist-justfile.7.scd` — likewise for the `justfile-*`
+  linters, citing eng-design_patterns-justfile(7) as prose origin) plus the
+  codegen
   section-1 reference via `conformist gen-man`, all compiled by the `manpages`
   Nix derivation — the build is the man-page lint (PRINCIPLE 4), there is no
   justfile recipe. Note `doc/` (man-page sources) is distinct from `docs/`

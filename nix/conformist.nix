@@ -28,8 +28,10 @@
   linters.justfile-default.enable = true; # eng-design_patterns-justfile(7): default first
   linters.justfile-recipe-names.enable = true; # ...(7): verb-noun recipe naming
   linters.justfile-debug-recipes.enable = true; # ...(7) RECIPE DESCRIPTIONS: debug/explore recipes documented (#23)
-  linters.justfile-recipe-descriptions.enable = true; # ...(7) RECIPE DESCRIPTIONS: every leaf documented (#17)
-  linters.justfile-task-hierarchy.enable = true; # ...(7) TASK HIERARCHY: no leaf in >1 aggregate (#17)
+  linters.justfile-recipe-descriptions.enable = true; # conformist-justfile(7): every leaf documented (#17)
+  linters.justfile-task-hierarchy.enable = true; # conformist-justfile(7) TASK HIERARCHY: pipeline-verb leaves in exactly one aggregate (#17)
+  linters.justfile-leaf-noun.enable = true; # conformist-justfile(7): leaves are verb-noun, not bare verbs (#17)
+  linters.justfile-aggregate-comments.enable = true; # conformist-justfile(7): aggregates carry no doc comment (#17)
 
   # Prefer top-level `excludes` over the deprecated `global.excludes`. These
   # apply to formatters and linters alike, so the test/** fixtures (deliberately

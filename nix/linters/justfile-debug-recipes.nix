@@ -37,12 +37,19 @@ let
         | select((.value.doc // "") == "")
         | .key'
 
+      # Capture (not `< <(...)`) so a just/jq failure aborts loudly instead of
+      # reading as "no findings" — a check must never pass vacuously on a parse error.
+      if ! undocumented=$(just --dump --dump-format json | jq -r "$filter"); then
+        echo "justfile-debug-recipes: failed to read recipes via just/jq" >&2
+        exit 2
+      fi
+
       fail=0
       while read -r name; do
         [ -n "$name" ] || continue
         echo "justfile-debug-recipes: '$name' is a debug/explore recipe with no doc comment; add a one-line comment stating its dev-loop or linking a tracking issue (eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS / LIFECYCLE GROUPS)" >&2
         fail=1
-      done < <(just --dump --dump-format json | jq -r "$filter")
+      done <<< "$undocumented"
 
       if [ "$fail" -ne 0 ]; then
         exit 1

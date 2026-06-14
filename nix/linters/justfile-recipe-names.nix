@@ -1,7 +1,9 @@
-# eng-design_patterns-justfile(7) NAMING CONVENTION / VERB CATEGORIES: every
-# recipe follows a verb-noun pattern where the verb is from the known category
-# set. Whole-tree check (passes-files=false): reads recipe names via
-# `just --summary`, takes no file arguments.
+# conformist-justfile(7) VERB LIST: every recipe follows a verb-noun pattern
+# where the verb is one of the canonical verbs. Whole-tree check
+# (passes-files=false): reads recipe names via `just --summary`, takes no file
+# arguments. conformist-justfile(7) VERB LIST is the source of truth for the verb
+# set below; it mirrors eng-design_patterns-justfile(7) VERB CATEGORIES (the prose
+# origin) — keep the two in sync.
 #
 # Exceptions: `default` (the special first recipe) and the eng-versioning(7)
 # release recipes `tag` / `release` (which are not verb-noun by convention).

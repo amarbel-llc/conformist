@@ -1,7 +1,8 @@
-# eng-design_patterns-justfile(7) DEFAULT RECIPE: `default` must be the FIRST
+# conformist-justfile(7) AGGREGATES AND LEAVES: `default` must be the FIRST
 # recipe, and it must contain only aggregate targets (recipes with no body of
 # their own) — never leaves directly. Whole-tree check (passes-files=false):
-# reads the justfile, takes no file arguments.
+# reads the justfile, takes no file arguments. Prose origin:
+# eng-design_patterns-justfile(7) DEFAULT RECIPE.
 {
   config,
   lib,
