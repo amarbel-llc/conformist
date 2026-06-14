@@ -256,7 +256,18 @@ debug-bench-backends iterations="3":
 
 # --- verify ---
 
-verify: verify-godyn-graph
+verify: verify-godyn-graph verify-linter-fixtures
+
+# Behavioral fixture tests for the nix/linters/ whole-tree checks: build the
+# `linter-fixtures` aggregate, which runs each compiled linter against pass/fail
+# fixture trees and asserts the exit code + output token (nix/linter-fixtures.nix,
+# conformist#17). Builds only the aggregate — NOT a full `nix flake check`, which
+# would also realize the ~130 registry smoke checks.
+verify-linter-fixtures:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.linter-fixtures" --no-link --print-build-logs
 
 # Drift gate for the committed godyn-graph.json: regenerate the graph into a
 # scratch file and diff it against the committed copy, failing if they differ.

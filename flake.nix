@@ -243,6 +243,16 @@
           inherit pkgs;
           lib = conformistLib;
         };
+
+        # Behavioral fixture tests for the whole-tree linters: run each compiled
+        # check against pass/fail fixture trees and assert the exit code + an
+        # output token. checks.<sys>.{linter-fixture-<name>-<label>, linter-fixtures
+        # (aggregate)}. Built cheaply by `just verify-linter-fixtures`. See
+        # nix/linter-fixtures.nix (conformist#17).
+        linterFixtureChecks = import ./nix/linter-fixtures.nix {
+          inherit pkgs;
+          lib = conformistLib;
+        };
       in
       {
         packages = {
@@ -276,118 +286,121 @@
         # read-only `conformist check` gate built by `just lint-fmt`. The
         # `formatter-*` / `linter-*` checks are the registry smoke test.
         formatter = conformistEval.config.build.wrapper;
-        checks = registryChecks // {
-          formatting = conformistEval.config.build.check self;
+        checks =
+          registryChecks
+          // linterFixtureChecks
+          // {
+            formatting = conformistEval.config.build.check self;
 
-          # Regression test for the sandbox-safe script-linter helper
-          # (conformist#19). Packages an example `#!/usr/bin/env bash` script via
-          # writeCheckScript and EXECUTES it inside the build sandbox — which has
-          # no /usr/bin/env — so a missing patchShebangs would make exec fail here
-          # (the very failure #19 describes), failing the build. This is the
-          # dogfood proof that the helper produces sandbox-safe scripts.
-          write-check-script =
-            let
-              example = conformistLib.writeCheckScript pkgs {
-                name = "example-check";
-                src = pkgs.writeText "example-check" "#!/usr/bin/env bash\necho ok\n";
-                runtimeInputs = [ pkgs.coreutils ];
-              };
-            in
-            pkgs.runCommand "conformist-write-check-script-test" { } ''
-              got=$(${example}/bin/example-check) || {
-                echo "write-check-script: example failed to exec in the pure sandbox (#19 regression)" >&2
-                exit 1
-              }
-              [ "$got" = "ok" ] || {
-                echo "write-check-script: unexpected output '$got'" >&2
-                exit 1
-              }
-              touch $out
-            '';
+            # Regression test for the sandbox-safe script-linter helper
+            # (conformist#19). Packages an example `#!/usr/bin/env bash` script via
+            # writeCheckScript and EXECUTES it inside the build sandbox — which has
+            # no /usr/bin/env — so a missing patchShebangs would make exec fail here
+            # (the very failure #19 describes), failing the build. This is the
+            # dogfood proof that the helper produces sandbox-safe scripts.
+            write-check-script =
+              let
+                example = conformistLib.writeCheckScript pkgs {
+                  name = "example-check";
+                  src = pkgs.writeText "example-check" "#!/usr/bin/env bash\necho ok\n";
+                  runtimeInputs = [ pkgs.coreutils ];
+                };
+              in
+              pkgs.runCommand "conformist-write-check-script-test" { } ''
+                got=$(${example}/bin/example-check) || {
+                  echo "write-check-script: example failed to exec in the pure sandbox (#19 regression)" >&2
+                  exit 1
+                }
+                [ "$got" = "ok" ] || {
+                  echo "write-check-script: unexpected output '$got'" >&2
+                  exit 1
+                }
+                touch $out
+              '';
 
-          # True-positive regression for the eng-versioning deprecated-file rule
-          # (conformist#14): run the linter's own command against fixtures and
-          # assert it passes a clean tree but FLAGS a `version.txt` and a flake.nix
-          # named version let-binding. checks.formatting only proves conformist's
-          # own clean tree passes; this proves the rule actually fires.
-          eng-versioning-deprecated-file =
-            let
-              cmd = conformistEval.config.settings.linter.eng-versioning-deprecated-file.command;
-            in
-            pkgs.runCommand "conformist-eng-versioning-deprecated-file-test" { } ''
-              set -eu
-              # Clean tree (flake.nix without a named version var, no version.txt) passes.
-              mkdir -p clean
-              printf '{ outputs = _: { }; }\n' > clean/flake.nix
-              ( cd clean && ${cmd} ) || { echo "FAIL: clean tree was flagged" >&2; exit 1; }
-              # version.txt at the repo root is flagged.
-              mkdir -p vt
-              printf '{ }\n' > vt/flake.nix
-              printf '0.1.0\n' > vt/version.txt
-              if ( cd vt && ${cmd} ); then echo "FAIL: version.txt not flagged" >&2; exit 1; fi
-              # A named version let-binding in flake.nix is flagged. The semver is
-              # passed as a printf arg so the matchable literal never appears in
-              # *this* flake.nix source — otherwise the rule would (correctly) flag
-              # conformist's own flake.nix.
-              mkdir -p nv
-              printf '{\n  fooVersion = "%s";\n}\n' 1.2.3 > nv/flake.nix
-              if ( cd nv && ${cmd} ); then echo "FAIL: flake.nix named version var not flagged" >&2; exit 1; fi
-              touch $out
-            '';
+            # True-positive regression for the eng-versioning deprecated-file rule
+            # (conformist#14): run the linter's own command against fixtures and
+            # assert it passes a clean tree but FLAGS a `version.txt` and a flake.nix
+            # named version let-binding. checks.formatting only proves conformist's
+            # own clean tree passes; this proves the rule actually fires.
+            eng-versioning-deprecated-file =
+              let
+                cmd = conformistEval.config.settings.linter.eng-versioning-deprecated-file.command;
+              in
+              pkgs.runCommand "conformist-eng-versioning-deprecated-file-test" { } ''
+                set -eu
+                # Clean tree (flake.nix without a named version var, no version.txt) passes.
+                mkdir -p clean
+                printf '{ outputs = _: { }; }\n' > clean/flake.nix
+                ( cd clean && ${cmd} ) || { echo "FAIL: clean tree was flagged" >&2; exit 1; }
+                # version.txt at the repo root is flagged.
+                mkdir -p vt
+                printf '{ }\n' > vt/flake.nix
+                printf '0.1.0\n' > vt/version.txt
+                if ( cd vt && ${cmd} ); then echo "FAIL: version.txt not flagged" >&2; exit 1; fi
+                # A named version let-binding in flake.nix is flagged. The semver is
+                # passed as a printf arg so the matchable literal never appears in
+                # *this* flake.nix source — otherwise the rule would (correctly) flag
+                # conformist's own flake.nix.
+                mkdir -p nv
+                printf '{\n  fooVersion = "%s";\n}\n' 1.2.3 > nv/flake.nix
+                if ( cd nv && ${cmd} ); then echo "FAIL: flake.nix named version var not flagged" >&2; exit 1; fi
+                touch $out
+              '';
 
-          # True-positive regression for the git-remotes SSH-only rule
-          # (conformist#8): spin up a throwaway repo and assert the linter passes
-          # all-SSH remotes (scp-like + ssh://) but FLAGS http:// and git://.
-          # lint-worktree only proves conformist's own SSH remotes pass; this
-          # proves the non-SSH schemes actually fire.
-          git-remotes =
-            let
-              cmd = conformistImpureEval.config.settings.linter.git-remotes.command;
-            in
-            pkgs.runCommand "conformist-git-remotes-test" { nativeBuildInputs = [ pkgs.git ]; } ''
-              set -eu
-              export HOME=$PWD
-              git init -q repo
-              cd repo
-              # all-SSH remotes (scp-like and ssh://) pass.
-              git remote add origin git@github.com:o/r.git
-              git remote add up ssh://git@example.com/o/r.git
-              ${cmd} || { echo "FAIL: all-SSH remotes were flagged" >&2; exit 1; }
-              # an http:// remote is flagged.
-              git remote add bad http://example.com/o/r.git
-              if ${cmd}; then echo "FAIL: http:// remote not flagged" >&2; exit 1; fi
-              git remote remove bad
-              # a git:// remote is flagged.
-              git remote add bad2 git://example.com/o/r.git
-              if ${cmd}; then echo "FAIL: git:// remote not flagged" >&2; exit 1; fi
-              touch $out
-            '';
+            # True-positive regression for the git-remotes SSH-only rule
+            # (conformist#8): spin up a throwaway repo and assert the linter passes
+            # all-SSH remotes (scp-like + ssh://) but FLAGS http:// and git://.
+            # lint-worktree only proves conformist's own SSH remotes pass; this
+            # proves the non-SSH schemes actually fire.
+            git-remotes =
+              let
+                cmd = conformistImpureEval.config.settings.linter.git-remotes.command;
+              in
+              pkgs.runCommand "conformist-git-remotes-test" { nativeBuildInputs = [ pkgs.git ]; } ''
+                set -eu
+                export HOME=$PWD
+                git init -q repo
+                cd repo
+                # all-SSH remotes (scp-like and ssh://) pass.
+                git remote add origin git@github.com:o/r.git
+                git remote add up ssh://git@example.com/o/r.git
+                ${cmd} || { echo "FAIL: all-SSH remotes were flagged" >&2; exit 1; }
+                # an http:// remote is flagged.
+                git remote add bad http://example.com/o/r.git
+                if ${cmd}; then echo "FAIL: http:// remote not flagged" >&2; exit 1; fi
+                git remote remove bad
+                # a git:// remote is flagged.
+                git remote add bad2 git://example.com/o/r.git
+                if ${cmd}; then echo "FAIL: git:// remote not flagged" >&2; exit 1; fi
+                touch $out
+              '';
 
-          # True-positive regression for the golangci-dewey wiring rule
-          # (conformist#10): a golangci-gating repo with a .custom-gcl.yml that
-          # references the dewey plugin passes; one without .custom-gcl.yml is
-          # flagged; a repo that doesn't gate on golangci-lint is a no-op pass.
-          golangci-dewey =
-            let
-              cmd = conformistEval.config.settings.linter.golangci-dewey.command;
-            in
-            pkgs.runCommand "conformist-golangci-dewey-test" { } ''
-              set -eu
-              # gates on golangci-lint + wires the dewey plugin -> passes.
-              mkdir -p ok
-              printf 'version: "2"\n' > ok/.golangci.yaml
-              printf 'plugins:\n  - module: github.com/amarbel-llc/purse-first/libs/dewey\n' > ok/.custom-gcl.yml
-              ( cd ok && ${cmd} ) || { echo "FAIL: wired repo was flagged" >&2; exit 1; }
-              # gates on golangci-lint, no .custom-gcl.yml -> flagged.
-              mkdir -p missing
-              printf 'version: "2"\n' > missing/.golangci.yaml
-              if ( cd missing && ${cmd} ); then echo "FAIL: missing .custom-gcl.yml not flagged" >&2; exit 1; fi
-              # does not gate on golangci-lint -> no-op pass.
-              mkdir -p none
-              ( cd none && ${cmd} ) || { echo "FAIL: non-golangci repo was flagged" >&2; exit 1; }
-              touch $out
-            '';
-        };
+            # True-positive regression for the golangci-dewey wiring rule
+            # (conformist#10): a golangci-gating repo with a .custom-gcl.yml that
+            # references the dewey plugin passes; one without .custom-gcl.yml is
+            # flagged; a repo that doesn't gate on golangci-lint is a no-op pass.
+            golangci-dewey =
+              let
+                cmd = conformistEval.config.settings.linter.golangci-dewey.command;
+              in
+              pkgs.runCommand "conformist-golangci-dewey-test" { } ''
+                set -eu
+                # gates on golangci-lint + wires the dewey plugin -> passes.
+                mkdir -p ok
+                printf 'version: "2"\n' > ok/.golangci.yaml
+                printf 'plugins:\n  - module: github.com/amarbel-llc/purse-first/libs/dewey\n' > ok/.custom-gcl.yml
+                ( cd ok && ${cmd} ) || { echo "FAIL: wired repo was flagged" >&2; exit 1; }
+                # gates on golangci-lint, no .custom-gcl.yml -> flagged.
+                mkdir -p missing
+                printf 'version: "2"\n' > missing/.golangci.yaml
+                if ( cd missing && ${cmd} ); then echo "FAIL: missing .custom-gcl.yml not flagged" >&2; exit 1; fi
+                # does not gate on golangci-lint -> no-op pass.
+                mkdir -p none
+                ( cd none && ${cmd} ) || { echo "FAIL: non-golangci repo was flagged" >&2; exit 1; }
+                touch $out
+              '';
+          };
 
         devShells.default = pkgs-master.mkShell {
           packages = [

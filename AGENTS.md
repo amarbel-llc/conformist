@@ -148,6 +148,16 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   against the working tree rather than the sandboxed `checks.formatting`.
 - `nix/checks.nix` — eval-only smoke test forcing module eval + config generation
   for every ported formatter/linter (`checks.<sys>.{formatter-*,linter-*}`).
+- `nix/linter-fixtures.nix` — **behavioral** fixture tests for the whole-tree
+  linters (conformist#17): `mkLinterFixtureCheck` evals a linter module, pulls
+  its `settings.linter.<name>.command`, and runs it against a crafted pass/fail
+  fixture tree, asserting the exit code + an output token. Closes the gap where a
+  linter's failure path / language variant was only verified by hand (the #29
+  Cargo lane, #23 undocumented-debug rejection). Exposed as
+  `checks.<sys>.{linter-fixture-<name>-<label>, linter-fixtures}`; the aggregate
+  is built cheaply by `just verify-linter-fixtures` (in the `verify` lane, so the
+  merge hook gates it — NOT a full `nix flake check`, which would also realize
+  the ~130 registry smoke checks).
 
 ### Flake outputs (`flake.nix`, `flake-module.nix`)
 
