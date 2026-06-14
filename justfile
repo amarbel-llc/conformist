@@ -89,6 +89,27 @@ explore-show-config:
       'let f = builtins.getFlake (toString ./.); s = builtins.currentSystem; p = import f.inputs.igloo { system = s; }; in (f.lib.evalModule p { imports = [ ./nix/conformist.nix ]; package = f.packages.${s}.conformist; }).config.build.configFile')
     cat "$out"
 
+# Smoke-test the eng template end-to-end: instantiate it into a temp dir, lock +
+# commit it, and run the sandboxed formatting check — the adopter's `nix flake
+# init -t .#eng` path (templates/eng/, #17). Fetches conformist from github, so
+# needs network; template-maintenance dev-loop, not in any aggregate / the CI lane.
+[group("explore")]
+explore-template-eng:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="{{ justfile_directory() }}"
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    cd "$d"
+    nix flake init -t "$src#eng"
+    git init -q
+    git add -A
+    nix flake lock
+    git add flake.lock
+    sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
+    echo "explore-template-eng: template instantiates and passes checks.formatting"
+
 # --- debug ---
 
 # Build-backend microbench: godyn (native, per-package CA) vs buildGoApplication

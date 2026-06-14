@@ -232,6 +232,12 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   also carries `lib.presets.{eng,eng-impure}` (the one-import eng rosters, see
   `nix/presets/`); `flakeModule` = `flake-module.nix` (flake-parts
   `perSystem.conformist`).
+- `templates.eng` (`templates/eng/`) — `nix flake init -t
+  github:amarbel-llc/conformist#eng` scaffolds an adopter repo wired to the eng
+  preset (flake.nix + conformist.nix + a conformist-justfile(7)-conformant
+  justfile + version.env + .envrc). `templates/**` is excluded from conformist's
+  own self-lint (consumer-facing scaffold, e.g. a direnv `.envrc` has no
+  shebang); the `explore-template-eng` recipe smoke-tests instantiation.
   Downstream consumers MUST set `conformist.package` — conformist is not in
   nixpkgs, so the module's `package` option has no default.
 

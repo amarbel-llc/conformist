@@ -42,6 +42,10 @@
     # conformist's test corpus contains files deliberately mis-formatted as
     # formatter-test fixtures; formatting them would corrupt the suite.
     "test/**"
+    # templates/** is consumer-facing scaffold (the `nix flake init -t .#eng`
+    # source), validated by instantiating it, not by conformist linting its own
+    # copy — e.g. a direnv .envrc legitimately has no shebang (shellcheck SC2148).
+    "templates/**"
     # Prose and design docs are out of scope for code formatters.
     "docs/**"
     "*.md"

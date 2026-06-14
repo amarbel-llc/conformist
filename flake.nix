@@ -440,5 +440,18 @@
 
       # flake-parts module: `perSystem.conformist`. See flake-module.nix.
       flakeModule = ./flake-module.nix;
+
+      # `nix flake init -t github:amarbel-llc/conformist#eng` scaffolds a repo
+      # already wired to conformist with the eng-convention preset: flake.nix
+      # (conformist input + follows + evalModule), conformist.nix (imports
+      # presets.eng + formatters), a conformist-justfile(7)-conformant justfile,
+      # version.env, and .envrc. See templates/eng/.
+      templates = {
+        eng = {
+          path = ./templates/eng;
+          description = "amarbel-llc eng-conventions conformist setup (preset + recipes)";
+        };
+        default = self.templates.eng;
+      };
     };
 }
