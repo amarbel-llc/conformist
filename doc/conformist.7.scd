@@ -50,7 +50,11 @@ conformist has two modes of operation.
 	folds the run's changes into the existing HEAD commit via
 	_git commit --amend --no-edit_ (keeping HEAD's message), producing one clean
 	commit rather than a fixup; it additionally refuses when HEAD has no commit
-	to amend or has already been pushed to a remote. Pre-merge hooks chain it
+	to amend or has already been pushed to a remote. With *--exit-zero-on-fix*,
+	conformist exits 0 (not 3) when fixes were committed/amended — refusals and
+	operational failures still exit nonzero — so a caller that treats any nonzero
+	exit as failure (e.g. a pre-merge repair hook) sees a successful repair as
+	success. Pre-merge hooks chain it
 	with the check mode below: absorb mechanical fixes, then hard-fail on
 	substantive findings.
 

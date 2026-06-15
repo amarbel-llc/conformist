@@ -46,6 +46,11 @@ type CommitOptions struct {
 	// (#33) instead of creating a fresh CommitMessage commit, keeping the
 	// existing message. Refused when HEAD is already pushed or absent.
 	Amend bool
+	// ExitZeroOnFix returns exit 0 instead of 3 when fixes were committed/amended
+	// (#35), so a caller that treats any nonzero exit as failure — e.g. a
+	// spinclass pre-merge repair hook — sees success. Refusals and operational
+	// failures still exit nonzero.
+	ExitZeroOnFix bool
 }
 
 // RunCommit wraps Run with the --commit flow (#24): verify the tree is safe
@@ -114,6 +119,13 @@ func RunCommit(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 		} else {
 			fmt.Fprintf(os.Stderr, "committed %d fixed file(s) as %s (%s)\n", len(toCommit), sha, CommitMessage)
 		}
+	}
+
+	// --exit-zero-on-fix (#35): a successful repair is success, not exit 3, for
+	// callers that gate on "nonzero = abort" (e.g. a spinclass pre-merge repair
+	// hook). The summary above still prints; only the exit code changes.
+	if opts.ExitZeroOnFix {
+		return nil
 	}
 
 	// ErrFixesCommitted is exit-code signalling (3), not a failure to print.

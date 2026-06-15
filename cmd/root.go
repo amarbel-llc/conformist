@@ -114,6 +114,13 @@ func NewRoot(version, commit string) (*cobra.Command, *stats.Stats) {
 			"already pushed or the repository has no commits.",
 	)
 
+	fs.Bool(
+		"exit-zero-on-fix", false,
+		"With --commit, exit 0 instead of 3 when fixes were committed/amended, so a caller that treats "+
+			"any nonzero exit as failure (e.g. a spinclass pre-merge repair hook) sees success. Refusals "+
+			"and operational failures still exit nonzero.",
+	)
+
 	// Staged scope (#25), lint-staged semantics: the caller's own commit
 	// proceeds with conformant content; conformist never commits here.
 	fs.Bool(
@@ -225,6 +232,11 @@ func runE(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, args []string)
 		return fmt.Errorf("failed to read amend flag: %w", err)
 	}
 
+	exitZeroOnFix, err := flags.GetBool("exit-zero-on-fix")
+	if err != nil {
+		return fmt.Errorf("failed to read exit-zero-on-fix flag: %w", err)
+	}
+
 	// --staged creates no commit (the caller's commit carries its own
 	// message), and tolerates a dirty tree by design — these knobs only make
 	// sense with --commit.
@@ -240,15 +252,20 @@ func runE(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, args []string)
 		return errors.New("--amend requires --commit")
 	}
 
+	if exitZeroOnFix && !commit {
+		return errors.New("--exit-zero-on-fix requires --commit")
+	}
+
 	if staged {
 		return format.RunStaged(v, statz, cmd, args) //nolint:wrapcheck
 	}
 
 	if commit {
 		opts := format.CommitOptions{
-			AllowDirty: allowDirty,
-			Trailers:   trailers,
-			Amend:      amend,
+			AllowDirty:    allowDirty,
+			Trailers:      trailers,
+			Amend:         amend,
+			ExitZeroOnFix: exitZeroOnFix,
 		}
 
 		return format.RunCommit(v, statz, cmd, args, opts) //nolint:wrapcheck
