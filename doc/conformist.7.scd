@@ -46,9 +46,13 @@ conformist has two modes of operation.
 	repository's commit-signing configuration. It exits 0 when the tree was already conformant, 3 when
 	fixes were applied and committed, and 2 when it refuses to run — on an
 	unclean working tree without *--allow-dirty*, or outside a git worktree.
-	Refusal happens before any formatting. Pre-merge hooks chain it with the
-	check mode below: absorb mechanical fixes, then hard-fail on substantive
-	findings.
+	Refusal happens before any formatting. With *--amend*, conformist instead
+	folds the run's changes into the existing HEAD commit via
+	_git commit --amend --no-edit_ (keeping HEAD's message), producing one clean
+	commit rather than a fixup; it additionally refuses when HEAD has no commit
+	to amend or has already been pushed to a remote. Pre-merge hooks chain it
+	with the check mode below: absorb mechanical fixes, then hard-fail on
+	substantive findings.
 
 *Staged* (lint-staged)
 	With *--staged*, conformist formats only the files currently staged in the

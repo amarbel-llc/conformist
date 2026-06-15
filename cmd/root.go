@@ -107,6 +107,13 @@ func NewRoot(version, commit string) (*cobra.Command, *stats.Stats) {
 			"commit message. May be repeated.",
 	)
 
+	fs.Bool(
+		"amend", false,
+		"With --commit, amend the existing HEAD commit (git commit --amend --no-edit), keeping its "+
+			"message, instead of creating a new "+format.CommitMessage+" commit. Refuses if HEAD is "+
+			"already pushed or the repository has no commits.",
+	)
+
 	// Staged scope (#25), lint-staged semantics: the caller's own commit
 	// proceeds with conformant content; conformist never commits here.
 	fs.Bool(
@@ -213,6 +220,11 @@ func runE(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, args []string)
 		return fmt.Errorf("failed to read allow-dirty flag: %w", err)
 	}
 
+	amend, err := flags.GetBool("amend")
+	if err != nil {
+		return fmt.Errorf("failed to read amend flag: %w", err)
+	}
+
 	// --staged creates no commit (the caller's commit carries its own
 	// message), and tolerates a dirty tree by design — these knobs only make
 	// sense with --commit.
@@ -224,6 +236,10 @@ func runE(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, args []string)
 		return errors.New("--allow-dirty requires --commit")
 	}
 
+	if amend && !commit {
+		return errors.New("--amend requires --commit")
+	}
+
 	if staged {
 		return format.RunStaged(v, statz, cmd, args) //nolint:wrapcheck
 	}
@@ -232,6 +248,7 @@ func runE(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, args []string)
 		opts := format.CommitOptions{
 			AllowDirty: allowDirty,
 			Trailers:   trailers,
+			Amend:      amend,
 		}
 
 		return format.RunCommit(v, statz, cmd, args, opts) //nolint:wrapcheck

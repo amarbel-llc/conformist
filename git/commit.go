@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -102,8 +103,37 @@ func CommitPaths(
 	trailers []string,
 	paths []string,
 ) (string, error) {
-	args := make([]string, 0, 7+2*len(trailers)+len(paths))
-	args = append(args, "-C", treeRoot, "commit", "--quiet", "-m", message)
+	return commitWithPaths(ctx, treeRoot, []string{"commit", "--quiet", "-m", message}, trailers, paths)
+}
+
+// AmendPaths folds the given toplevel-relative paths' working-tree content into
+// HEAD (`git commit --amend --no-edit -- <paths>`): the existing message is
+// kept (no editor), and only the listed paths are updated in the amended tree —
+// the rest of HEAD's tree is preserved. Like CommitPaths, the real git binary
+// honors the repo's signing/identity config, and trailers are appended (here to
+// the kept message). Returns the amended commit's new hash.
+func AmendPaths(
+	ctx context.Context,
+	treeRoot string,
+	trailers []string,
+	paths []string,
+) (string, error) {
+	return commitWithPaths(ctx, treeRoot, []string{"commit", "--quiet", "--amend", "--no-edit"}, trailers, paths)
+}
+
+// commitWithPaths runs a `git commit` variant (baseArgs) scoped to exactly the
+// given toplevel-relative paths, appending any trailers, then resolves and
+// returns the resulting HEAD hash. Shared by CommitPaths and AmendPaths.
+func commitWithPaths(
+	ctx context.Context,
+	treeRoot string,
+	baseArgs []string,
+	trailers []string,
+	paths []string,
+) (string, error) {
+	args := make([]string, 0, 3+len(baseArgs)+2*len(trailers)+len(paths))
+	args = append(args, "-C", treeRoot)
+	args = append(args, baseArgs...)
 
 	for _, trailer := range trailers {
 		args = append(args, "--trailer", trailer)
@@ -130,4 +160,50 @@ func CommitPaths(
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+// HeadExists reports whether the repository has a commit at HEAD to amend (a
+// freshly `git init`'d repo with no commits has none). Backed by
+// `git rev-parse --verify --quiet HEAD`: exit 0 = HEAD resolves, a non-zero
+// exit = no commit yet.
+func HeadExists(ctx context.Context, treeRoot string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "rev-parse", "--verify", "--quiet", "HEAD")
+
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("failed to check for a HEAD commit in %s: %w", treeRoot, err)
+	}
+
+	return true, nil
+}
+
+// HeadRemoteRefs returns the remote-tracking refs (e.g.
+// "refs/remotes/origin/x") that contain HEAD — i.e. the remotes HEAD has been
+// pushed to. A non-empty result means amending HEAD would rewrite
+// already-published history. Backed by `git branch -r --contains HEAD`; this
+// reads only LOCAL remote-tracking refs and does not fetch, so a HEAD pushed
+// since the last fetch may not show up.
+func HeadRemoteRefs(ctx context.Context, treeRoot string) ([]string, error) {
+	cmd := exec.CommandContext(
+		ctx, "git", "-C", treeRoot, "branch", "-r", "--contains", "HEAD", "--format=%(refname)",
+	)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check whether HEAD is pushed in %s: %w", treeRoot, err)
+	}
+
+	var refs []string
+
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			refs = append(refs, line)
+		}
+	}
+
+	return refs, nil
 }

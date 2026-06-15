@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/amarbel-llc/conformist/config"
 	"github.com/amarbel-llc/conformist/git"
@@ -41,6 +42,10 @@ type CommitOptions struct {
 	// Trailers are appended to the commit message via `git commit --trailer`
 	// (#26), e.g. a tool-attribution line.
 	Trailers []string
+	// Amend folds the run's fixes into HEAD via `git commit --amend --no-edit`
+	// (#33) instead of creating a fresh CommitMessage commit, keeping the
+	// existing message. Refused when HEAD is already pushed or absent.
+	Amend bool
 }
 
 // RunCommit wraps Run with the --commit flow (#24): verify the tree is safe
@@ -61,7 +66,7 @@ func RunCommit(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 		ctx = context.Background()
 	}
 
-	preDirty, err := commitPreflight(ctx, cfg, opts.AllowDirty)
+	preDirty, err := commitPreflight(ctx, cfg, opts.AllowDirty, opts.Amend)
 	if err != nil {
 		return err
 	}
@@ -95,15 +100,20 @@ func RunCommit(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 	slices.Sort(toCommit)
 
 	// A failed commit (e.g. the signing agent is locked) must fail loudly:
-	// CommitPaths surfaces git's stderr, no commit is created, and the index
-	// is left untouched (`git commit -- <paths>` stages nothing on failure).
-	sha, err := git.CommitPaths(ctx, cfg.TreeRoot, CommitMessage, opts.Trailers, toCommit)
+	// both CommitPaths and AmendPaths surface git's stderr, create no commit,
+	// and leave the index untouched (`git commit -- <paths>` stages nothing on
+	// failure).
+	sha, err := commitOrAmend(ctx, cfg.TreeRoot, opts, toCommit)
 	if err != nil {
 		return fmt.Errorf("failed to commit fixes: %w", err)
 	}
 
 	if !cfg.Quiet {
-		fmt.Fprintf(os.Stderr, "committed %d fixed file(s) as %s (%s)\n", len(toCommit), sha, CommitMessage)
+		if opts.Amend {
+			fmt.Fprintf(os.Stderr, "amended HEAD with %d fixed file(s) (%s)\n", len(toCommit), sha)
+		} else {
+			fmt.Fprintf(os.Stderr, "committed %d fixed file(s) as %s (%s)\n", len(toCommit), sha, CommitMessage)
+		}
 	}
 
 	// ErrFixesCommitted is exit-code signalling (3), not a failure to print.
@@ -112,17 +122,30 @@ func RunCommit(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 	return ErrFixesCommitted
 }
 
+// commitOrAmend creates the fix commit (or amends HEAD with #33's --amend),
+// taking each path's content from the working tree. Returns the resulting HEAD
+// hash.
+func commitOrAmend(ctx context.Context, treeRoot string, opts CommitOptions, paths []string) (string, error) {
+	if opts.Amend {
+		return git.AmendPaths(ctx, treeRoot, opts.Trailers, paths) //nolint:wrapcheck
+	}
+
+	return git.CommitPaths(ctx, treeRoot, CommitMessage, opts.Trailers, paths) //nolint:wrapcheck
+}
+
 // commitPreflight enforces the --commit safety policy and returns the set of
 // paths that were already dirty before the run. Current policy: refuse on ANY
 // tracked staged/unstaged change unless --allow-dirty is passed (untracked
-// files are ignored throughout — they are never committed).
+// files are ignored throughout — they are never committed). With amend (#33),
+// it additionally refuses when HEAD has no commit to amend or is already
+// pushed.
 //
 // NOTE(#24, agent-loop): this policy is deliberately isolated here. It is a
 // first cut optimized for the pre-merge-hook case, where the tree is clean by
 // construction; once the flag has seen real agent-loop use the
 // refuse/allow-dirty split may need revisiting (e.g. scoping dirtiness to
 // formatter-matched files) without touching the commit flow itself.
-func commitPreflight(ctx context.Context, cfg *config.Config, allowDirty bool) (map[string]bool, error) {
+func commitPreflight(ctx context.Context, cfg *config.Config, allowDirty, amend bool) (map[string]bool, error) {
 	if walkType, typeErr := walk.TypeString(cfg.Walk); typeErr == nil && walkType == walk.Stdin {
 		return nil, fmt.Errorf("%w: stdin mode has no working tree state to commit", ErrCommitRefused)
 	}
@@ -146,6 +169,15 @@ func commitPreflight(ctx context.Context, cfg *config.Config, allowDirty bool) (
 		return nil, fmt.Errorf("%w: %s is not inside a git worktree", ErrCommitRefused, cfg.TreeRoot)
 	}
 
+	// amend rewrites HEAD: refuse if there is no HEAD to amend, or if HEAD is
+	// already published (amending would rewrite shared history). These run
+	// before any formatting, so a refused amend leaves the tree untouched.
+	if amend {
+		if err := amendPreflight(ctx, cfg.TreeRoot); err != nil {
+			return nil, err
+		}
+	}
+
 	dirty, err := git.ChangedPaths(ctx, cfg.TreeRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect uncommitted changes: %w", err)
@@ -165,4 +197,32 @@ func commitPreflight(ctx context.Context, cfg *config.Config, allowDirty bool) (
 	}
 
 	return preDirty, nil
+}
+
+// amendPreflight rejects an --amend run that cannot safely rewrite HEAD: a repo
+// with no commit to amend, or a HEAD already pushed to a remote (amending would
+// rewrite published history).
+func amendPreflight(ctx context.Context, treeRoot string) error {
+	headExists, err := git.HeadExists(ctx, treeRoot)
+	if err != nil {
+		return fmt.Errorf("failed to check for a HEAD commit: %w", err)
+	}
+
+	if !headExists {
+		return fmt.Errorf("%w: nothing to amend (no HEAD commit yet)", ErrCommitRefused)
+	}
+
+	remoteRefs, err := git.HeadRemoteRefs(ctx, treeRoot)
+	if err != nil {
+		return fmt.Errorf("failed to check whether HEAD is pushed: %w", err)
+	}
+
+	if len(remoteRefs) > 0 {
+		return fmt.Errorf(
+			"%w: HEAD is already pushed (%s); refusing to amend published history",
+			ErrCommitRefused, strings.Join(remoteRefs, ", "),
+		)
+	}
+
+	return nil
 }

@@ -153,6 +153,124 @@ func TestCommit(tt *testing.T) {
 		"the pre-existing dirty file should remain dirty in the working tree")
 }
 
+// TestCommitAmend covers --commit --amend (#33): instead of a fresh fix
+// commit, the run folds its changes into HEAD with `git commit --amend
+// --no-edit`, keeping the message. It refuses (exit 2) when there is no HEAD to
+// amend or when HEAD is already pushed, and the bare flag requires --commit.
+func TestCommitAmend(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := test.TempExamples(t)
+	configPath := filepath.Join(tempDir, "conformist.toml")
+
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	cfg := &config.Config{
+		FormatterConfigs: map[string]*config.Formatter{
+			"append": {
+				Command:  "test-fmt-append",
+				Options:  []string{"hello"},
+				Includes: []string{"ruby/*"},
+			},
+		},
+	}
+
+	test.WriteConfig(t, configPath, cfg)
+
+	rubyPath := filepath.Join("ruby", "bundler.rb")
+
+	// --amend without --commit is rejected (guarded in root.go, before any
+	// worktree state is consulted)
+	conformist(t,
+		withArgs("--amend"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorContains(err, "--amend requires --commit")
+		}),
+	)
+
+	git("init")
+
+	// no HEAD yet: --commit --amend is refused (exit 2) before any formatting
+	conformist(t,
+		withArgs("--commit", "--amend"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrCommitRefused)
+			as.ErrorContains(err, "nothing to amend")
+			as.Equal(2, cmd.ExitCode(err))
+		}),
+	)
+
+	emptyRepoRuby, err := os.ReadFile(rubyPath)
+	as.NoError(err)
+	as.NotContains(string(emptyRepoRuby), "hello", "the empty-repo refusal must happen before formatting")
+
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	headBefore := git("rev-parse", "HEAD")
+
+	// clean tree: the reformatted file is folded into HEAD, exit 3
+	conformist(t,
+		withArgs("--commit", "--amend"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrFixesCommitted)
+			as.Equal(3, cmd.ExitCode(err))
+		}),
+	)
+
+	headAmended := git("rev-parse", "HEAD")
+	as.NotEqual(headBefore, headAmended, "HEAD should have been amended to a new sha")
+	as.Equal("init", git("log", "-1", "--format=%s"), "--no-edit must keep the existing message")
+	as.Contains(git("show", "HEAD:ruby/bundler.rb"), "hello",
+		"the reformatted file should be folded into HEAD's tree")
+	as.Empty(git("status", "--porcelain", "--untracked-files=no"),
+		"the tracked tree should be clean after the amend")
+
+	// once HEAD is pushed, amending is refused (exit 2): rewriting published
+	// history is unsafe. Push to a bare remote so origin/<branch> contains HEAD.
+	remoteDir := t.TempDir()
+	git("init", "--bare", remoteDir)
+	git("remote", "add", "origin", remoteDir)
+	git("push", "-u", "origin", "HEAD")
+
+	prePush, err := os.ReadFile(rubyPath)
+	as.NoError(err)
+
+	// --no-cache forces a reformat so a fix WOULD be produced; the pushed-HEAD
+	// refusal must still short-circuit before any formatting
+	conformist(t,
+		withArgs("--commit", "--amend", "--no-cache"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrCommitRefused)
+			as.ErrorContains(err, "already pushed")
+			as.Equal(2, cmd.ExitCode(err))
+		}),
+	)
+
+	as.Equal(headAmended, git("rev-parse", "HEAD"), "a refused amend must not move HEAD")
+
+	postPush, err := os.ReadFile(rubyPath)
+	as.NoError(err)
+	as.Equal(string(prePush), string(postPush), "the pushed-HEAD refusal must happen before formatting")
+}
+
 // TestCommitTrailer covers --trailer (#26): extra trailers are appended to
 // the fix commit's message, and the flag requires --commit.
 func TestCommitTrailer(tt *testing.T) {

@@ -19,6 +19,17 @@ func TestGitReader(tt *testing.T) {
 	t := &test_ui.T{T: tt}
 	as := require.New(t)
 
+	// Neutralize the developer/CI git config so the commits this test makes do
+	// not inherit a forced commit.gpgsign — otherwise `git commit` exits 128
+	// when the signing agent is locked. Identity comes from the explicit env
+	// below (and the per-repo `git config` calls); mirrors cmd/commit_test.go.
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
 	tempDir := test.TempExamples(t)
 
 	// init a git repo

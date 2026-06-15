@@ -65,6 +65,10 @@ not run `just`/`just lint` again right before merging.
 already conformant, 3 when it applied fixes and committed them
 (`chore: conformist fmt+fix`, plus any `--trailer` lines — #26), 2 when
 refused (dirty tree without `--allow-dirty`, or no git worktree).
+`conformist --commit --amend` (#33) folds the run's fixes into HEAD via
+`git commit --amend --no-edit` (keeping HEAD's message) instead of a fresh
+commit, exiting 3 on amend; it additionally refuses (exit 2) when HEAD has no
+commit to amend or is already pushed (`git branch -r --contains HEAD`).
 `conformist --staged` (lint-staged restage, #25) exits 0/3/2 analogously:
 formats only index-staged files and restages the formatted content, creates
 no commit, refuses partially staged files (grep-stable "partially staged"
