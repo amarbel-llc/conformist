@@ -40,7 +40,13 @@ var (
 // and restaging would sweep the unstaged hunks into the index, corrupting the
 // caller's intended commit. (Formatting the staged blobs alone would be the
 // graduated semantics; see #25.)
-func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string) error {
+//
+// exitZeroOnFix (#35/#39) downgrades the restage's exit-3 signal to exit 0, for
+// callers that gate on "nonzero = abort" — e.g. a git pre-commit hook, where a
+// successful restage is the SUCCESS path and the commit should proceed with the
+// formatted content. Refusals (ErrStagedRefused) and operational errors stay
+// nonzero. Mirrors RunCommit's ExitZeroOnFix.
+func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string, exitZeroOnFix bool) error {
 	cmd.SilenceUsage = true
 
 	// the staged set IS the scope; explicit paths have nothing to select
@@ -159,6 +165,13 @@ func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 
 	if !cfg.Quiet {
 		fmt.Fprintf(os.Stderr, "reformatted and restaged %d staged file(s)\n", len(toRestage))
+	}
+
+	// --exit-zero-on-fix (#35/#39): a successful restage is success, not exit 3,
+	// for callers that gate on "nonzero = abort" (e.g. a git pre-commit hook).
+	// The summary above still prints; only the exit code changes.
+	if exitZeroOnFix {
+		return nil
 	}
 
 	// ErrFixesRestaged is exit-code signalling (3), not a failure to print.

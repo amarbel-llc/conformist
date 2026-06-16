@@ -116,9 +116,9 @@ func NewRoot(version, commit string) (*cobra.Command, *stats.Stats) {
 
 	fs.Bool(
 		"exit-zero-on-fix", false,
-		"With --commit, exit 0 instead of 3 when fixes were committed/amended, so a caller that treats "+
-			"any nonzero exit as failure (e.g. a spinclass pre-merge repair hook) sees success. Refusals "+
-			"and operational failures still exit nonzero.",
+		"With --commit or --staged, exit 0 instead of 3 when fixes were committed/amended/restaged, so a "+
+			"caller that treats any nonzero exit as failure (e.g. a spinclass pre-merge repair hook or a "+
+			"git pre-commit hook) sees success. Refusals and operational failures still exit nonzero.",
 	)
 
 	// Staged scope (#25), lint-staged semantics: the caller's own commit
@@ -252,12 +252,12 @@ func runE(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, args []string)
 		return errors.New("--amend requires --commit")
 	}
 
-	if exitZeroOnFix && !commit {
-		return errors.New("--exit-zero-on-fix requires --commit")
+	if exitZeroOnFix && !commit && !staged {
+		return errors.New("--exit-zero-on-fix requires --commit or --staged")
 	}
 
 	if staged {
-		return format.RunStaged(v, statz, cmd, args) //nolint:wrapcheck
+		return format.RunStaged(v, statz, cmd, args, exitZeroOnFix) //nolint:wrapcheck
 	}
 
 	if commit {

@@ -69,10 +69,12 @@ refused (dirty tree without `--allow-dirty`, or no git worktree).
 `git commit --amend --no-edit` (keeping HEAD's message) instead of a fresh
 commit, exiting 3 on amend; it additionally refuses (exit 2) when HEAD has no
 commit to amend or is already pushed (`git branch -r --contains HEAD`).
-`conformist --commit --exit-zero-on-fix` (#35) exits 0 instead of 3 when fixes
-were committed/amended (refusals/failures stay nonzero), so a caller that gates
-on "nonzero = abort" — e.g. a spinclass pre-merge repair hook — treats a
-successful repair as success.
+`--exit-zero-on-fix` (#35/#39) exits 0 instead of 3 when fixes were
+committed/amended/restaged (refusals/failures stay nonzero), so a caller that
+gates on "nonzero = abort" — e.g. a spinclass pre-merge repair hook or a git
+pre-commit hook — treats a successful repair as success. It pairs with
+`--commit` and with `--staged` (the canonical pre-commit-hook command is
+`conformist --staged --exit-zero-on-fix`).
 `conformist --staged` (lint-staged restage, #25) exits 0/3/2 analogously:
 formats only index-staged files and restages the formatted content, creates
 no commit, refuses partially staged files (grep-stable "partially staged"

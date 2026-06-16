@@ -66,7 +66,11 @@ conformist has two modes of operation.
 	unstaged edits) are refused before any formatting, since restaging would
 	sweep the unstaged hunks into the index. Exits 0 when the staged content
 	was already conformant, 3 when files were reformatted and restaged, and 2
-	when refused.
+	when refused. With *--exit-zero-on-fix*, conformist exits 0 (not 3) on a
+	successful restage — refusals and operational failures still exit nonzero —
+	so the canonical git pre-commit hook command
+	_conformist --staged --exit-zero-on-fix_ proceeds with the commit when the
+	staged content was repaired in place.
 
 *Check* (read-only)
 	Runs every formatter and linter without writing to the tree, reporting what

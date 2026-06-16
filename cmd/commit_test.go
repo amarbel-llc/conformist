@@ -550,6 +550,81 @@ func TestStaged(tt *testing.T) {
 	)
 }
 
+// TestStagedExitZeroOnFix covers --exit-zero-on-fix with --staged (#39): a
+// successful restage exits 0 instead of 3 (for callers that gate on
+// nonzero=abort, e.g. a git pre-commit hook), while the restage still happens.
+// The flag requires --commit or --staged.
+func TestStagedExitZeroOnFix(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := test.TempExamples(t)
+	configPath := filepath.Join(tempDir, "conformist.toml")
+
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	cfg := &config.Config{
+		FormatterConfigs: map[string]*config.Formatter{
+			"append": {
+				Command:  "test-fmt-append",
+				Options:  []string{"hello"},
+				Includes: []string{"ruby/*"},
+			},
+		},
+	}
+
+	test.WriteConfig(t, configPath, cfg)
+
+	// --exit-zero-on-fix without --commit or --staged is still rejected
+	conformist(t,
+		withArgs("--exit-zero-on-fix"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorContains(err, "--exit-zero-on-fix requires --commit or --staged")
+		}),
+	)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	head := git("rev-parse", "HEAD")
+
+	// stage a change to a matched file
+	rubyPath := filepath.Join("ruby", "bundler.rb")
+	as.NoError(os.WriteFile(rubyPath, []byte("puts 'staged change'\n"), 0o644))
+	git("add", rubyPath)
+
+	// the formatted content is restaged, but the flag downgrades the
+	// "fixes restaged" exit 3 to 0 (withNoError)
+	conformist(t,
+		withArgs("--staged", "--exit-zero-on-fix"),
+		withNoError(t),
+	)
+
+	// the restage still happened: the index blob carries the fix, no unstaged
+	// delta remains, the file is staged but NOT committed
+	as.Contains(git("show", ":ruby/bundler.rb"), "hello")
+	as.Empty(git("diff", "--name-only", "--", "ruby/bundler.rb"))
+	as.Equal("ruby/bundler.rb", git("diff", "--cached", "--name-only"))
+	as.Equal(head, git("rev-parse", "HEAD"), "--staged never creates a commit")
+}
+
 // TestCommitStdin asserts --commit refuses stdin mode: there is no working
 // tree state to commit when formatting a stream.
 func TestCommitStdin(tt *testing.T) {
