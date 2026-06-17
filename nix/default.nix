@@ -33,6 +33,7 @@ let
       args ? [ ],
       includes ? [ ],
       excludes ? [ ],
+      workingDir ? null,
     }:
     {
       pkgs,
@@ -69,6 +70,12 @@ let
           default = null;
         };
 
+        workingDir = lib.mkOption {
+          description = "Subdirectory (relative to the tree root) to run the formatter in (conformist#38).";
+          type = lib.types.nullOr lib.types.str;
+          default = workingDir;
+        };
+
         finalPackage = lib.mkOption {
           type = lib.types.package;
           readOnly = true;
@@ -96,6 +103,9 @@ let
         })
         // (lib.optionalAttrs (cfg.priority != null) {
           inherit (cfg) priority;
+        })
+        // (lib.optionalAttrs (cfg.workingDir != null) {
+          "working-dir" = cfg.workingDir;
         });
       };
     };
@@ -117,6 +127,7 @@ let
       args ? [ ],
       includes ? [ ],
       excludes ? [ ],
+      workingDir ? null,
       # Repair (autofix) action, if the tool has one. The common case is the
       # SAME binary as the check `command` invoked with different args (e.g.
       # `statix check` vs `statix fix`, `ruff check` vs `ruff check --fix`): set
@@ -160,6 +171,12 @@ let
           description = "Priority";
           type = lib.types.nullOr lib.types.int;
           default = null;
+        };
+
+        workingDir = lib.mkOption {
+          description = "Subdirectory (relative to the tree root) to run the linter's check/repair in (conformist#38).";
+          type = lib.types.nullOr lib.types.str;
+          default = workingDir;
         };
 
         finalPackage = lib.mkOption {
@@ -208,6 +225,9 @@ let
         })
         // (lib.optionalAttrs (cfg.priority != null) {
           inherit (cfg) priority;
+        })
+        // (lib.optionalAttrs (cfg.workingDir != null) {
+          "working-dir" = cfg.workingDir;
         });
       };
     };

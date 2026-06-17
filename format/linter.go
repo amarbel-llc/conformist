@@ -25,8 +25,9 @@ type Linter struct {
 	log         *log.Logger
 	executable  string // resolved check command
 	repairExe   string // resolved repair command (empty if none configured)
-	workingDir  string
-	passesFiles bool // false => whole-tree check: run once, no file args
+	treeRoot    string // the project tree root (working-dir is resolved against it)
+	workingDir  string // the dir the tool runs in: treeRoot, or a subdir (#38)
+	passesFiles bool   // false => whole-tree check: run once, no file args
 
 	includes []glob.Glob
 	excludes []glob.Glob
@@ -93,7 +94,7 @@ func (l *Linter) run(
 		}
 
 		for _, file := range files {
-			args = append(args, file.RelPath)
+			args = append(args, relocateFileArg(l.treeRoot, l.workingDir, file.RelPath, ""))
 		}
 	}
 
@@ -135,7 +136,8 @@ func newLinter(name, treeRoot string, env expand.Environ, cfg *config.Linter) (*
 	l := Linter{
 		name:        name,
 		config:      cfg,
-		workingDir:  treeRoot,
+		treeRoot:    treeRoot,
+		workingDir:  resolveToolDir(treeRoot, cfg.WorkingDir),
 		passesFiles: cfg.PassesFiles == nil || *cfg.PassesFiles,
 	}
 

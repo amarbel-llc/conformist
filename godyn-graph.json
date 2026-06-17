@@ -278,7 +278,8 @@
       "linter.go",
       "repair.go",
       "sandbox.go",
-      "scheduler.go"
+      "scheduler.go",
+      "workingdir.go"
     ],
     "cgoFiles": null,
     "cFiles": null,

@@ -124,6 +124,136 @@ func TestCompositeCheckerWholeTreeLinter(tt *testing.T) {
 	as.Equal("args=0\n", string(runs))
 }
 
+// TestLinterWorkingDir verifies a whole-tree linter with working-dir runs in
+// that subdirectory (conformist#38): the check is clean only when run from the
+// subdir holding its marker file, otherwise it reports a finding.
+func TestLinterWorkingDir(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	// stub whole-tree check: clean (exit 0) iff a `marker` file is in the cwd.
+	lint := writeFile(t, root, "cwdcheck.sh",
+		"#!/usr/bin/env bash\n[ -f marker ]\n", 0o755)
+
+	writeFile(t, root, "sub/marker", "", 0o644)
+	writeFile(t, root, "sub/x.go", "package x\n", 0o644)
+
+	passesFiles := false
+	run := func(workingDir string) []format.Finding {
+		t.Helper()
+
+		statz := stats.New()
+		cfg := &config.Config{
+			TreeRoot:    root,
+			OnUnmatched: "info",
+			LinterConfigs: map[string]*config.Linter{
+				"cwd": {
+					Command:     lint,
+					Includes:    []string{"sub/*.go"},
+					PassesFiles: &passesFiles,
+					WorkingDir:  workingDir,
+				},
+			},
+		}
+
+		checker, err := format.NewCompositeChecker(cfg, &statz)
+		as.NoError(err)
+
+		_, err = checker.Check(context.Background(), []*walk.File{walkFile(t, root, "sub/x.go")})
+		as.NoError(err)
+
+		findings, err := checker.Finalize(context.Background())
+		as.NoError(err)
+
+		return findings
+	}
+
+	as.Empty(run("sub"), "working-dir=sub should run the check from sub/, where marker lives")
+	as.Len(run(""), 1, "without working-dir the check runs at the tree root, where marker is absent")
+}
+
+// TestLinterWorkingDirFileArgs verifies that with working-dir set, matched file
+// paths are passed RELATIVE to that subdirectory so the tool resolves them from
+// its cwd (conformist#38).
+func TestLinterWorkingDirFileArgs(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	// stub linter: exit non-zero unless every arg resolves as a file from the cwd.
+	lint := writeFile(t, root, "argcheck.sh",
+		"#!/usr/bin/env bash\nfor f in \"$@\"; do [ -f \"$f\" ] || exit 3; done\nexit 0\n", 0o755)
+
+	writeFile(t, root, "sub/a.go", "package a\n", 0o644)
+
+	statz := stats.New()
+	cfg := &config.Config{
+		TreeRoot:    root,
+		OnUnmatched: "info",
+		LinterConfigs: map[string]*config.Linter{
+			"args": {Command: lint, Includes: []string{"sub/*.go"}, WorkingDir: "sub"},
+		},
+	}
+
+	checker, err := format.NewCompositeChecker(cfg, &statz)
+	as.NoError(err)
+
+	findings, err := checker.Check(context.Background(), []*walk.File{walkFile(t, root, "sub/a.go")})
+	as.NoError(err)
+	as.Empty(findings, "the file arg must be passed relative to sub/ (a.go), so the tool resolves it from its cwd")
+}
+
+// TestFormatterWorkingDirSandbox verifies working-dir is honored in the sandbox
+// check path (conformist#38): the formatter runs in the sandbox copy of its
+// subdir with file args relative to it. The stub only acts on a slash-free arg,
+// so it modifies (and is reported) only when the path was relocated to "a.txt".
+func TestFormatterWorkingDirSandbox(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	// fix-only formatter: append to each arg that has NO slash (i.e. was passed
+	// relative to the working-dir), leaving tree-relative "src/a.txt" untouched.
+	fix := writeFile(t, root, "fix.sh",
+		"#!/usr/bin/env bash\nfor f in \"$@\"; do case \"$f\" in */*) ;; *) printf 'X' >> \"$f\";; esac; done\nexit 0\n",
+		0o755)
+
+	writeFile(t, root, "src/a.txt", "hello", 0o644)
+
+	run := func(workingDir string) []format.Finding {
+		t.Helper()
+
+		statz := stats.New()
+		cfg := &config.Config{
+			TreeRoot:    root,
+			OnUnmatched: "info",
+			FormatterConfigs: map[string]*config.Formatter{
+				"stub": {Command: fix, Includes: []string{"*.txt"}, WorkingDir: workingDir},
+			},
+		}
+
+		checker, err := format.NewCompositeChecker(cfg, &statz)
+		as.NoError(err)
+
+		findings, err := checker.Check(context.Background(), []*walk.File{walkFile(t, root, "src/a.txt")})
+		as.NoError(err)
+
+		// the source is never written by a check, regardless of working-dir
+		after, err := os.ReadFile(filepath.Join(root, "src/a.txt"))
+		as.NoError(err)
+		as.Equal("hello", string(after))
+
+		return findings
+	}
+
+	withWD := run("src")
+	as.Len(withWD, 1, "working-dir=src relocates the arg to a slash-free a.txt, which the stub modifies")
+	as.Equal("src/a.txt", withWD[0].Path)
+
+	as.Empty(run(""), "without working-dir the arg is src/a.txt (has a slash); the stub is a no-op")
+}
+
 // TestCompositeCheckerSandbox verifies that a fix-only formatter is checked via
 // the sandbox: a file that would change is reported, and the original is never
 // modified on disk.

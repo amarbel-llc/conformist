@@ -43,7 +43,8 @@ type Formatter struct {
 	log             *log.Logger
 	executable      string // path to the executable described by Command
 	checkExecutable string // resolved CheckCommand (empty if none configured)
-	workingDir      string
+	treeRoot        string // the project tree root (working-dir is resolved against it)
+	workingDir      string // the dir the tool runs in: treeRoot, or a subdir (#38)
 
 	// internal, compiled versions of Includes and Excludes.
 	includes []glob.Glob
@@ -108,13 +109,11 @@ func (f *Formatter) Apply(ctx context.Context, files []*walk.File) error {
 		return nil
 	}
 
-	// append paths to the args
+	// append paths to the args, relocated when the formatter runs in a subdir
+	// (working-dir, #38); with no working-dir this preserves the historical
+	// TmpPath-or-RelPath argument exactly.
 	for _, file := range files {
-		if file.TmpPath != "" {
-			args = append(args, file.TmpPath)
-		} else {
-			args = append(args, file.RelPath)
-		}
+		args = append(args, relocateFileArg(f.treeRoot, f.workingDir, file.RelPath, file.TmpPath))
 	}
 
 	// execute the command
@@ -174,7 +173,8 @@ func newFormatter(
 	// capture config and the formatter's name
 	f.name = name
 	f.config = cfg
-	f.workingDir = treeRoot
+	f.treeRoot = treeRoot
+	f.workingDir = resolveToolDir(treeRoot, cfg.WorkingDir)
 
 	// test if the formatter is available
 	executable, err := interp.LookPathDir(treeRoot, env, cfg.Command)

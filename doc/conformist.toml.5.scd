@@ -99,10 +99,16 @@ Each _[formatter.<name>]_ table accepts:
 *no-positional-arg-support*
 	Set true for a tool that cannot accept a file list as arguments.
 
+*working-dir*
+	Subdirectory, relative to the tree root, to run this formatter in --- e.g.
+	a submodule whose codegen must run from there. Defaults to the tree root.
+	When set, file arguments are passed relative to it.
+
 # LINTER SECTIONS
 
 Each _[linter.<name>]_ table accepts the same *includes*, *excludes*,
-*priority* and *no-positional-arg-support* keys as a formatter, plus:
+*priority*, *no-positional-arg-support* and *working-dir* keys as a formatter,
+plus:
 
 *command*
 	The read-only check, run as _command [options] [files]_. It MUST NOT

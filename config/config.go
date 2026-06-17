@@ -81,6 +81,11 @@ type Formatter struct {
 	// Sandbox forces sandbox execution in check mode even when a native check
 	// command is available (RFC 0001 §3, §6).
 	Sandbox bool `mapstructure:"sandbox,omitempty" toml:"sandbox,omitempty"`
+	// WorkingDir is an optional subdirectory (relative to the tree root) in which
+	// to run this formatter, e.g. a Go submodule whose codegen must run from
+	// there. Empty (the default) runs at the tree root, unchanged. When set, file
+	// arguments are passed relative to this directory (conformist#38).
+	WorkingDir string `mapstructure:"working-dir,omitempty" toml:"working-dir,omitempty"`
 }
 
 // Linter represents a tool that inspects files and reports problems, exiting
@@ -112,6 +117,12 @@ type Linter struct {
 	RepairCommand string `mapstructure:"repair-command,omitempty" toml:"repair-command,omitempty"`
 	// RepairOptions are the args passed to RepairCommand.
 	RepairOptions []string `mapstructure:"repair-options,omitempty" toml:"repair-options,omitempty"`
+	// WorkingDir is an optional subdirectory (relative to the tree root) in which
+	// to run this linter's check/repair commands, e.g. a Go submodule whose
+	// codegen must run from there. Empty (the default) runs at the tree root,
+	// unchanged. When set, file arguments are passed relative to this directory
+	// (conformist#38).
+	WorkingDir string `mapstructure:"working-dir,omitempty" toml:"working-dir,omitempty"`
 }
 
 // SetFlags appends our flags to the provided flag set.

@@ -68,7 +68,7 @@ func (f *Formatter) checkNative(ctx context.Context, files []*walk.File) (nonzer
 
 		args := append([]string{}, f.config.CheckOptions...)
 		for _, file := range files[start:end] {
-			args = append(args, file.RelPath)
+			args = append(args, relocateFileArg(f.treeRoot, f.workingDir, file.RelPath, ""))
 		}
 
 		cmd := exec.CommandContext(ctx, f.checkExecutable, args...) //nolint:gosec
@@ -130,17 +130,25 @@ func (f *Formatter) checkSandbox(ctx context.Context, treeRoot string, files []*
 		maxBatch = 1
 	}
 
+	// working-dir (#38) is relative to the sandbox root here, not the tree root,
+	// so the formatter runs inside the sandbox copy of its subdir. Ensure it
+	// exists even when no matched file was copied under it.
+	sandboxToolDir := resolveToolDir(dir, f.config.WorkingDir)
+	if err := os.MkdirAll(sandboxToolDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create sandbox working dir: %w", err)
+	}
+
 	for start := 0; start < len(files); start += maxBatch {
 		end := min(start+maxBatch, len(files))
 
 		args := append([]string{}, f.config.Options...)
 		for _, file := range files[start:end] {
-			args = append(args, file.RelPath)
+			args = append(args, relocateFileArg(dir, sandboxToolDir, file.RelPath, ""))
 		}
 
 		cmd := exec.CommandContext(ctx, f.executable, args...) //nolint:gosec
 		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-		cmd.Dir = dir
+		cmd.Dir = sandboxToolDir
 
 		if out, runErr := cmd.CombinedOutput(); runErr != nil {
 			return nil, fmt.Errorf("formatter '%s' failed in sandbox: %w\n%s", f.name, runErr, out)
