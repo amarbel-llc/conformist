@@ -24,10 +24,10 @@ func (i Type) String() string {
 // Re-run the stringer command to generate them again.
 func _TypeNoOp() {
 	var x [1]struct{}
-	_ = x[Traversed-(0)]
-	_ = x[Matched-(1)]
-	_ = x[Formatted-(2)]
-	_ = x[Changed-(3)]
+	_ = x[Traversed-0]
+	_ = x[Matched-1]
+	_ = x[Formatted-2]
+	_ = x[Changed-3]
 }
 
 var _TypeValues = []Type{Traversed, Matched, Formatted, Changed}

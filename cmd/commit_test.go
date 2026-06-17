@@ -63,7 +63,8 @@ func TestCommit(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// --commit outside a git worktree is refused (exit 2)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrCommitRefused)
@@ -86,7 +87,8 @@ func TestCommit(tt *testing.T) {
 	mainGo := filepath.Join("go", "main.go")
 	as.NoError(os.WriteFile(mainGo, []byte("package main\n"), 0o644))
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrCommitRefused)
@@ -98,7 +100,8 @@ func TestCommit(tt *testing.T) {
 	git("checkout", "--", mainGo)
 
 	// clean tree: the reformatted file is committed, exit 3
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrFixesCommitted)
@@ -116,7 +119,8 @@ func TestCommit(tt *testing.T) {
 
 	// second run: nothing left to fix (change detection skips the file),
 	// exit 0, no new commit
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit"),
 		withNoError(t),
 	)
@@ -124,7 +128,8 @@ func TestCommit(tt *testing.T) {
 
 	// --ci implies fail-on-change, which contradicts committing: refused
 	// before any formatting (exit 2)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--ci"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrCommitRefused)
@@ -138,7 +143,8 @@ func TestCommit(tt *testing.T) {
 	// otherwise-skipped target)
 	as.NoError(os.WriteFile(mainGo, []byte("package main\n"), 0o644))
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--allow-dirty", "--no-cache"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrFixesCommitted)
@@ -198,7 +204,8 @@ func TestCommitAmend(tt *testing.T) {
 
 	// --amend without --commit is rejected (guarded in root.go, before any
 	// worktree state is consulted)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--amend"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "--amend requires --commit")
@@ -208,7 +215,8 @@ func TestCommitAmend(tt *testing.T) {
 	git("init")
 
 	// no HEAD yet: --commit --amend is refused (exit 2) before any formatting
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--amend"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrCommitRefused)
@@ -227,7 +235,8 @@ func TestCommitAmend(tt *testing.T) {
 	headBefore := git("rev-parse", "HEAD")
 
 	// clean tree: the reformatted file is folded into HEAD, exit 3
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--amend"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrFixesCommitted)
@@ -255,7 +264,8 @@ func TestCommitAmend(tt *testing.T) {
 
 	// --no-cache forces a reformat so a fix WOULD be produced; the pushed-HEAD
 	// refusal must still short-circuit before any formatting
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--amend", "--no-cache"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrCommitRefused)
@@ -313,7 +323,8 @@ func TestCommitExitZeroOnFix(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// --exit-zero-on-fix without --commit is rejected
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--exit-zero-on-fix"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "--exit-zero-on-fix requires --commit")
@@ -328,7 +339,8 @@ func TestCommitExitZeroOnFix(tt *testing.T) {
 
 	// clean tree: the reformatted file is committed, but the flag downgrades
 	// the "fixes applied" exit 3 to 0 (withNoError)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--exit-zero-on-fix"),
 		withNoError(t),
 	)
@@ -383,7 +395,8 @@ func TestCommitTrailer(tt *testing.T) {
 	git("commit", "-m", "init")
 
 	// --trailer without --commit is rejected
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--trailer", "X-Fixed-By: conformist-test"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "--trailer requires --commit")
@@ -391,7 +404,8 @@ func TestCommitTrailer(tt *testing.T) {
 	)
 
 	// trailers are appended to the fix commit message
-	conformist(t,
+	conformist(
+		t,
 		withArgs(
 			"--commit",
 			"--trailer", "X-Fixed-By: conformist-test",
@@ -452,7 +466,8 @@ func TestStaged(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// outside a git worktree → refused (exit 2)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrStagedRefused)
@@ -467,7 +482,8 @@ func TestStaged(tt *testing.T) {
 	head := git("rev-parse", "HEAD")
 
 	// nothing staged → nothing to do (exit 0)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged"),
 		withNoError(t),
 	)
@@ -481,7 +497,8 @@ func TestStaged(tt *testing.T) {
 	mainGo := filepath.Join("go", "main.go")
 	as.NoError(os.WriteFile(mainGo, []byte("package main\n"), 0o644))
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrFixesRestaged)
@@ -502,7 +519,8 @@ func TestStaged(tt *testing.T) {
 	// second run: staged content is now conformant → exit 0, index unchanged
 	stagedBlob := git("show", ":ruby/bundler.rb")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged"),
 		withNoError(t),
 	)
@@ -516,7 +534,8 @@ func TestStaged(tt *testing.T) {
 	as.NoError(err)
 	as.NoError(os.WriteFile(rubyPath, append(preUnstaged, []byte("puts 'unstaged extra'\n")...), 0o644))
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged", "--no-cache"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrFixesRestaged)
@@ -532,19 +551,22 @@ func TestStaged(tt *testing.T) {
 	as.Equal(string(preUnstaged)+"puts 'unstaged extra'\n", string(postUnstaged))
 
 	// flag interactions
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged", "--commit"),
 		withError(func(as *require.Assertions, err error) {
 			as.Error(err)
 		}),
 	)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged", "--trailer", "X-Fixed-By: conformist-test"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "--trailer requires --commit")
 		}),
 	)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged", "ruby"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "positional paths")
@@ -615,7 +637,8 @@ func TestStagedPartial(tt *testing.T) {
 	// sanity: the index holds only the staged line
 	as.Equal("staged line", git("show", ":ruby/bundler.rb"))
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, formatCmd.ErrFixesRestaged)
@@ -686,7 +709,8 @@ func TestStagedExitZeroOnFix(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// --exit-zero-on-fix without --commit or --staged is still rejected
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--exit-zero-on-fix"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "--exit-zero-on-fix requires --commit or --staged")
@@ -706,7 +730,8 @@ func TestStagedExitZeroOnFix(tt *testing.T) {
 
 	// the formatted content is restaged, but the flag downgrades the
 	// "fixes restaged" exit 3 to 0 (withNoError)
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--staged", "--exit-zero-on-fix"),
 		withNoError(t),
 	)
@@ -739,7 +764,8 @@ func TestCommitStdin(tt *testing.T) {
 
 	test.WriteConfig(t, configPath, cfg)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--commit", "--stdin", "ruby/bundler.rb"),
 		withError(func(as *require.Assertions, err error) {
 			as.Error(err)

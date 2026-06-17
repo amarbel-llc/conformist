@@ -24,11 +24,11 @@ func (i Type) String() string {
 // Re-run the stringer command to generate them again.
 func _TypeNoOp() {
 	var x [1]struct{}
-	_ = x[Auto-(0)]
-	_ = x[Stdin-(1)]
-	_ = x[Filesystem-(2)]
-	_ = x[Git-(3)]
-	_ = x[Jujutsu-(4)]
+	_ = x[Auto-0]
+	_ = x[Stdin-1]
+	_ = x[Filesystem-2]
+	_ = x[Git-3]
+	_ = x[Jujutsu-4]
 }
 
 var _TypeValues = []Type{Auto, Stdin, Filesystem, Git, Jujutsu}

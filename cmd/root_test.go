@@ -100,7 +100,8 @@ func TestOnUnmatched(tt *testing.T) {
 			level, err := log.ParseLevel(levelStr)
 			as.NoError(err, "failed to parse log level: %s", level)
 
-			conformist(t,
+			conformist(
+				t,
 				withArgs("-vv", "--on-unmatched", levelStr),
 				withNoError(t),
 				withStderr(checkOutput(level)),
@@ -108,7 +109,8 @@ func TestOnUnmatched(tt *testing.T) {
 
 			t.Setenv("CONFORMIST_ON_UNMATCHED", levelStr)
 
-			conformist(t,
+			conformist(
+				t,
 				withArgs("-vv"),
 				withNoError(t),
 				withStderr(checkOutput(level)),
@@ -124,7 +126,8 @@ func TestOnUnmatched(tt *testing.T) {
 			}
 		}
 
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--on-unmatched", "foo"),
 			withError(errorFn("foo")),
 		)
@@ -174,7 +177,8 @@ func TestCpuProfile(tt *testing.T) {
 	// allow missing formatter
 	t.Setenv("CONFORMIST_ALLOW_MISSING_FORMATTER", "true")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--cpu-profile", "cpu.pprof"),
 		withNoError(t),
 	)
@@ -205,7 +209,8 @@ func TestAllowMissingFormatter(tt *testing.T) {
 	})
 
 	t.Run(test_ui.MakeTestCaseInfo("default"), func(t *test_ui.T) {
-		conformist(t,
+		conformist(
+			t,
 			withError(func(as *require.Assertions, err error) {
 				as.ErrorIs(err, format.ErrCommandNotFound)
 			}),
@@ -213,7 +218,8 @@ func TestAllowMissingFormatter(tt *testing.T) {
 	})
 
 	t.Run(test_ui.MakeTestCaseInfo("arg"), func(t *test_ui.T) {
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--allow-missing-formatter"),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -261,7 +267,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 	test.ChangeWorkDir(t, tempDir)
 
 	t.Run(test_ui.MakeTestCaseInfo("default"), func(t *test_ui.T) {
-		conformist(t,
+		conformist(
+			t,
 			withNoError(t),
 			withModtimeBump(tempDir, time.Second),
 			withStats(t, map[stats.Type]int{
@@ -274,7 +281,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 	})
 
 	t.Run(test_ui.MakeTestCaseInfo("args"), func(t *test_ui.T) {
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--formatters", "rust,nix"),
 			withModtimeBump(tempDir, time.Second),
 			withNoError(t),
@@ -286,7 +294,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 			}),
 		)
 
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--formatters", "ruby,nix"),
 			withModtimeBump(tempDir, time.Second),
 			withNoError(t),
@@ -298,7 +307,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 			}),
 		)
 
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--formatters", "nix"),
 			withModtimeBump(tempDir, time.Second),
 			withNoError(t),
@@ -311,7 +321,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 		)
 
 		// bad name
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--formatters", "foo"),
 			withError(func(as *require.Assertions, err error) {
 				as.ErrorContains(err, "formatter foo not found in config")
@@ -322,7 +333,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 	t.Run(test_ui.MakeTestCaseInfo("env"), func(t *test_ui.T) {
 		t.Setenv("CONFORMIST_FORMATTERS", "ruby,nix")
 
-		conformist(t,
+		conformist(
+			t,
 			withNoError(t),
 			withModtimeBump(tempDir, time.Second),
 			withStats(t, map[stats.Type]int{
@@ -335,7 +347,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 
 		t.Setenv("CONFORMIST_FORMATTERS", "bar,foo")
 
-		conformist(t,
+		conformist(
+			t,
 			withError(func(as *require.Assertions, err error) {
 				as.ErrorContains(err, "formatter bar not found in config")
 			}),
@@ -344,7 +357,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 
 	t.Run(test_ui.MakeTestCaseInfo("bad names"), func(t *test_ui.T) {
 		for _, name := range []string{"foo$", "/bar", "baz%"} {
-			conformist(t,
+			conformist(
+				t,
 				withArgs("--formatters", name),
 				withError(func(as *require.Assertions, err error) {
 					as.ErrorContains(err, fmt.Sprintf("formatter name %q is invalid", name))
@@ -353,7 +367,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 
 			t.Setenv("CONFORMIST_FORMATTERS", name)
 
-			conformist(t,
+			conformist(
+				t,
 				withError(func(as *require.Assertions, err error) {
 					as.ErrorContains(err, fmt.Sprintf("formatter name %q is invalid", name))
 				}),
@@ -368,7 +383,8 @@ func TestSpecifyingFormatters(tt *testing.T) {
 
 			test.WriteConfig(t, configPath, cfg)
 
-			conformist(t,
+			conformist(
+				t,
 				withError(func(as *require.Assertions, err error) {
 					as.ErrorContains(err, fmt.Sprintf("formatter name %q is invalid", name))
 				}),
@@ -398,7 +414,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 		},
 	}
 
-	conformist(t,
+	conformist(
+		t,
 		withConfig(configPath, cfg),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -412,7 +429,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 	// globally exclude nix files
 	cfg.Excludes = []string{"*.nix"}
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -427,7 +445,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 	// add haskell files to the global exclude
 	cfg.Excludes = []string{"*.nix", "*.hs"}
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -444,7 +463,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 	// remove python files from the echo formatter
 	echo.Excludes = []string{"*.py"}
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -459,7 +479,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 	// remove go files from the echo formatter via env
 	t.Setenv("CONFORMIST_FORMATTER_ECHO_EXCLUDES", "*.py,*.go")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -476,7 +497,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 	// adjust the includes for echo to only include rust files
 	echo.Includes = []string{"*.rs"}
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -491,7 +513,8 @@ func TestIncludesAndExcludes(tt *testing.T) {
 	// add js files to echo formatter via env
 	t.Setenv("CONFORMIST_FORMATTER_ECHO_INCLUDES", "*.rs,*.js")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -527,7 +550,8 @@ func TestConfigFile(tt *testing.T) {
 			// With an explicit, out-of-tree --config-file and no --tree-root, the
 			// tree root defaults to the working directory (2 files), NOT the
 			// config file's directory. See conformist#2.
-			conformist(t,
+			conformist(
+				t,
 				withConfig(configPath, &config.Config{
 					FormatterConfigs: map[string]*config.Formatter{
 						"echo": {
@@ -546,7 +570,8 @@ func TestConfigFile(tt *testing.T) {
 				}),
 			)
 
-			conformist(t,
+			conformist(
+				t,
 				withArgs("--config-file", configPath, "--tree-root", tempDir),
 				withNoError(t),
 				withStats(t, map[stats.Type]int{
@@ -559,7 +584,8 @@ func TestConfigFile(tt *testing.T) {
 
 			// use env variable; CONFORMIST_CONFIG is still an out-of-tree config,
 			// so the tree root remains the working directory (2 files, hot cache)
-			conformist(t,
+			conformist(
+				t,
 				withEnv(map[string]string{
 					// CONFORMIST_CONFIG takes precedence
 					"CONFORMIST_CONFIG": configPath,
@@ -575,7 +601,8 @@ func TestConfigFile(tt *testing.T) {
 			)
 
 			// should fallback to PRJ_ROOT
-			conformist(t,
+			conformist(
+				t,
 				withArgs("--tree-root", tempDir),
 				withEnv(map[string]string{
 					"PRJ_ROOT": filepath.Dir(configPath),
@@ -593,7 +620,8 @@ func TestConfigFile(tt *testing.T) {
 			configSubDir := filepath.Join(filepath.Dir(configPath), "sub")
 			as.NoError(os.MkdirAll(configSubDir, 0o600))
 
-			conformist(t,
+			conformist(
+				t,
 				withArgs("--tree-root", tempDir),
 				withEnv(map[string]string{
 					"PRJ_ROOT": configSubDir,
@@ -627,7 +655,8 @@ func TestCache(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// first run
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -638,7 +667,8 @@ func TestCache(tt *testing.T) {
 	)
 
 	// cached run with no changes to underlying files
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -649,7 +679,8 @@ func TestCache(tt *testing.T) {
 	)
 
 	// clear cache
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -661,7 +692,8 @@ func TestCache(tt *testing.T) {
 	)
 
 	// cached run with no changes to underlying files
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -672,7 +704,8 @@ func TestCache(tt *testing.T) {
 	)
 
 	// bump underlying files
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withModtimeBump(tempDir, time.Second),
 		withStats(t, map[stats.Type]int{
@@ -684,7 +717,8 @@ func TestCache(tt *testing.T) {
 	)
 
 	// no cache
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--no-cache"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -712,7 +746,8 @@ func TestCache(tt *testing.T) {
 
 	// running should match but not format anything
 
-	conformist(t,
+	conformist(
+		t,
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, format.ErrFormattingFailures)
 		}),
@@ -725,7 +760,8 @@ func TestCache(tt *testing.T) {
 	)
 
 	// running again should provide the same result
-	conformist(t,
+	conformist(
+		t,
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorIs(err, format.ErrFormattingFailures)
 		}),
@@ -747,7 +783,8 @@ func TestCache(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// we should now format the haskell files
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -790,7 +827,8 @@ func TestChangeWorkingDirectory(tt *testing.T) {
 		// change to an empty temp dir and try running without specifying a working directory
 		as.NoError(os.Chdir(t.TempDir()))
 
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withError(func(as *require.Assertions, err error) {
 				as.ErrorContains(err, "failed to find conformist config file")
@@ -801,7 +839,8 @@ func TestChangeWorkingDirectory(tt *testing.T) {
 		// now change to the examples temp directory
 		as.NoError(os.Chdir(tempDir), "failed to change to temp directory")
 
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -837,7 +876,8 @@ func TestChangeWorkingDirectory(tt *testing.T) {
 				args = []string{"-C", tempDir}
 			}
 
-			conformist(t,
+			conformist(
+				t,
 				withArgs(args...),
 				withConfig(configPath, cfg),
 				withNoError(t),
@@ -888,7 +928,8 @@ func TestConfigFileLegacyFallback(tt *testing.T) {
 
 		test.ChangeWorkDir(t, tempDir)
 
-		conformist(t,
+		conformist(
+			t,
 			withConfig(filepath.Join(tempDir, "treelint.toml"), cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -916,7 +957,8 @@ func TestConfigFileLegacyFallback(tt *testing.T) {
 		// conformist.toml (written here) uses the valid echo formatter; a
 		// no-error run proves treelint.toml's broken formatter was not loaded.
 		// 34 = the 33 bundled example files + the extra treelint.toml we wrote.
-		conformist(t,
+		conformist(
+			t,
 			withConfig(filepath.Join(tempDir, "conformist.toml"), cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -948,7 +990,8 @@ func TestFailOnChange(tt *testing.T) {
 
 		// running with a cold cache, we should see the rust files being formatted, resulting in changes, which should
 		// trigger an error
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--fail-on-change"),
 			withConfig(configPath, cfg),
 			withError(func(as *require.Assertions, err error) {
@@ -964,7 +1007,8 @@ func TestFailOnChange(tt *testing.T) {
 
 		// running with a hot cache, we should see matches for the rust files, but no attempt to format them as the
 		// underlying files have not changed since we last ran
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--fail-on-change"),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -992,7 +1036,8 @@ func TestFailOnChange(tt *testing.T) {
 
 		// running with a cold cache, we should see the haskell files being formatted, resulting in changes, which should
 		// trigger an error
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--fail-on-change"),
 			withConfigFunc(configPath, func() *config.Config {
 				// new mod time is in the next second
@@ -1025,7 +1070,8 @@ func TestFailOnChange(tt *testing.T) {
 
 		// running with a hot cache, we should see matches for the haskell files, but no attempt to format them as the
 		// underlying files have not changed since we last ran
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--fail-on-change"),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1217,7 +1263,8 @@ func TestCacheBusting(tt *testing.T) {
 			}))
 
 		// running again with a hot cache, we should see nothing be formatted
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1248,7 +1295,8 @@ func TestCacheBusting(tt *testing.T) {
 			}))
 
 		// running again with a hot cache, we should see nothing be formatted
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1277,7 +1325,8 @@ func TestCacheBusting(tt *testing.T) {
 		}
 
 		// initial run
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1289,7 +1338,8 @@ func TestCacheBusting(tt *testing.T) {
 		)
 
 		// cached run
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1308,7 +1358,8 @@ func TestCacheBusting(tt *testing.T) {
 		}
 
 		// only the rust files should be formatted
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1327,7 +1378,8 @@ func TestCacheBusting(tt *testing.T) {
 		}
 
 		// python files should be formatted as their pipeline has changed
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1339,7 +1391,8 @@ func TestCacheBusting(tt *testing.T) {
 		)
 
 		// cached run
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1355,7 +1408,8 @@ func TestCacheBusting(tt *testing.T) {
 		cfg.FormatterConfigs["python_secondary"].Priority = 1
 
 		// python files should be formatted as their pipeline has changed
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1367,7 +1421,8 @@ func TestCacheBusting(tt *testing.T) {
 		)
 
 		// cached run
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1382,7 +1437,8 @@ func TestCacheBusting(tt *testing.T) {
 		delete(cfg.FormatterConfigs, "python_secondary")
 
 		// python files should be formatted as their pipeline has changed
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1394,7 +1450,8 @@ func TestCacheBusting(tt *testing.T) {
 		)
 
 		// cached run
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1410,7 +1467,8 @@ func TestCacheBusting(tt *testing.T) {
 
 		// only python files should match, but no formatting should occur as not formatting signatures have been
 		// affected
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withNoError(t),
 			withStats(t, map[stats.Type]int{
@@ -1450,7 +1508,8 @@ func TestGit(tt *testing.T) {
 
 	// run before adding anything to the index
 	// we should pick up untracked files since we use `git ls-files -o`
-	conformist(t,
+	conformist(
+		t,
 		withConfig(configPath, cfg),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -1465,7 +1524,8 @@ func TestGit(tt *testing.T) {
 	gitCmd = exec.CommandContext(t.Context(), "git", "add", ".")
 	as.NoError(gitCmd.Run(), "failed to add everything to the index")
 
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -1483,7 +1543,8 @@ func TestGit(tt *testing.T) {
 		_ = f.Close()
 	})
 
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -1498,7 +1559,8 @@ func TestGit(tt *testing.T) {
 
 	// we should traverse and match against fewer files, but no formatting should occur as no formatting signatures
 	// are impacted
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 30,
@@ -1515,7 +1577,8 @@ func TestGit(tt *testing.T) {
 	// the .git folder contains 50 additional files
 	// when added to the 30 we started with (34 minus nixpkgs.toml which we removed from the filesystem), we should
 	// traverse 82 files.
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--walk", "filesystem"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -1530,7 +1593,8 @@ func TestGit(tt *testing.T) {
 	// we should traverse and match against those files, but without any underlying change to their files or their
 	// formatting config, we will not format them
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("go"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1542,7 +1606,8 @@ func TestGit(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("go", "haskell"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1554,7 +1619,8 @@ func TestGit(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-C", tempDir, "go", "haskell", "ruby"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1567,7 +1633,8 @@ func TestGit(tt *testing.T) {
 	)
 
 	// try with a bad path
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-C", tempDir, "haskell", "foo"),
 		withConfig(configPath, cfg),
 		withError(func(as *require.Assertions, err error) {
@@ -1579,7 +1646,8 @@ func TestGit(tt *testing.T) {
 	_, err = os.Create(filepath.Join(tempDir, "foo.txt"))
 	as.NoError(err)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("haskell", "foo.txt", "-vv"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1591,7 +1659,8 @@ func TestGit(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("go", "foo.txt"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1603,7 +1672,8 @@ func TestGit(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("foo.txt"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1648,7 +1718,8 @@ func TestJujutsu(tt *testing.T) {
 	// Jujutsu depends on updating the index with a `jj` command. So, until we do
 	// that, the conformist should return nothing, since the walker is executed with
 	// `--ignore-working-copy` which does not update the index.
-	conformist(t,
+	conformist(
+		t,
 		withConfig(configPath, cfg),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -1664,7 +1735,8 @@ func TestJujutsu(tt *testing.T) {
 	as.NoError(jjCmd.Run(), "failed to update the index")
 
 	// This is our first pass, since previously the files were not in the index. This should format all files.
-	conformist(t,
+	conformist(
+		t,
 		withConfig(configPath, cfg),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -1687,7 +1759,8 @@ func TestJujutsu(tt *testing.T) {
 		_ = f.Close()
 	})
 
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -1706,7 +1779,8 @@ func TestJujutsu(tt *testing.T) {
 
 	// we should traverse and match against fewer files, but no formatting should occur as no formatting signatures
 	// are impacted
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 30,
@@ -1722,7 +1796,8 @@ func TestJujutsu(tt *testing.T) {
 	// walk with filesystem instead of with jujutsu
 	// the .jj and .git folders contain additional internal files (count varies
 	// by jj version); total = 29 example files + jj/git internal files
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--walk", "filesystem"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -1737,7 +1812,8 @@ func TestJujutsu(tt *testing.T) {
 	// we should traverse and match against those files, but without any underlying change to their files or their
 	// formatting config, we will not format them
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("go"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1749,7 +1825,8 @@ func TestJujutsu(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("go", "haskell"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1761,7 +1838,8 @@ func TestJujutsu(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-C", tempDir, "go", "haskell", "ruby"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1774,7 +1852,8 @@ func TestJujutsu(tt *testing.T) {
 	)
 
 	// try with a bad path
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-C", tempDir, "haskell", "foo"),
 		withConfig(configPath, cfg),
 		withError(func(as *require.Assertions, err error) {
@@ -1790,7 +1869,8 @@ func TestJujutsu(tt *testing.T) {
 	jjCmd = exec.CommandContext(t.Context(), "jj")
 	as.NoError(jjCmd.Run(), "failed to update the index")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("haskell", "foo.txt", "-vv"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1802,7 +1882,8 @@ func TestJujutsu(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("go", "foo.txt"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1814,7 +1895,8 @@ func TestJujutsu(tt *testing.T) {
 		}),
 	)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("foo.txt"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -1861,7 +1943,8 @@ func TestTreeRootCmd(tt *testing.T) {
 	}
 
 	// run conformist with DEBUG logging enabled and with tree root cmd being the root of the temp directory
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-vv", "--tree-root-cmd", treeRootCmd(tempDir)),
 		withNoError(t),
 		withStderr(checkStderr),
@@ -1875,7 +1958,8 @@ func TestTreeRootCmd(tt *testing.T) {
 	)
 
 	// run from a subdirectory, mixing things up by specifying the command via an env variable
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-vv"),
 		withEnv(map[string]string{
 			"CONFORMIST_TREE_ROOT_CMD": treeRootCmd(filepath.Join(tempDir, "go")),
@@ -1894,7 +1978,8 @@ func TestTreeRootCmd(tt *testing.T) {
 	// run from a subdirectory, mixing things up by specifying the command via config
 	cfg.TreeRootCmd = treeRootCmd(filepath.Join(tempDir, "haskell"))
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-vv"),
 		withNoError(t),
 		withStderr(checkStderr),
@@ -1908,7 +1993,8 @@ func TestTreeRootCmd(tt *testing.T) {
 	)
 
 	// run with a long-running command (2 seconds or more)
-	conformist(t,
+	conformist(
+		t,
 		withArgs(
 			"-vv",
 			"--tree-root-cmd", fmt.Sprintf(
@@ -1923,7 +2009,8 @@ func TestTreeRootCmd(tt *testing.T) {
 	)
 
 	// run with a command that outputs multiple lines
-	conformist(t,
+	conformist(
+		t,
 		withArgs(
 			"--tree-root-cmd", fmt.Sprintf(
 				"bash -c 'echo %s && echo %s'",
@@ -1955,13 +2042,15 @@ func TestTreeRootExclusivity(tt *testing.T) {
 	test.ChangeWorkDir(t, tempDir)
 
 	assertExclusiveFlag := func(as *require.Assertions, err error) {
-		as.ErrorContains(err,
+		as.ErrorContains(
+			err,
 			"if any flags in the group [tree-root tree-root-cmd tree-root-file] are set none of the others can be;",
 		)
 	}
 
 	assertExclusiveConfig := func(as *require.Assertions, err error) {
-		as.ErrorContains(err,
+		as.ErrorContains(
+			err,
 			"at most one of tree-root, tree-root-cmd or tree-root-file can be specified",
 		)
 	}
@@ -2009,7 +2098,8 @@ func TestTreeRootExclusivity(tt *testing.T) {
 			args = append(args, flagValues[key]...)
 		}
 
-		conformist(t,
+		conformist(
+			t,
 			withArgs(args...),
 			withError(assertExclusiveFlag),
 		)
@@ -2022,7 +2112,8 @@ func TestTreeRootExclusivity(tt *testing.T) {
 			env[entry[0]] = entry[1]
 		}
 
-		conformist(t,
+		conformist(
+			t,
 			withEnv(env),
 			withError(assertExclusiveConfig),
 		)
@@ -2037,7 +2128,8 @@ func TestTreeRootExclusivity(tt *testing.T) {
 			entry(cfg)
 		}
 
-		conformist(t,
+		conformist(
+			t,
 			withConfig(configPath, cfg),
 			withError(assertExclusiveConfig),
 		)
@@ -2088,7 +2180,8 @@ func TestPathsArg(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// without any path args
-	conformist(t,
+	conformist(
+		t,
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
 			stats.Traversed: 33,
@@ -2099,7 +2192,8 @@ func TestPathsArg(tt *testing.T) {
 	)
 
 	// specify some explicit paths
-	conformist(t,
+	conformist(
+		t,
 		withArgs("rust/src/main.rs", "haskell/Nested/Foo.hs"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2114,7 +2208,8 @@ func TestPathsArg(tt *testing.T) {
 	absoluteInternalPath, err := filepath.Abs("rust/src/main.rs")
 	as.NoError(err)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs(absoluteInternalPath),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2126,7 +2221,8 @@ func TestPathsArg(tt *testing.T) {
 	)
 
 	// specify a bad path
-	conformist(t,
+	conformist(
+		t,
 		withArgs("rust/src/main.rs", "haskell/Nested/Bar.hs"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "Bar.hs not found")
@@ -2138,7 +2234,8 @@ func TestPathsArg(tt *testing.T) {
 	as.NoError(err)
 	as.FileExists(absoluteExternalPath, "external file must exist")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs(absoluteExternalPath),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, fmt.Sprintf("path %s not inside the tree root", absoluteExternalPath))
@@ -2149,7 +2246,8 @@ func TestPathsArg(tt *testing.T) {
 	relativeExternalPath := "../outside_tree.go"
 	as.FileExists(relativeExternalPath, "external file must exist")
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs(relativeExternalPath),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, fmt.Sprintf("path %s not inside the tree root", relativeExternalPath))
@@ -2179,7 +2277,8 @@ func TestStdin(tt *testing.T) {
 	t.Setenv("CONFORMIST_ALLOW_MISSING_FORMATTER", "true")
 
 	// we get an error about the missing filename parameter.
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--stdin"),
 		withError(func(as *require.Assertions, err error) {
 			as.EqualError(err, "exactly one path should be specified when using the --stdin flag")
@@ -2192,7 +2291,8 @@ func TestStdin(tt *testing.T) {
 	// now pass along the filename parameter
 	os.Stdin = test.TempFile(t, "", "stdin", &contents)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--stdin", "test.nix"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2212,7 +2312,8 @@ func TestStdin(tt *testing.T) {
 	// try a file that's outside of the project root
 	os.Stdin = test.TempFile(t, "", "stdin", &contents)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--stdin", "../test.nix"),
 		withError(func(as *require.Assertions, err error) {
 			as.ErrorContains(err, "path ../test.nix not inside the tree root "+tempDir)
@@ -2231,7 +2332,8 @@ func TestStdin(tt *testing.T) {
 `
 	os.Stdin = test.TempFile(t, "", "stdin", &contents)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--stdin", "test.md"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2259,7 +2361,8 @@ help:
 `
 	os.Stdin = test.TempFile(t, "", "stdin", &contents)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--stdin", "foo/justfile"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2348,7 +2451,8 @@ func TestDeterministicOrderingInPipeline(tt *testing.T) {
 `
 	os.Stdin = test.TempFile(t, "", "stdin", &badToml)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--stdin", "conformist.toml"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2418,7 +2522,8 @@ func TestRunInSubdir(tt *testing.T) {
 			test.WriteConfig(t, configPath, cfg)
 
 			// without any path args, should reformat the whole tree
-			conformist(t,
+			conformist(
+				t,
 				withNoError(t),
 				withStats(t, map[stats.Type]int{
 					stats.Traversed: 33,
@@ -2430,7 +2535,8 @@ func TestRunInSubdir(tt *testing.T) {
 
 			// specify some explicit paths, relative to the tree root
 			// this should not work, as we're in a subdirectory
-			conformist(t,
+			conformist(
+				t,
 				withArgs("-c", "go/main.go", "haskell/Nested/Foo.hs"),
 				withError(func(as *require.Assertions, err error) {
 					as.ErrorContains(err, "go/main.go not found")
@@ -2438,7 +2544,8 @@ func TestRunInSubdir(tt *testing.T) {
 			)
 
 			// specify some explicit paths, relative to the current directory
-			conformist(t,
+			conformist(
+				t,
 				withArgs("-c", "main.go", "../haskell/Nested/Foo.hs"),
 				withNoError(t),
 				withStats(t, map[stats.Type]int{
@@ -2486,7 +2593,8 @@ func TestProjectRootIsSymlink(tt *testing.T) {
 	test.WriteConfig(t, configPath, cfg)
 
 	// Verify we can format a specific file.
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c", "go/main.go"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2498,7 +2606,8 @@ func TestProjectRootIsSymlink(tt *testing.T) {
 	)
 
 	// Verify we can format a specific directory that is a symlink.
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c", "symlink-to-yaml-dir"),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2510,7 +2619,8 @@ func TestProjectRootIsSymlink(tt *testing.T) {
 	)
 
 	// Verify we can format the current directory (which is a symlink!).
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c", "."),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
@@ -2552,7 +2662,8 @@ func TestConcurrentInvocation(tt *testing.T) {
 	// concurrent invocation with one slow instance and one not
 
 	eg.Go(func() error {
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--formatters", "slow"),
 			withConfig(configPath, cfg),
 			withNoError(t),
@@ -2563,7 +2674,8 @@ func TestConcurrentInvocation(tt *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("--formatters", "echo"),
 		withConfig(configPath, cfg),
 		withError(func(as *require.Assertions, err error) {
@@ -2576,7 +2688,8 @@ func TestConcurrentInvocation(tt *testing.T) {
 	// concurrent invocation with one slow instance and one configured to clear the cache
 
 	eg.Go(func() error {
-		conformist(t,
+		conformist(
+			t,
 			withArgs("--formatters", "slow"),
 			withConfig(configPath, cfg),
 			withNoError(t),
@@ -2587,7 +2700,8 @@ func TestConcurrentInvocation(tt *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	conformist(t,
+	conformist(
+		t,
 		withArgs("-c", "--formatters", "echo"),
 		withConfig(configPath, cfg),
 		withNoError(t),
@@ -2614,7 +2728,8 @@ func TestNoPositionalArgSupport(tt *testing.T) {
 		},
 	}
 
-	conformist(t,
+	conformist(
+		t,
 		withConfig(configPath, cfg),
 		withNoError(t),
 		withStats(t, map[stats.Type]int{
