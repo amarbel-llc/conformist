@@ -52,19 +52,23 @@ lint-go:
 
 # --- build ---
 
-build: build-gomod2nix build-godyn-graph build-go build-nix
+build: build-gomod2nix build-go build-nix
 
 # Regenerate gomod2nix.toml from go.mod/go.sum. Run after changing deps.
 build-gomod2nix:
     nix develop --command gomod2nix
 
-# Regenerate godyn-graph.json, the Go source dependency graph that drives the
-# native (godyn) build backend (buildGoAuto, igloo#29). CGO off — conformist is
-# pure-Go — for clean file selection; captures cmd/init's //go:embed init.toml.
-# Mirrors build-gomod2nix: run after changing imports/deps/embeds, then commit
-# the regenerated graph. The committed graph is drift-checked by
-# verify-godyn-graph.
-build-godyn-graph:
+# OPT-IN: regenerate godyn-graph.json, the Go source dependency graph that drives
+# the opt-in native (godyn) build backend (buildGoAuto, igloo#29;
+# `.#conformist-native`). bga is the default backend now, so this is only needed
+# when working on the godyn path — hence the debug group, not the `build`
+# pipeline lane. CGO off — conformist is pure-Go — for clean file selection;
+# captures the //go:embed patterns (e.g. cmd/conform/scaffold/*,
+# cmd/init/init.toml). MUST run on x86_64-linux: the graph embeds linux/amd64-only
+# sources, so regenerating on another host corrupts it (igloo#33). Run after
+# changing imports/deps/embeds, then commit; drift-checked by debug-godyn-graph-drift.
+[group("debug")]
+debug-godyn-graph:
     nix develop --command env CGO_ENABLED=0 godyn-gen . godyn-graph.json
 
 # Out-of-nix go build for a fast inner loop. Version/commit stay dev/unknown
@@ -281,7 +285,7 @@ debug-bench-backends iterations="3":
 
 # --- verify ---
 
-verify: verify-godyn-graph verify-linter-fixtures
+verify: verify-linter-fixtures
 
 # Behavioral fixture tests for the nix/linters/ whole-tree checks: build the
 # `linter-fixtures` aggregate, which runs each compiled linter against pass/fail
@@ -294,19 +298,23 @@ verify-linter-fixtures:
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${system}.linter-fixtures" --no-link --print-build-logs
 
-# Drift gate for the committed godyn-graph.json: regenerate the graph into a
-# scratch file and diff it against the committed copy, failing if they differ.
-# Regenerating into a temp file keeps the working tree untouched (unlike
-# build-godyn-graph, which writes in place). Mirrors the spirit of the gomod2nix
-# regen but adds an explicit gate so a stale graph can't reach a merge (igloo#29).
-verify-godyn-graph:
+# OPT-IN: drift check for the committed godyn-graph.json — regenerate the graph
+# into a scratch file and diff it against the committed copy, failing if they
+# differ. godyn is opt-in now (bga is the default backend), so this no longer
+# gates the merge; it's a manual check for the godyn path — hence the debug group,
+# not the `verify` pipeline lane. MUST run on x86_64-linux — on another host
+# godyn-gen emits a host-platform graph that always "differs" from the
+# linux-locked committed one (a false positive; igloo#33). Keeps the working tree
+# untouched (unlike debug-godyn-graph, which writes in place).
+[group("debug")]
+debug-godyn-graph-drift:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
     nix develop --command env CGO_ENABLED=0 godyn-gen . "$tmp"
     if ! diff -u godyn-graph.json "$tmp"; then
-        echo "verify-godyn-graph: committed godyn-graph.json is stale — run 'just build-godyn-graph' and commit the result." >&2
+        echo "debug-godyn-graph-drift: committed godyn-graph.json is stale — run 'just debug-godyn-graph' and commit the result." >&2
         exit 1
     fi
 

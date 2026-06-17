@@ -22,8 +22,9 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        # On x86_64-linux `.default` is the godyn build (needs the ca-derivations
-        # experimental feature); swap to `.conformist-bga` to avoid it.
+        # `.default` is the bga (buildGoApplication) build on every system —
+        # platform-agnostic, no ca-derivations needed. (`.conformist-native` is an
+        # opt-in godyn build, x86_64-linux only.)
         conformistPkg = conformist.packages.${system}.default;
 
         # Pure lane: the eng preset + this repo's own formatters/excludes

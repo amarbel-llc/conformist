@@ -66,18 +66,25 @@
         pkgs = igloo.legacyPackages.${system};
         pkgs-master = import nixpkgs-master { inherit system; };
 
-        # Per-system backend gating: godyn is only exercised on x86_64-linux
-        # (godyn(7) LIMITATIONS), and the committed godyn-graph.json is generated
+        # Where the godyn (native) backend can build at all: only x86_64-linux
+        # (godyn(7) LIMITATIONS). The committed godyn-graph.json is generated
         # there — `go list`'s file/import selection honors GOOS/GOARCH, so the
         # graph embeds linux/amd64-only sources (e.g. x/sys/unix's *_linux*.go +
-        # asm_linux_amd64.s) that cannot compile on any other system. Until
-        # igloo#33 (per-system graphs) lands, every other system defaults to the
-        # bga backend; the godyn outputs stay exposed for opt-in.
+        # asm_linux_amd64.s) that cannot compile on any other system (igloo#33).
+        #
+        # godyn is NO LONGER the default backend anywhere — bga (buildGoApplication
+        # off gomod2nix.toml) is the default on every system, because the
+        # single-platform graph and its hand-committed JSON are immature and the
+        # JSON drifts from source (it broke the Linux build when cmd/conform gained
+        # //go:embed patterns the graph didn't list). godyn stays opt-in via
+        # `.#conformist-native`; this flag now only gates whether that opt-in
+        # package is buildable on the current system. Re-promotion is a future
+        # session, pending igloo#33 (per-system graphs) + dropping the JSON.
         godynSystem = system == "x86_64-linux";
 
         # bga (buildGoApplication) build — the ca-derivations-free backend behind
-        # `.#conformist-bga`, and the default backend on non-x86_64-linux systems
-        # (godynSystem above; the godyn build is the default where exercised).
+        # `.#conformist-bga` and the DEFAULT on every system (godynSystem above;
+        # godyn is opt-in via `.#conformist-native`).
         conformistBin = pkgs.buildGoApplication {
           pname = "conformist";
           # `src = self` lets the fork's buildGoApplication resolve
@@ -143,16 +150,15 @@
               conformist gen-man "$out/share/man/man1"
             '';
 
-        # Man pages per backend: the default (godyn) package needs no bga build,
-        # and the bga fallback needs no ca-derivations.
+        # Man pages per backend: the bga default needs no ca-derivations; the
+        # opt-in godyn package carries its own (manpages, built from conformist-native).
         manpages = mkManpages conformist-native;
         manpagesBga = mkManpages conformistBin;
 
-        # The godyn package: the godyn (native) binary plus its man pages. The
-        # shipped default on godynSystem; `nix build`, `nix run .`, and
-        # `.#conformist` resolve here on x86_64-linux and to conformist-bga
-        # elsewhere (see conformistDefault below). `meta.mainProgram` keeps
-        # `nix run` / `lib.getExe` resolving to bin/conformist.
+        # The opt-in godyn package: the godyn (native) binary plus its man pages.
+        # NOT the default — bga is (see conformistDefault below). Kept reachable
+        # for the future godyn re-promotion work (igloo#33). `meta.mainProgram`
+        # keeps `nix run` / `lib.getExe` resolving to bin/conformist.
         conformist = pkgs.symlinkJoin {
           name = "conformist";
           paths = [
@@ -164,11 +170,12 @@
           };
         };
 
-        # Opt-in bga package: the single input-addressed buildGoApplication
-        # derivation + bga-built man pages. ca-derivations-free, so consumers
-        # without that experimental feature (or who want the cold/release-faster
-        # single-derivation build) can `nix build .#conformist-bga`. See the
-        # backend bench (`just debug-bench-backends`) for the tradeoffs.
+        # The bga package: the single input-addressed buildGoApplication
+        # derivation + bga-built man pages. ca-derivations-free and platform-
+        # agnostic (no per-system graph), so it is the DEFAULT backend on every
+        # system (see conformistDefault below) and what `.#conformist-bga` names
+        # explicitly. See the backend bench (`just debug-bench-backends`) for the
+        # godyn-vs-bga tradeoffs.
         conformist-bga = pkgs.symlinkJoin {
           name = "conformist-bga";
           paths = [
@@ -180,20 +187,22 @@
           };
         };
 
-        # The per-system default package and self-consumption binary (see
-        # godynSystem above): godyn where it's exercised, bga everywhere else.
-        conformistDefault = if godynSystem then conformist else conformist-bga;
-        selfBin = if godynSystem then conformist-native else conformistBin;
+        # The default package and self-consumption binary: bga on every system.
+        # godyn is opt-in (`.#conformist-native` / the `conformist` join), never
+        # the default — see the godynSystem comment above.
+        conformistDefault = conformist-bga;
+        selfBin = conformistBin;
 
-        # Native (godyn) build of the bare binary, driven by the committed
+        # Opt-in native (godyn) build of the bare binary, driven by the committed
         # godyn-graph.json (igloo#29). buildGoAuto with strategy = "dev" selects
         # igloo's per-package godyn backend (`go tool compile`/`link` directly,
-        # no `go build`). This is the DEFAULT backend on x86_64-linux (godynSystem):
-        # the `conformist` join above bundles it with man pages, and
-        # `.#conformist-native` exposes the bare binary (no man pages) for the fast
-        # inner loop and the backend bench. Its per-package outputs are
-        # content-addressed, so building it requires the ca-derivations feature;
-        # the input-addressed bga build is `.#conformist-bga`.
+        # no `go build`). NO LONGER the default backend — bga is (conformistDefault
+        # above); kept reachable via the `conformist` join (man pages) and
+        # `.#conformist-native` (bare binary) for the fast inner loop, the backend
+        # bench, and the future godyn re-promotion work. Its per-package outputs
+        # are content-addressed, so building it requires the ca-derivations feature;
+        # the input-addressed bga build is `.#conformist-bga`. Only builds on
+        # x86_64-linux (godynSystem) until igloo#33 lands.
         #
         # subPackages / GOTOOLCHAIN are buildGoApplication-only knobs and so live
         # under bgaArgs (the godyn backend ignores them: its scope is the graph,
@@ -256,23 +265,24 @@
       in
       {
         packages = {
-          # Per-system default (godynSystem): godyn (native) build + man pages on
-          # x86_64-linux, the bga build + man pages everywhere else (igloo#33).
+          # Default on every system: the bga (buildGoApplication) build + man
+          # pages. Platform-agnostic, ca-derivations-free, no per-system graph.
           default = conformistDefault;
           conformist = conformistDefault;
-          # bga (buildGoApplication) build + man pages: ca-derivations-free,
-          # a single input-addressed derivation. The default on non-godyn
-          # systems; opt-in on x86_64-linux.
+          # The bga build + man pages, named explicitly. Same derivation as the
+          # default above; kept as a stable name for the `conformist-bga` vs
+          # `conformist-native` A/B (and the backend bench).
           conformist-bga = conformist-bga;
-          # The bare godyn binary for the fast edit loop and the backend bench
-          # (`nix build .#conformist-native`, `.#conformist-native.passthru.bga`); no man
-          # pages. See conformist-native above. Only builds on godynSystem until
-          # igloo#33 lands (linux-generated graph).
+          # Opt-in: the bare godyn (native) binary for the fast edit loop and the
+          # backend bench (`nix build .#conformist-native`,
+          # `.#conformist-native.passthru.bga`); no man pages. NOT the default —
+          # see conformist-native above. Only builds on godynSystem (x86_64-linux)
+          # until igloo#33 lands (linux-generated graph).
           conformist-native = conformist-native;
           # The compiled man pages on their own, for inspection
-          # (`nix build .#manpages`); built with the per-system default backend's
-          # binary, and also bundled into the conformist package.
-          manpages = if godynSystem then manpages else manpagesBga;
+          # (`nix build .#manpages`); built with the bga default backend's binary,
+          # and also bundled into the conformist package.
+          manpages = manpagesBga;
           # The generated config for the impure (git-state) self-checks, consumed
           # by `just check-worktree`.
           conformist-impure-config = conformistImpureEval.config.build.configFile;
@@ -407,9 +417,9 @@
             # mkGoEnv puts the gomod2nix-regen `go` wrapper + the gomod2nix CLI
             # on PATH, so `just build-gomod2nix` / `just update-go` work.
             (pkgs.mkGoEnv { pwd = ./.; })
-            # igloo's pkgs.go (1.26.3), matching conformistBin + the godyn
+            # igloo's pkgs.go (1.26.3), matching conformistBin + the opt-in godyn
             # backend (igloo#29). godyn-gen runs `go list -deps -json` against
-            # this go, so `just build-godyn-graph` regenerates the committed graph.
+            # this go, so `just debug-godyn-graph` regenerates the committed graph.
             pkgs.go
             pkgs.godyn-gen
             pkgs-master.gofumpt
