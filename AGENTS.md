@@ -102,9 +102,12 @@ worktree, in stdin mode, or under fail-on-change.
   `chore: conformist fmt+fix`; dirty-tree policy in `commitPreflight`);
   subcommands `check` (`check.go`) and `version` (`version.go`) dispatch
   separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
-  eng shape — writes `conformist.nix`/`version.env` if absent (`//go:embed`-ed
-  `cmd/conform/scaffold/`), prints the flake.nix + justfile wiring to paste, never
-  edits existing files; idempotent, exits 3 when it scaffolds (`ErrScaffolded`);
+  eng shape — writes every absent shape file (`conformist.nix`, `version.env`,
+  and, greenfield, a complete `flake.nix`/`justfile`; all `//go:embed`-ed from
+  `cmd/conform/scaffold/`, the flake.nix/justfile kept byte-identical to
+  `templates/eng/` by a drift test — #41), never edits an existing file: an
+  already-present flake.nix/justfile is left untouched and its wiring is printed
+  to paste instead. Idempotent, exits 3 when it scaffolds (`ErrScaffolded`);
   a hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via
   `cmd/init`, `--completion` emits shell completions. Config flags live on

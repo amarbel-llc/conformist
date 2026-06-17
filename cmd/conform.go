@@ -18,11 +18,12 @@ func newConformCmd() *cobra.Command {
 		Use:   "conform",
 		Short: "Scaffold this repo into the amarbel-llc conformist shape",
 		Long: "Transition the current repo toward the amarbel-llc conformist shape. Writes " +
-			"conformist.nix and version.env if they are absent (skipping any that exist), " +
-			"then prints the flake.nix and justfile wiring to add by hand. It is idempotent " +
-			"and never edits existing files — auto-rewriting an arbitrary flake.nix is fragile, " +
-			"so conform scaffolds the new pieces and reports the rest. Exits 0 when nothing was " +
-			"written, 3 when it scaffolded files.",
+			"each shape file that is absent — conformist.nix, version.env, and (for a greenfield " +
+			"repo) a complete flake.nix and justfile — skipping any that already exist. It is " +
+			"idempotent and never edits an existing file: when flake.nix or justfile is already " +
+			"present, conform leaves it untouched and prints the wiring to paste instead, since " +
+			"auto-rewriting an arbitrary flake.nix is fragile. Exits 0 when nothing was written, " +
+			"3 when it scaffolded files.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
