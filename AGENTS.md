@@ -177,9 +177,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair), `gomod2nix`
   (conformist-nix(7) GO MODULE LOCK — gomod2nix.toml in sync with go.mod/go.sum;
   check regenerates-to-temp + diffs, repair regenerates + `git add`s; impure
-  because regen needs the module graph and repair stages; gates on flake.nix
-  since go.mod/go.sum are default-excluded; native check pending
-  amarbel-llc/gomod2nix#14).
+  because regen needs the module graph and repair stages; watches the
+  default-excluded go.mod/go.sum via `ignore-global-excludes` (conformist#44);
+  native check pending amarbel-llc/gomod2nix#14).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the
   seven `justfile-*`) and `eng-impure.nix` (git-state lane: `git-remotes`,

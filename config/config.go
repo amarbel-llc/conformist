@@ -112,6 +112,13 @@ type Linter struct {
 	// arguments — it runs once (cwd = tree root) when at least one file matching
 	// its includes is present, but never receives a file list (RFC 0001 §4).
 	PassesFiles *bool `mapstructure:"passes-files,omitempty" toml:"passes-files,omitempty"`
+	// IgnoreGlobalExcludes, when true, exempts this linter from the global
+	// `excludes` list, so it can watch a file that formatters are forbidden to
+	// rewrite — e.g. a whole-tree drift check gating on go.mod, which is globally
+	// excluded precisely so no formatter touches it. The linter's own
+	// includes/excludes still apply. Defaults to false: a globally-excluded file
+	// is invisible to every linter, as before (conformist#44).
+	IgnoreGlobalExcludes *bool `mapstructure:"ignore-global-excludes,omitempty" toml:"ignore-global-excludes,omitempty"`
 	// RepairCommand is an optional autofix invocation used in repair mode. If
 	// unset, the linter is a no-op in repair mode (RFC 0001 §4).
 	RepairCommand string `mapstructure:"repair-command,omitempty" toml:"repair-command,omitempty"`

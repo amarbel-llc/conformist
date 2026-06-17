@@ -137,6 +137,14 @@ plus:
 	tree root with no file arguments, when at least one file matching its
 	*includes* is present.
 
+*ignore-global-excludes*
+	Defaults to false. Set true to exempt this linter from the top-level
+	*excludes* list, so it can watch a file that formatters are forbidden to
+	rewrite --- e.g. a whole-tree drift check triggering on _go.mod_, which is
+	globally excluded precisely so no formatter touches it. The linter's own
+	*includes*/*excludes* still apply. Formatters have no equivalent: the global
+	*excludes* always keep a file from being rewritten.
+
 # ENVIRONMENT
 
 Every option has an environment override named by upper-casing the key and

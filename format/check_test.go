@@ -582,3 +582,75 @@ func TestCompositeCheckerSandboxReadOnlySource(tt *testing.T) {
 	as.NoError(err)
 	as.Equal(os.FileMode(0o444), info.Mode().Perm())
 }
+
+// TestLinterIgnoreGlobalExcludes verifies the conformist#44 fix: a globally-
+// excluded file (e.g. go.mod, which formatters must never rewrite) is invisible
+// to a normal linter, but a linter that opts in via ignore-global-excludes can
+// still watch it. A formatter never sees the excluded file either way.
+func TestLinterIgnoreGlobalExcludes(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	// stub linter: exit 1 (a finding) whenever it is run at all, so "did it run"
+	// is observable as a finding. As a whole-tree check it takes no file args.
+	lint := writeFile(t, root, "ran.sh", "#!/usr/bin/env bash\nexit 1\n", 0o755)
+	// fix-only formatter: append X to each arg. If a formatter ever saw the
+	// excluded file the source would change; a check reports it via the sandbox.
+	fix := writeFile(t, root, "fix.sh",
+		"#!/usr/bin/env bash\nfor f in \"$@\"; do printf X >> \"$f\"; done\nexit 0\n", 0o755)
+
+	writeFile(t, root, "go.mod", "module example.com/x\n", 0o644)
+
+	passesFiles := false
+	run := func(ignore bool) []format.Finding {
+		t.Helper()
+
+		statz := stats.New()
+		cfg := &config.Config{
+			TreeRoot:    root,
+			OnUnmatched: "info",
+			Excludes:    []string{"go.mod"}, // the formatter "don't rewrite" set
+			LinterConfigs: map[string]*config.Linter{
+				"watch": {
+					Command:              lint,
+					Includes:             []string{"go.mod"},
+					PassesFiles:          &passesFiles,
+					IgnoreGlobalExcludes: &ignore,
+				},
+			},
+			FormatterConfigs: map[string]*config.Formatter{
+				// includes go.mod, but the global exclude must keep it away.
+				"fmt": {Command: fix, Includes: []string{"go.mod"}},
+			},
+		}
+
+		checker, err := format.NewCompositeChecker(cfg, &statz)
+		as.NoError(err)
+
+		findings, err := checker.Check(context.Background(), []*walk.File{walkFile(t, root, "go.mod")})
+		as.NoError(err)
+
+		wholeFindings, err := checker.Finalize(context.Background())
+		as.NoError(err)
+		findings = append(findings, wholeFindings...)
+
+		// the formatter must never have run against the excluded file, regardless
+		// of the linter's opt-in: the source is untouched.
+		after, err := os.ReadFile(filepath.Join(root, "go.mod"))
+		as.NoError(err)
+		as.Equal("module example.com/x\n", string(after), "a formatter must never touch a globally-excluded file")
+
+		return findings
+	}
+
+	// Opt-in: the linter watches the excluded go.mod and runs (reporting a finding).
+	optIn := run(true)
+	as.Len(optIn, 1, "ignore-global-excludes lets the linter watch the globally-excluded go.mod")
+	as.Equal(format.FindingLint, optIn[0].Kind)
+	as.Equal("watch", optIn[0].Tool)
+
+	// Default: the linter does not opt in, so the globally-excluded go.mod is
+	// invisible to it and the check never runs (no findings).
+	as.Empty(run(false), "without the opt-in, a globally-excluded file stays invisible to the linter")
+}

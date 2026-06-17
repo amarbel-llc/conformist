@@ -36,11 +36,16 @@ func (c *CompositeLinter) Repair(ctx context.Context, files []*walk.File) error 
 	linterFiles := map[*Linter][]*walk.File{}
 
 	for _, file := range files {
-		if pathMatches(file.RelPath, c.globalExcludes) {
-			continue
-		}
+		// A globally-excluded file is still offered to linters that opt out of
+		// global excludes via ignore-global-excludes (conformist#44); others
+		// skip it as before.
+		globallyExcluded := pathMatches(file.RelPath, c.globalExcludes)
 
 		for _, l := range c.linters {
+			if globallyExcluded && !l.IgnoresGlobalExcludes() {
+				continue
+			}
+
 			if l.Wants(file) {
 				linterFiles[l] = append(linterFiles[l], file)
 			}

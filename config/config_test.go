@@ -83,10 +83,11 @@ func TestLinterConfig(tt *testing.T) {
 				RepairOptions: []string{"check", "--fix"},
 			},
 			"drift": {
-				Command:     "dagnabit",
-				Options:     []string{"export", "--check"},
-				Includes:    []string{"libs/**"},
-				PassesFiles: ptr(false),
+				Command:              "dagnabit",
+				Options:              []string{"export", "--check"},
+				Includes:             []string{"libs/**"},
+				PassesFiles:          ptr(false),
+				IgnoreGlobalExcludes: ptr(true),
 			},
 		},
 	}
@@ -114,6 +115,12 @@ func TestLinterConfig(tt *testing.T) {
 	as.NotNil(drift.PassesFiles)
 	as.False(*drift.PassesFiles)
 	as.Nil(sc.PassesFiles)
+
+	// ignore-global-excludes round-trips for the opt-in linter; others leave it
+	// unset (nil => defaults to false / honors global excludes — conformist#44).
+	as.NotNil(drift.IgnoreGlobalExcludes)
+	as.True(*drift.IgnoreGlobalExcludes)
+	as.Nil(sc.IgnoreGlobalExcludes)
 }
 
 func ptr[T any](v T) *T { return &v }

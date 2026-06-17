@@ -72,24 +72,37 @@ func (c *CompositeChecker) Check(ctx context.Context, files []*walk.File) ([]Fin
 	linterFiles := map[*Linter][]*walk.File{}
 
 	for _, file := range files {
-		if pathMatches(file.RelPath, c.globalExcludes) {
-			continue
-		}
+		// A globally-excluded file is kept from formatters (the "don't rewrite"
+		// intent), but still offered to linters that opt out of global excludes
+		// via ignore-global-excludes (the "watch" intent — conformist#44).
+		globallyExcluded := pathMatches(file.RelPath, c.globalExcludes)
 
 		matched := false
 
-		for _, f := range c.formatters {
-			if f.Wants(file) {
-				formatterFiles[f] = append(formatterFiles[f], file)
-				matched = true
+		if !globallyExcluded {
+			for _, f := range c.formatters {
+				if f.Wants(file) {
+					formatterFiles[f] = append(formatterFiles[f], file)
+					matched = true
+				}
 			}
 		}
 
 		for _, l := range c.linters {
+			if globallyExcluded && !l.IgnoresGlobalExcludes() {
+				continue
+			}
+
 			if l.Wants(file) {
 				linterFiles[l] = append(linterFiles[l], file)
 				matched = true
 			}
+		}
+
+		// A globally-excluded file that no opt-in linter wanted is silently
+		// skipped, exactly as before — it must not trip the unmatched path.
+		if globallyExcluded && !matched {
+			continue
 		}
 
 		switch {

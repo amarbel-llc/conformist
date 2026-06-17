@@ -103,21 +103,18 @@ in
     settings.linter.gomod2nix = {
       command = lib.getExe check;
       "repair-command" = lib.getExe repair;
-      # Gate on flake.nix, NOT go.mod/go.sum/gomod2nix.toml. The obvious gate
-      # (the Go module files) is defeated by conformist's GLOBAL excludes:
-      # module-options.nix default-excludes go.mod/go.sum (so formatters never
-      # rewrite them), and both the checker (format/check.go) and the repair
-      # linter (format/repair.go) drop globally-excluded files BEFORE per-linter
-      # matching — so an includes entry for an excluded file never fires. Since
-      # this is a whole-tree check (passes-files=false), the matched files are
-      # only a trigger; the script reads the real go.mod itself. So we gate on a
-      # non-excluded file every eng repo has, exactly as flake-lock gates on
-      # flake.nix (not the excluded flake.lock) and eng-versioning gates on
-      # version.env. A full `conformist check` (the lint lane / merge hook) and
-      # the pre-commit `--staged` run both surface flake.nix, so the gate fires
-      # in both lanes that matter. (The excludes-blind-linter conflation is a
-      # conformist wart tracked separately; this gate sidesteps it per precedent.)
-      includes = [ "flake.nix" ];
+      # Watch the real Go module files. go.mod/go.sum are in conformist's GLOBAL
+      # excludes (module-options.nix default-excludes them so formatters never
+      # rewrite them), and globally-excluded files are normally dropped before
+      # per-linter matching — so ignore-global-excludes (conformist#44) is what
+      # lets this whole-tree check trigger when go.mod/go.sum change. The matched
+      # files are only a trigger; the script reads the real go.mod itself.
+      includes = [
+        "go.mod"
+        "go.sum"
+        "gomod2nix.toml"
+      ];
+      ignore-global-excludes = true;
       passes-files = false;
     };
   };

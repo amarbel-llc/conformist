@@ -159,6 +159,7 @@ formatter name; the two are independent tools.
 | `priority` | integer | MAY | Execution order within a file's tool sequence; lower runs first. Default `0`. |
 | `no-positional-arg-support` | boolean | MAY | If `true`, the tool MUST be invoked with at most one file at a time. |
 | `passes-files` | boolean | MAY | Default `true`. If `false`, the linter is a **whole-tree check**: it is invoked once with no file arguments. See below. |
+| `ignore-global-excludes` | boolean | MAY | Default `false`. If `true`, the linter is matched against files in the top-level `excludes` list (its own `includes`/`excludes` still apply). See below. |
 | `repair-command` | string | MAY | An autofix action used in repair mode — a bare executable or a shell line (see Command forms). See below. |
 | `repair-options` | array of string | MAY | Arguments for `repair-command`. |
 | `working-dir` | string | MAY | Subdirectory (relative to the tree root) to run the check/repair in. See Command forms. |
@@ -186,6 +187,17 @@ matched files are otherwise not passed to it. The check still runs with the tree
 root as its working directory and reports findings via a non-zero exit, exactly
 like a per-file linter. (Whole-tree checks are not yet incrementally cached — they
 run on every `check` invocation; see the follow-up tracked separately.)
+
+The top-level `excludes` list expresses a **formatter** concern — "no tool may
+rewrite these files" (e.g. lockfiles, `go.mod`). conformist MUST drop a
+globally-excluded file before formatter matching, and by default before linter
+matching too. But a linter MAY set `ignore-global-excludes = true` to opt out of
+the global excludes, so it can *watch* a file that formatters are forbidden to
+rewrite — e.g. a whole-tree drift check that triggers on `go.mod`. With the flag
+set, conformist MUST still offer a globally-excluded file to the linter's own
+`includes`/`excludes`; without it (the default), a globally-excluded file remains
+invisible to the linter. The flag has no meaning for formatters, whose contract is
+precisely to honor "don't rewrite".
 
 In repair mode, conformist determines a linter's repair action as follows:
 
