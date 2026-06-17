@@ -13,6 +13,14 @@
 [hooks]
 pre-merge = "just"
 
+# Per-commit repair (conformist#39/#40): format the index-staged content at
+# authoring time so every commit is conformant in history. `--exit-zero-on-fix`
+# maps the restage's exit-3 signal to 0, so a successful repair lets the commit
+# proceed (a pre-commit hook treats nonzero as "block"); partial-stage files are
+# formatted in isolation rather than refused. Uses the PATH `conformist` (the
+# home-manager-installed binary), which MUST be >= the build carrying #39.
+pre-commit = "conformist --staged --exit-zero-on-fix"
+
 # Per-worktree golangci-lint cache. golangci-lint's default user-global cache
 # replays per-package diagnostics whose embedded absolute paths point at
 # whichever worktree populated them; when that worktree is later deleted, the
