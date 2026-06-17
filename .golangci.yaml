@@ -1,69 +1,69 @@
 version: "2"
 run:
-    # dewey's test_ui package (used by the test helpers per the testui
-    # analyzer) is behind a `test` build constraint; without the tag the
-    # linter cannot typecheck the _test.go files that import it.
-    build-tags:
-        - test
+  # dewey's test_ui package (used by the test helpers per the testui
+  # analyzer) is behind a `test` build constraint; without the tag the
+  # linter cannot typecheck the _test.go files that import it.
+  build-tags:
+    - test
 linters:
-    # Stock golangci-lint linters (conformist#22) plus the dewey custom analyzers
-    # (conformist#10). default:all minus the curated disables below; dewey is a
-    # custom module linter so it is enabled explicitly. Gated in CI via `just
-    # lint-go` (the purse-first golangci-lint-dewey build, v2.12.2).
-    default: all
-    disable:
-        - cyclop
-        - contextcheck # threading ctx through every constructor is invasive for little gain
-        - depguard
-        - err113
-        - exhaustruct
-        - forbidigo
-        - funcorder
-        - funlen
-        - gochecknoglobals # main.version/commit are intentional -X ldflags build vars
-        - gocognit
-        - gocyclo
-        - godox
-        - gomodguard # deprecated in v2.12 (replaced by gomodguard_v2); not used here
-        - maintidx
-        - mnd
-        - noinlineerr
-        - nonamedreturns
-        - paralleltest
-        - varnamelen
-        - wsl # superseded by wsl_v5
-        - wsl_v5 # opinionated whitespace rules; previously disabled as `wsl`
-    enable:
-        - dewey
-    settings:
-        custom:
-            dewey:
-                type: module
-                description: dewey static analyzers (defererr, seqerror, repool, testui; opt-in actx, paramobj)
-                settings:
-                    defererr: true
-                    seqerror: true
-                    repool: true
-                    actx: false
-                    paramobj: false
-    exclusions:
-        generated: lax
-        presets:
-            - comments
-            - common-false-positives
-            - legacy
-            - std-error-handling
-        rules:
-            # Test files use repeated string literals, permissive temp-file
-            # permissions, long inline stub scripts, and pre-modernize helpers;
-            # exempt the linters that flag those idioms in tests.
-            - path: _test\.go
-              linters:
-                  - goconst
-                  - gosec
-                  - lll
-                  - modernize
-        paths:
-            - third_party$
-            - builtin$
-            - examples$
+  # Stock golangci-lint linters (conformist#22) plus the dewey custom analyzers
+  # (conformist#10). default:all minus the curated disables below; dewey is a
+  # custom module linter so it is enabled explicitly. Gated in CI via `just
+  # lint-go` (the purse-first golangci-lint-dewey build, v2.12.2).
+  default: all
+  disable:
+    - cyclop
+    - contextcheck # threading ctx through every constructor is invasive for little gain
+    - depguard
+    - err113
+    - exhaustruct
+    - forbidigo
+    - funcorder
+    - funlen
+    - gochecknoglobals # main.version/commit are intentional -X ldflags build vars
+    - gocognit
+    - gocyclo
+    - godox
+    - gomodguard # deprecated in v2.12 (replaced by gomodguard_v2); not used here
+    - maintidx
+    - mnd
+    - noinlineerr
+    - nonamedreturns
+    - paralleltest
+    - varnamelen
+    - wsl # superseded by wsl_v5
+    - wsl_v5 # opinionated whitespace rules; previously disabled as `wsl`
+  enable:
+    - dewey
+  settings:
+    custom:
+      dewey:
+        type: module
+        description: dewey static analyzers (defererr, seqerror, repool, testui; opt-in actx, paramobj)
+        settings:
+          defererr: true
+          seqerror: true
+          repool: true
+          actx: false
+          paramobj: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Test files use repeated string literals, permissive temp-file
+      # permissions, long inline stub scripts, and pre-modernize helpers;
+      # exempt the linters that flag those idioms in tests.
+      - path: _test\.go
+        linters:
+          - goconst
+          - gosec
+          - lll
+          - modernize
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
