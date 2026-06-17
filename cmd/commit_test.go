@@ -508,26 +508,28 @@ func TestStaged(tt *testing.T) {
 	)
 	as.Equal(stagedBlob, git("show", ":ruby/bundler.rb"))
 
-	// a staged file with ADDITIONAL unstaged edits is refused before any
-	// formatting (the restage would sweep the unstaged hunk into the index)
-	preRefusal, err := os.ReadFile(rubyPath)
+	// a staged file with ADDITIONAL unstaged edits is now handled, not refused
+	// (#40): its STAGED blob is formatted and restaged (exit 3), while the
+	// working tree's unstaged hunk is left untouched. (TestStagedPartial covers
+	// the blob-isolation mechanics in detail.)
+	preUnstaged, err := os.ReadFile(rubyPath)
 	as.NoError(err)
-	as.NoError(os.WriteFile(rubyPath, append(preRefusal, []byte("puts 'unstaged extra'\n")...), 0o644))
+	as.NoError(os.WriteFile(rubyPath, append(preUnstaged, []byte("puts 'unstaged extra'\n")...), 0o644))
 
 	conformist(t,
 		withArgs("--staged", "--no-cache"),
 		withError(func(as *require.Assertions, err error) {
-			as.ErrorIs(err, formatCmd.ErrStagedRefused)
-			as.ErrorContains(err, "partially staged")
-			as.ErrorContains(err, "ruby/bundler.rb")
-			as.Equal(2, cmd.ExitCode(err))
+			as.ErrorIs(err, formatCmd.ErrFixesRestaged)
+			as.Equal(3, cmd.ExitCode(err))
 		}),
 	)
 
-	// refusal happened before formatting: the worktree gained no new append
-	postRefusal, err := os.ReadFile(rubyPath)
+	// the unstaged hunk was NOT swept into the index ...
+	as.NotContains(git("show", ":ruby/bundler.rb"), "unstaged extra")
+	// ... and remains in the working tree, which was not formatted
+	postUnstaged, err := os.ReadFile(rubyPath)
 	as.NoError(err)
-	as.Equal(string(preRefusal)+"puts 'unstaged extra'\n", string(postRefusal))
+	as.Equal(string(preUnstaged)+"puts 'unstaged extra'\n", string(postUnstaged))
 
 	// flag interactions
 	conformist(t,
@@ -548,6 +550,98 @@ func TestStaged(tt *testing.T) {
 			as.ErrorContains(err, "positional paths")
 		}),
 	)
+}
+
+// TestStagedPartial covers --staged's graduated partial-stage semantics (#40):
+// a file that is BOTH staged and carries additional unstaged edits has its
+// STAGED blob formatted and restaged via the object store, while the working
+// tree's unstaged hunk is left untouched (the naive "format worktree + git add"
+// would sweep the unstaged hunk into the index). The index mode is preserved.
+func TestStagedPartial(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := test.TempExamples(t)
+	configPath := filepath.Join(tempDir, "conformist.toml")
+
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	cfg := &config.Config{
+		FormatterConfigs: map[string]*config.Formatter{
+			"append": {
+				Command:  "test-fmt-append",
+				Options:  []string{"hello"},
+				Includes: []string{"ruby/*"},
+			},
+		},
+	}
+
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	head := git("rev-parse", "HEAD")
+
+	rubyPath := filepath.Join("ruby", "bundler.rb")
+
+	// stage a blob with a non-default mode, then add an UNSTAGED edit on top so
+	// the file is partially staged (staged blob != worktree).
+	as.NoError(os.WriteFile(rubyPath, []byte("staged line\n"), 0o644))
+	as.NoError(os.Chmod(rubyPath, 0o755))
+	git("add", rubyPath)
+
+	preMode := strings.Fields(git("ls-files", "--stage", "--", "ruby/bundler.rb"))[0]
+
+	as.NoError(os.WriteFile(rubyPath, []byte("staged line\nunstaged line\n"), 0o755))
+
+	// sanity: the index holds only the staged line
+	as.Equal("staged line", git("show", ":ruby/bundler.rb"))
+
+	conformist(t,
+		withArgs("--staged"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrFixesRestaged)
+			as.Equal(3, cmd.ExitCode(err))
+		}),
+	)
+
+	// the STAGED blob was formatted (test-fmt-append added a "hello" line) and
+	// restaged ...
+	stagedBlob := git("show", ":ruby/bundler.rb")
+	as.Contains(stagedBlob, "staged line")
+	as.Contains(stagedBlob, "hello")
+	// ... but the unstaged hunk was NOT swept into the index
+	as.NotContains(stagedBlob, "unstaged line")
+
+	// the restaged entry preserves the index mode
+	postMode := strings.Fields(git("ls-files", "--stage", "--", "ruby/bundler.rb"))[0]
+	as.Equal(preMode, postMode, "the restaged entry must preserve the index mode")
+
+	// the WORKING TREE keeps its unstaged hunk and was NOT formatted
+	worktree, err := os.ReadFile(rubyPath)
+	as.NoError(err)
+	as.Equal("staged line\nunstaged line\n", string(worktree))
+
+	// no commit was created — the commit is the caller's
+	as.Equal(head, git("rev-parse", "HEAD"))
 }
 
 // TestStagedExitZeroOnFix covers --exit-zero-on-fix with --staged (#39): a

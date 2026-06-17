@@ -62,11 +62,13 @@ conformist has two modes of operation.
 	With *--staged*, conformist formats only the files currently staged in the
 	index and restages the formatted content; no commit is created, so the
 	caller's own commit — message, signing, trailers — proceeds with
-	conformant content. Partially staged files (staged with additional
-	unstaged edits) are refused before any formatting, since restaging would
-	sweep the unstaged hunks into the index. Exits 0 when the staged content
-	was already conformant, 3 when files were reformatted and restaged, and 2
-	when refused. With *--exit-zero-on-fix*, conformist exits 0 (not 3) on a
+	conformant content. A fully staged file is formatted in the working tree
+	and restaged. A partially staged file (staged with additional unstaged
+	edits) has its staged blob formatted in isolation and restaged via the
+	object store, leaving the working tree's unstaged hunks untouched. Exits 0
+	when the staged content was already conformant, 3 when files were
+	reformatted and restaged, and 2 when refused — outside a git worktree, in
+	stdin mode, or under fail-on-change. With *--exit-zero-on-fix*, conformist exits 0 (not 3) on a
 	successful restage — refusals and operational failures still exit nonzero —
 	so the canonical git pre-commit hook command
 	_conformist --staged --exit-zero-on-fix_ proceeds with the commit when the

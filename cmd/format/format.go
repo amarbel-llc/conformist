@@ -107,6 +107,21 @@ func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string)
 		cancel()
 	}()
 
+	return formatTree(ctx, cfg, statz, db, paths)
+}
+
+// formatTree runs the linter-repair + formatter pipeline over cfg.TreeRoot,
+// scoped to paths, using db for change-detection caching (nil disables it). It
+// is the shared core of Run and the staged-blob isolation lane (#40), which
+// points cfg.TreeRoot at a temp tree of materialized staged blobs so the working
+// tree is never touched.
+func formatTree(
+	ctx context.Context,
+	cfg *config.Config,
+	statz *stats.Stats,
+	db *bolt.DB,
+	paths []string,
+) error {
 	// parse the walk type
 	walkType, err := walk.TypeString(cfg.Walk)
 	if err != nil {

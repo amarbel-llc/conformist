@@ -194,6 +194,7 @@
     "isMain": false,
     "local": true,
     "goFiles": [
+      "blobs.go",
       "commit.go",
       "format.go",
       "staged.go"
@@ -306,7 +307,8 @@
     "local": true,
     "goFiles": [
       "commit.go",
-      "git.go"
+      "git.go",
+      "staged.go"
     ],
     "cgoFiles": null,
     "cFiles": null,

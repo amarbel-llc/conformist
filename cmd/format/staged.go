@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/amarbel-llc/conformist/config"
 	"github.com/amarbel-llc/conformist/git"
@@ -26,20 +25,26 @@ var (
 	ErrFixesRestaged = errors.New("fixes were applied and restaged")
 
 	// ErrStagedRefused indicates --staged declined to run (exit code 2):
-	// outside a git worktree, in stdin mode, fail-on-change, or partially
-	// staged files (the "partially staged" message token is grep-stable for
-	// hook consumers). Refusal happens BEFORE any formatting.
+	// outside a git worktree, in stdin mode, or fail-on-change. Refusal happens
+	// BEFORE any formatting. (Partially staged files are no longer refused —
+	// their staged blobs are formatted in isolation; see #40.)
 	ErrStagedRefused = errors.New("refusing to format staged files")
 )
 
 // RunStaged implements the lint-staged-style --staged mode (#25): format only
 // the files currently staged in the index, restage the formatted content, and
 // create no commit — the caller's own commit (message, signing, trailers)
-// then proceeds with conformant content. Files that are staged AND carry
-// additional unstaged edits are refused up front: formatting the working tree
-// and restaging would sweep the unstaged hunks into the index, corrupting the
-// caller's intended commit. (Formatting the staged blobs alone would be the
-// graduated semantics; see #25.)
+// then proceeds with conformant content. Two lanes handle the two kinds of
+// staged file:
+//
+//   - Fully staged (no unstaged delta): format the working-tree file in place
+//     and `git add` exactly the files that changed. Safe because the working
+//     tree and index agree, so restaging cannot sweep in unintended edits.
+//   - Partially staged (staged AND carrying additional unstaged edits): format
+//     the STAGED blob alone in isolation and restage it via the object store,
+//     leaving the working tree's unstaged hunks untouched (graduated semantics,
+//     #40). The naive "format working tree + git add" path would corrupt the
+//     caller's intended commit, which is why this lane uses blob-level plumbing.
 //
 // exitZeroOnFix (#35/#39) downgrades the restage's exit-3 signal to exit 0, for
 // callers that gate on "nonzero = abort" — e.g. a git pre-commit hook, where a
@@ -89,9 +94,9 @@ func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 	}
 
 	var (
-		partial   []string
-		stagedSet = make(map[string]bool)
-		toFormat  []string
+		partialPaths []string
+		stagedSet    = make(map[string]bool)
+		toFormat     []string
 	)
 
 	for _, entry := range entries {
@@ -100,7 +105,12 @@ func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 		}
 
 		if entry.Unstaged != ' ' {
-			partial = append(partial, entry.Path)
+			// partially staged: format the staged blob in isolation (#40). A
+			// staged deletion that is also unstaged-modified has no staged
+			// content to format.
+			if entry.Staged != 'D' {
+				partialPaths = append(partialPaths, entry.Path)
+			}
 
 			continue
 		}
@@ -113,58 +123,35 @@ func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 		}
 	}
 
-	if len(partial) > 0 {
-		slices.Sort(partial)
-
-		return fmt.Errorf(
-			"%w: partially staged (staged with additional unstaged changes): %s; "+
-				"stage the remaining changes or commit in two passes",
-			ErrStagedRefused, strings.Join(partial, ", "),
-		)
-	}
-
-	if len(toFormat) == 0 {
+	if len(toFormat) == 0 && len(partialPaths) == 0 {
 		log.Debugf("--staged: nothing staged to format")
 
 		return nil
 	}
 
-	slices.Sort(toFormat)
-
-	if err := Run(v, statz, cmd, toFormat); err != nil {
+	// Fully-staged lane: format the working tree in place, restage the files
+	// that changed. The partial lane below never touches the working tree.
+	fullRestaged, err := restageFullyStaged(ctx, v, statz, cmd, cfg, stagedSet, toFormat)
+	if err != nil {
 		return err
 	}
 
-	// anything in the staged set that now differs from the index is formatter
-	// output (the partial-staging refusal above guarantees there were no
-	// pre-existing unstaged deltas on these files) — restage exactly that.
-	post, err := git.StatusEntries(ctx, cfg.TreeRoot)
+	// Partial-stage lane (#40): format each staged blob in isolation and restage
+	// it via the object store, leaving the working tree's unstaged hunks alone.
+	partialRestaged, err := restagePartialBlobs(ctx, cfg, partialPaths)
 	if err != nil {
-		return fmt.Errorf("failed to detect formatted files: %w", err)
+		return err
 	}
 
-	var toRestage []string
-
-	for _, entry := range post {
-		if entry.Unstaged != ' ' && stagedSet[entry.Path] {
-			toRestage = append(toRestage, entry.Path)
-		}
-	}
-
-	if len(toRestage) == 0 {
+	total := fullRestaged + partialRestaged
+	if total == 0 {
 		log.Debugf("--staged: staged content was already conformant")
 
 		return nil
 	}
 
-	slices.Sort(toRestage)
-
-	if err := git.AddPaths(ctx, cfg.TreeRoot, toRestage); err != nil {
-		return fmt.Errorf("failed to restage formatted files: %w", err)
-	}
-
 	if !cfg.Quiet {
-		fmt.Fprintf(os.Stderr, "reformatted and restaged %d staged file(s)\n", len(toRestage))
+		fmt.Fprintf(os.Stderr, "reformatted and restaged %d staged file(s)\n", total)
 	}
 
 	// --exit-zero-on-fix (#35/#39): a successful restage is success, not exit 3,
@@ -178,4 +165,114 @@ func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 	cmd.SilenceErrors = true
 
 	return ErrFixesRestaged
+}
+
+// restageFullyStaged formats the working-tree copies of the fully-staged files
+// (those with no unstaged delta) in place, then restages exactly the ones the
+// run changed. It returns the number of files restaged. Safe because, with no
+// pre-existing unstaged delta, any post-run worktree change on a staged file is
+// formatter output.
+func restageFullyStaged(
+	ctx context.Context,
+	v *viper.Viper,
+	statz *stats.Stats,
+	cmd *cobra.Command,
+	cfg *config.Config,
+	stagedSet map[string]bool,
+	toFormat []string,
+) (int, error) {
+	if len(toFormat) == 0 {
+		return 0, nil
+	}
+
+	slices.Sort(toFormat)
+
+	if err := Run(v, statz, cmd, toFormat); err != nil {
+		return 0, err
+	}
+
+	post, err := git.StatusEntries(ctx, cfg.TreeRoot)
+	if err != nil {
+		return 0, fmt.Errorf("failed to detect formatted files: %w", err)
+	}
+
+	var toRestage []string
+
+	for _, entry := range post {
+		if entry.Unstaged != ' ' && stagedSet[entry.Path] {
+			toRestage = append(toRestage, entry.Path)
+		}
+	}
+
+	if len(toRestage) == 0 {
+		return 0, nil
+	}
+
+	slices.Sort(toRestage)
+
+	if err := git.AddPaths(ctx, cfg.TreeRoot, toRestage); err != nil {
+		return 0, fmt.Errorf("failed to restage formatted files: %w", err)
+	}
+
+	return len(toRestage), nil
+}
+
+// restagePartialBlobs formats the staged blob of each partially-staged file in
+// isolation and restages the formatted content via the object store
+// (hash-object + update-index --cacheinfo), preserving each file's index mode
+// and leaving the working tree's unstaged hunks untouched (#40). It returns the
+// number of files restaged.
+func restagePartialBlobs(ctx context.Context, cfg *config.Config, paths []string) (int, error) {
+	if len(paths) == 0 {
+		return 0, nil
+	}
+
+	slices.Sort(paths)
+
+	contents := make(map[string][]byte, len(paths))
+	modes := make(map[string]string, len(paths))
+
+	for _, p := range paths {
+		blob, err := git.StagedBlob(ctx, cfg.TreeRoot, p)
+		if err != nil {
+			return 0, fmt.Errorf("failed to read staged blob: %w", err)
+		}
+
+		mode, err := git.StagedFileMode(ctx, cfg.TreeRoot, p)
+		if err != nil {
+			return 0, fmt.Errorf("failed to read staged mode: %w", err)
+		}
+
+		contents[p] = blob
+		modes[p] = mode
+	}
+
+	changed, err := formatStagedBlobs(ctx, cfg, contents)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(changed) == 0 {
+		return 0, nil
+	}
+
+	restaged := make([]string, 0, len(changed))
+	for p := range changed {
+		restaged = append(restaged, p)
+	}
+
+	slices.Sort(restaged)
+
+	for _, p := range restaged {
+		oid, err := git.HashObject(ctx, cfg.TreeRoot, p, changed[p])
+		if err != nil {
+			return 0, fmt.Errorf("failed to write formatted staged blob: %w", err)
+		}
+
+		if err := git.UpdateIndexCacheinfo(ctx, cfg.TreeRoot, modes[p], oid, p); err != nil {
+			return 0, fmt.Errorf("failed to restage formatted staged blob: %w", err)
+		}
+	}
+
+	return len(restaged), nil
 }

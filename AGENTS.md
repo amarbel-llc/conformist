@@ -75,10 +75,14 @@ gates on "nonzero = abort" — e.g. a spinclass pre-merge repair hook or a git
 pre-commit hook — treats a successful repair as success. It pairs with
 `--commit` and with `--staged` (the canonical pre-commit-hook command is
 `conformist --staged --exit-zero-on-fix`).
-`conformist --staged` (lint-staged restage, #25) exits 0/3/2 analogously:
-formats only index-staged files and restages the formatted content, creates
-no commit, refuses partially staged files (grep-stable "partially staged"
-message token).
+`conformist --staged` (lint-staged restage, #25/#40) exits 0/3/2 analogously:
+formats only index-staged files and restages the formatted content, creating
+no commit. A fully-staged file is formatted in the working tree and `git add`ed;
+a partially staged file (staged with additional unstaged edits) is no longer
+refused — its STAGED blob is formatted in isolation and restaged via the object
+store (`git hash-object` + `git update-index --cacheinfo`), leaving the working
+tree's unstaged hunks untouched (#40). It still refuses (exit 2) outside a git
+worktree, in stdin mode, or under fail-on-change.
 
 ## Architecture
 
