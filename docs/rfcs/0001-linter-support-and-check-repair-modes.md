@@ -99,7 +99,7 @@ expression `^[a-zA-Z0-9_-]+$`.
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `command` | string | MUST | Repair action executable. Invoked as `command [options] [...files]`. |
+| `command` | string | MUST | Repair action. A bare executable invoked as `command [options] [...files]`, or a shell line (see Command forms). |
 | `options` | array of string | MAY | Arguments inserted before the file list. |
 | `includes` | array of string | MUST (≥1) | Glob patterns selecting files this formatter processes. |
 | `excludes` | array of string | MAY | Glob patterns removing files from this formatter. |
@@ -108,10 +108,30 @@ expression `^[a-zA-Z0-9_-]+$`.
 | `check-command` | string | MAY | A native read-only check action. See below. |
 | `check-options` | array of string | MAY | Arguments for `check-command`. |
 | `sandbox` | boolean | MAY | If `true`, force sandbox execution (Section 6) even when a native check action exists. Default `false`. |
+| `working-dir` | string | MAY | Subdirectory (relative to the tree root) to run the tool in. See Command forms. |
 
 A formatter's `command` (repair action) MUST conform to the conformist formatter
 specification (files passed as arguments; writes back only on change; non-zero
 exit on error).
+
+**Command forms.** Any `command`, `check-command`, or `repair-command` MAY be
+either a single bare executable or a shell line, and this applies identically to
+formatters and linters:
+
+- A command that is a single literal word MUST be resolved via `PATH` lookup at
+  the tree root and executed directly (the pre-existing behavior, unchanged),
+  receiving `[options] [...files]` as its arguments.
+- A command containing any shell syntax — multiple words, `&&`/`||`, pipes,
+  redirections, assignments — MUST instead be run through an in-process POSIX
+  shell interpreter. The matched files (preceded by `options`) are provided as
+  the shell positional parameters, so the line references them as `"$@"`. This
+  lets a tool `cd` into a subdirectory or chain steps without a wrapper binary.
+
+A tool with a `working-dir` MUST be run with its working directory set to that
+subdirectory (joined onto the tree root, or onto the sandbox root in sandbox
+check mode), and conformist MUST pass each matched file relative to that
+directory. An empty `working-dir` (the default) runs at the tree root with file
+arguments unchanged.
 
 In check mode, conformist determines a formatter's check action as follows:
 
@@ -132,15 +152,16 @@ formatter name; the two are independent tools.
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `command` | string | MUST | Check action executable. Invoked as `command [options] [...files]`. Read-only; non-zero exit signals findings. |
+| `command` | string | MUST | Check action. A bare executable invoked as `command [options] [...files]`, or a shell line (see Command forms). Read-only; non-zero exit signals findings. |
 | `options` | array of string | MAY | Arguments inserted before the file list. |
 | `includes` | array of string | MUST (≥1) | Glob patterns selecting files this linter inspects. |
 | `excludes` | array of string | MAY | Glob patterns removing files from this linter. |
 | `priority` | integer | MAY | Execution order within a file's tool sequence; lower runs first. Default `0`. |
 | `no-positional-arg-support` | boolean | MAY | If `true`, the tool MUST be invoked with at most one file at a time. |
 | `passes-files` | boolean | MAY | Default `true`. If `false`, the linter is a **whole-tree check**: it is invoked once with no file arguments. See below. |
-| `repair-command` | string | MAY | An autofix action used in repair mode. See below. |
+| `repair-command` | string | MAY | An autofix action used in repair mode — a bare executable or a shell line (see Command forms). See below. |
 | `repair-options` | array of string | MAY | Arguments for `repair-command`. |
+| `working-dir` | string | MAY | Subdirectory (relative to the tree root) to run the check/repair in. See Command forms. |
 
 A linter's `command` (check action) MUST be read-only: it MUST NOT write to any
 file it is passed. It MUST exit `0` when all passed files are clean and MUST exit

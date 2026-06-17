@@ -72,7 +72,12 @@ are command-line only and are rejected in the config file.
 Each _[formatter.<name>]_ table accepts:
 
 *command*
-	The executable to invoke. Required.
+	The tool to invoke. Required. Either a single executable (looked up on
+	PATH, as before) or a shell line --- e.g. _cd sub && tool_ --- run through an
+	in-process shell interpreter. A shell line may use _cd_, _&&_, and pipes,
+	and receives the matched files as positional parameters (reference them as
+	"$@"); a bare single-word command keeps the direct-exec fast path. See also
+	*working-dir* for the common "run in a subdirectory" case.
 
 *options*
 	List of arguments passed before the file list.
@@ -111,7 +116,8 @@ Each _[linter.<name>]_ table accepts the same *includes*, *excludes*,
 plus:
 
 *command*
-	The read-only check, run as _command [options] [files]_. It MUST NOT
+	The read-only check, run as _command [options] [files]_. May be a single
+	executable or a shell line (see the formatter *command*). It MUST NOT
 	modify files and MUST exit non-zero when a passed file has a finding.
 	Required.
 
@@ -119,8 +125,9 @@ plus:
 	Arguments passed before the file list.
 
 *repair-command*
-	Optional autofix invocation run in repair mode. A linter with no
-	*repair-command* is a no-op in repair mode.
+	Optional autofix invocation run in repair mode --- a single executable or a
+	shell line, like *command*. A linter with no *repair-command* is a no-op in
+	repair mode.
 
 *repair-options*
 	Arguments passed to *repair-command*.

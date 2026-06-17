@@ -123,7 +123,12 @@ worktree, in stdin mode, or under fail-on-change.
   `check.go` / `repair.go` are the two modes; `sandbox.go` implements the
   copy-and-diff strategy that lets fix-only formatters be _checked_ without
   writing to the source tree (so checks work on a read-only tree); `linter.go`,
-  `composite.go`, `glob.go` round out matching and linter execution.
+  `composite.go`, `glob.go` round out matching and linter execution. `exec.go`
+  resolves each tool's `command`/`check-command`/`repair-command` into an
+  `invocation` — a bare PATH executable run directly, or a shell line run via the
+  in-process `mvdan.cc/sh` interpreter (so a command can `cd` into a subdir or
+  chain steps) — and every formatter/linter also honors a `working-dir` subdir
+  (`workingdir.go`); both are conformist#38.
 - `walk/` — pluggable tree walkers: `filesystem.go`, `git.go`, `jujutsu.go`,
   `stdin.go`, selected by `type_enum.go`. `walk/cache/` is the bbolt-backed
   (`go.etcd.io/bbolt`) cache: a `paths` bucket for per-file format signatures and

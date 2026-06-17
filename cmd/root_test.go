@@ -159,7 +159,8 @@ func TestQuiet(tt *testing.T) {
 
 	// check it doesn't suppress errors
 	conformist(t, withError(func(as *require.Assertions, err error) {
-		as.ErrorContains(err, "error looking up 'foo-fmt'")
+		as.ErrorIs(err, format.ErrCommandNotFound)
+		as.ErrorContains(err, "foo-fmt")
 	}))
 }
 

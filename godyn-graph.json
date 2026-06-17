@@ -273,6 +273,7 @@
     "goFiles": [
       "check.go",
       "composite.go",
+      "exec.go",
       "formatter.go",
       "glob.go",
       "linter.go",
@@ -297,7 +298,8 @@
       "go.etcd.io/bbolt",
       "golang.org/x/sync/errgroup",
       "mvdan.cc/sh/v3/expand",
-      "mvdan.cc/sh/v3/interp"
+      "mvdan.cc/sh/v3/interp",
+      "mvdan.cc/sh/v3/syntax"
     ]
   },
   {

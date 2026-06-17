@@ -2,10 +2,7 @@ package format
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"time"
 
 	"github.com/amarbel-llc/conformist/config"
@@ -13,7 +10,6 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/gobwas/glob"
 	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/interp"
 )
 
 // Linter wraps a configured [linter.<name>] tool. Its check command is read-only
@@ -23,11 +19,11 @@ type Linter struct {
 	config *config.Linter
 
 	log         *log.Logger
-	executable  string // resolved check command
-	repairExe   string // resolved repair command (empty if none configured)
-	treeRoot    string // the project tree root (working-dir is resolved against it)
-	workingDir  string // the dir the tool runs in: treeRoot, or a subdir (#38)
-	passesFiles bool   // false => whole-tree check: run once, no file args
+	commandInv  invocation // resolved check Command (bare exe or shell line, #38)
+	repairInv   invocation // resolved RepairCommand (zero value if none configured)
+	treeRoot    string     // the project tree root (working-dir is resolved against it)
+	workingDir  string     // the dir the tool runs in: treeRoot, or a subdir (#38)
+	passesFiles bool       // false => whole-tree check: run once, no file args
 
 	includes []glob.Glob
 	excludes []glob.Glob
@@ -38,7 +34,7 @@ func (l *Linter) Name() string { return l.name }
 func (l *Linter) Priority() int { return l.config.Priority }
 
 // HasRepair reports whether a repair (autofix) command is configured.
-func (l *Linter) HasRepair() bool { return l.repairExe != "" }
+func (l *Linter) HasRepair() bool { return l.config.RepairCommand != "" }
 
 func (l *Linter) hasNoPositionalArgSupport() bool {
 	return l.config.NoPositionalArgSupport != nil && *l.config.NoPositionalArgSupport
@@ -54,17 +50,17 @@ func (l *Linter) Wants(file *walk.File) bool {
 // the linter reported findings (a non-zero exit), along with the combined
 // output. A non-nil error indicates an operational failure, not findings.
 func (l *Linter) Check(ctx context.Context, files []*walk.File) (findings bool, output string, err error) {
-	return l.run(ctx, l.executable, l.config.Options, files)
+	return l.run(ctx, l.commandInv, l.config.Options, files)
 }
 
 // Repair runs the linter's autofix command over files (it may write to them).
 // It is a no-op when no repair command is configured.
 func (l *Linter) Repair(ctx context.Context, files []*walk.File) error {
-	if l.repairExe == "" {
+	if l.config.RepairCommand == "" {
 		return nil
 	}
 
-	_, output, err := l.run(ctx, l.repairExe, l.config.RepairOptions, files)
+	_, output, err := l.run(ctx, l.repairInv, l.config.RepairOptions, files)
 	if err != nil {
 		return err
 	}
@@ -77,7 +73,7 @@ func (l *Linter) Repair(ctx context.Context, files []*walk.File) error {
 }
 
 func (l *Linter) run(
-	ctx context.Context, exe string, options []string, files []*walk.File,
+	ctx context.Context, inv invocation, options []string, files []*walk.File,
 ) (nonzero bool, output string, err error) {
 	if len(files) == 0 {
 		return false, "", nil
@@ -100,21 +96,13 @@ func (l *Linter) run(
 
 	start := time.Now()
 
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-	cmd.Dir = l.workingDir
+	l.log.Debugf("executing: %s %v", inv.raw, args)
 
-	l.log.Debugf("executing: %s", cmd.String())
-
-	out, runErr := cmd.CombinedOutput()
-	if runErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			// a non-zero exit means findings, not an operational failure
-			return true, string(out), nil
-		}
-
-		return false, string(out), fmt.Errorf("linter '%s' failed to execute: %w", l.name, runErr)
+	// inv.run maps a non-zero exit to nonzero=true (findings) and reserves err
+	// for an operational failure (RFC 0001 §4).
+	nonzero, output, err = inv.run(ctx, l.workingDir, args)
+	if err != nil {
+		return false, output, err
 	}
 
 	if l.passesFiles {
@@ -123,7 +111,7 @@ func (l *Linter) run(
 		l.log.Infof("whole-tree check completed in %v", time.Since(start))
 	}
 
-	return false, string(out), nil
+	return nonzero, output, nil
 }
 
 // newLinter creates a Linter, resolving its check (and optional repair)
@@ -141,20 +129,18 @@ func newLinter(name, treeRoot string, env expand.Environ, cfg *config.Linter) (*
 		passesFiles: cfg.PassesFiles == nil || *cfg.PassesFiles,
 	}
 
-	executable, err := interp.LookPathDir(treeRoot, env, cfg.Command)
+	var err error
+
+	l.commandInv, err = newInvocation(name, treeRoot, env, cfg.Command)
 	if err != nil {
-		return nil, fmt.Errorf("%w: error looking up '%s'", ErrCommandNotFound, cfg.Command)
+		return nil, fmt.Errorf("%w: %w", ErrCommandNotFound, err)
 	}
 
-	l.executable = executable
-
 	if cfg.RepairCommand != "" {
-		repairExe, err := interp.LookPathDir(treeRoot, env, cfg.RepairCommand)
+		l.repairInv, err = newInvocation(name+" (repair)", treeRoot, env, cfg.RepairCommand)
 		if err != nil {
-			return nil, fmt.Errorf("%w: error looking up repair command '%s'", ErrCommandNotFound, cfg.RepairCommand)
+			return nil, fmt.Errorf("%w: %w", ErrCommandNotFound, err)
 		}
-
-		l.repairExe = repairExe
 	}
 
 	if cfg.Priority > 0 {

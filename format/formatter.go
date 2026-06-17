@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/gobwas/glob"
 	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/interp"
 )
 
 const (
@@ -40,11 +38,11 @@ type Formatter struct {
 	name   string
 	config *config.Formatter
 
-	log             *log.Logger
-	executable      string // path to the executable described by Command
-	checkExecutable string // resolved CheckCommand (empty if none configured)
-	treeRoot        string // the project tree root (working-dir is resolved against it)
-	workingDir      string // the dir the tool runs in: treeRoot, or a subdir (#38)
+	log        *log.Logger
+	commandInv invocation // resolved Command (bare exe or shell line, #38)
+	checkInv   invocation // resolved CheckCommand (zero value if none configured)
+	treeRoot   string     // the project tree root (working-dir is resolved against it)
+	workingDir string     // the dir the tool runs in: treeRoot, or a subdir (#38)
 
 	// internal, compiled versions of Includes and Excludes.
 	includes []glob.Glob
@@ -67,11 +65,6 @@ func (f *Formatter) Priority() int {
 	return f.config.Priority
 }
 
-// Executable returns the path to the executable defined by Command.
-func (f *Formatter) Executable() string {
-	return f.executable
-}
-
 // Hash adds this formatter's config and executable info to the config hash being created.
 func (f *Formatter) Hash(h hash.Hash) error {
 	// including the name helps us to easily detect when formatters have been added/removed
@@ -81,15 +74,11 @@ func (f *Formatter) Hash(h hash.Hash) error {
 	// if priority changes, the outcome of applying a sequence of formatters might be different
 	h.Write([]byte(strconv.Itoa(f.config.Priority)))
 
-	// stat the formatter's executable
-	info, err := os.Lstat(f.executable)
-	if err != nil {
-		return fmt.Errorf("failed to stat formatter executable: %w", err)
+	// fold in the command's identity: a bare executable's size+mod-time (so a
+	// tool upgrade invalidates the cache), or a shell line's text (#38).
+	if err := f.commandInv.signature(h); err != nil {
+		return err
 	}
-
-	// include the executable's size and mod time
-	// if the formatter executable changes (e.g. new version) the outcome of applying the formatter might differ
-	h.Write(fmt.Appendf(nil, "%d %d", info.Size(), info.ModTime().Unix()))
 
 	return nil
 }
@@ -101,40 +90,39 @@ func (f *Formatter) Apply(ctx context.Context, files []*walk.File) error {
 
 	start := time.Now()
 
-	// construct args, starting with config
-	args := f.config.Options
-
 	// exit early if nothing to process
 	if len(files) == 0 {
 		return nil
 	}
 
-	// append paths to the args, relocated when the formatter runs in a subdir
-	// (working-dir, #38); with no working-dir this preserves the historical
-	// TmpPath-or-RelPath argument exactly.
+	// construct args from the configured options, then append the matched file
+	// paths, relocated when the formatter runs in a subdir (working-dir, #38);
+	// with no working-dir this preserves the historical TmpPath-or-RelPath
+	// argument exactly.
+	args := append([]string{}, f.config.Options...)
 	for _, file := range files {
 		args = append(args, relocateFileArg(f.treeRoot, f.workingDir, file.RelPath, file.TmpPath))
 	}
 
-	// execute the command
-	cmd := exec.CommandContext(ctx, f.executable, args...) //nolint:gosec
-	// replace the default Cancel handler installed by CommandContext because it sends SIGKILL (-9).
-	cmd.Cancel = func() error {
-		return cmd.Process.Signal(os.Interrupt)
-	}
-	cmd.Dir = f.workingDir
+	f.log.Debugf("executing: %s %v", f.config.Command, args)
 
-	// log out the command being executed
-	f.log.Debugf("executing: %s", cmd.String())
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		f.log.Errorf("failed to apply with options '%v': %s", f.config.Options, err)
-
+	// a formatter that exits non-zero failed to apply (formatters, unlike
+	// linters, must exit 0); surface its output and fail loudly.
+	nonzero, out, err := f.commandInv.run(ctx, f.workingDir, args)
+	if err != nil || nonzero {
 		if len(out) > 0 {
 			_, _ = fmt.Fprintf(os.Stderr, "\n%s\n", out)
 		}
 
-		return fmt.Errorf("formatter '%s' with options '%v' failed to apply: %w", f.config.Command, f.config.Options, err)
+		if err != nil {
+			f.log.Errorf("failed to apply: %s", err)
+
+			return fmt.Errorf("formatter '%s' failed to apply: %w", f.config.Command, err)
+		}
+
+		f.log.Errorf("formatter '%s' exited non-zero", f.config.Command)
+
+		return fmt.Errorf("formatter '%s' exited non-zero", f.config.Command)
 	}
 
 	f.log.Infof("%v file(s) processed in %v", len(files), time.Since(start))
@@ -176,22 +164,19 @@ func newFormatter(
 	f.treeRoot = treeRoot
 	f.workingDir = resolveToolDir(treeRoot, cfg.WorkingDir)
 
-	// test if the formatter is available
-	executable, err := interp.LookPathDir(treeRoot, env, cfg.Command)
+	// resolve the command: a bare executable (looked up on PATH) or a shell
+	// line run through the interpreter (#38).
+	f.commandInv, err = newInvocation(name, treeRoot, env, cfg.Command)
 	if err != nil {
-		return nil, fmt.Errorf("%w: error looking up '%s'", ErrCommandNotFound, cfg.Command)
+		return nil, fmt.Errorf("%w: %w", ErrCommandNotFound, err)
 	}
-
-	f.executable = executable
 
 	// resolve the optional native check command (RFC 0001 §3)
 	if cfg.CheckCommand != "" {
-		checkExe, err := interp.LookPathDir(treeRoot, env, cfg.CheckCommand)
+		f.checkInv, err = newInvocation(name+" (check)", treeRoot, env, cfg.CheckCommand)
 		if err != nil {
-			return nil, fmt.Errorf("%w: error looking up check command '%s'", ErrCommandNotFound, cfg.CheckCommand)
+			return nil, fmt.Errorf("%w: %w", ErrCommandNotFound, err)
 		}
-
-		f.checkExecutable = checkExe
 	}
 
 	// initialise internal state

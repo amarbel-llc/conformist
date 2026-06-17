@@ -254,6 +254,162 @@ func TestFormatterWorkingDirSandbox(tt *testing.T) {
 	as.Empty(run(""), "without working-dir the arg is src/a.txt (has a slash); the stub is a no-op")
 }
 
+// TestCommandShellDetection pins the bare-command-vs-shell-line routing (#38)
+// through the public API: a single literal word is PATH-resolved at construction
+// (so an unresolved one fails with ErrCommandNotFound), while anything with shell
+// syntax — operators, pipes, assignments, multiple words — is never resolved at
+// construction (it is run through the interpreter, failing only at run time, if
+// at all).
+func TestCommandShellDetection(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	build := func(command string, assert func(error)) {
+		t.Helper()
+
+		statz := stats.New()
+		cfg := &config.Config{
+			TreeRoot:    t.TempDir(),
+			OnUnmatched: "info",
+			FormatterConfigs: map[string]*config.Formatter{
+				"t": {Command: command, Includes: []string{"*"}},
+			},
+		}
+
+		_, err := format.NewCompositeFormatter(cfg, &statz, 1024)
+		assert(err)
+	}
+
+	// A bare, unresolved command is looked up on PATH at construction and fails.
+	build("definitely-not-a-real-binary-xyzzy", func(err error) {
+		as.ErrorIs(err, format.ErrCommandNotFound)
+	})
+
+	// Shell lines are not PATH-resolved at construction, so they build fine even
+	// though `definitely-not-a-real-binary-xyzzy` does not exist.
+	for _, command := range []string{
+		"definitely-not-a-real-binary-xyzzy && true",
+		"definitely-not-a-real-binary-xyzzy | cat",
+		"FOO=1 definitely-not-a-real-binary-xyzzy",
+		"definitely-not-a-real-binary-xyzzy arg1 arg2",
+		"cd sub && definitely-not-a-real-binary-xyzzy",
+	} {
+		build(command, func(err error) {
+			as.NoError(err, "a shell line must not be PATH-resolved at construction: %q", command)
+		})
+	}
+}
+
+// TestLinterShellCommand verifies a linter whose `command` is a shell line (it
+// uses `&&`/`||`, so it runs through the interpreter, not a bare exec) reports a
+// non-zero exit as findings rather than an operational error (conformist#38).
+func TestLinterShellCommand(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	writeFile(t, root, "good.sh", "echo ok\n", 0o644)
+	writeFile(t, root, "bad.sh", "echo BAD\n", 0o644)
+
+	statz := stats.New()
+	cfg := &config.Config{
+		TreeRoot:    root,
+		OnUnmatched: "info",
+		LinterConfigs: map[string]*config.Linter{
+			// shell line: exit 1 (findings) if any passed file ($@) contains BAD.
+			"shell": {Command: `grep -q BAD "$@" && exit 1 || exit 0`, Includes: []string{"*.sh"}},
+		},
+	}
+
+	checker, err := format.NewCompositeChecker(cfg, &statz)
+	as.NoError(err)
+
+	findings, err := checker.Check(context.Background(), []*walk.File{
+		walkFile(t, root, "good.sh"),
+		walkFile(t, root, "bad.sh"),
+	})
+	as.NoError(err, "a non-zero exit from the shell line is findings, not an operational error")
+	as.Len(findings, 1)
+	as.Equal(format.FindingLint, findings[0].Kind)
+}
+
+// TestLinterShellRepairWorkingDir verifies the motivating #38 case: a whole-tree
+// repair-command that is a shell line, run in a subdirectory via working-dir.
+// The repair writes its output only when run from the subdir holding its marker.
+func TestLinterShellRepairWorkingDir(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	writeFile(t, root, "sub/x.go", "package x\n", 0o644)
+	writeFile(t, root, "sub/marker", "", 0o644) // present only under sub/
+
+	passesFiles := false
+	statz := stats.New()
+	cfg := &config.Config{
+		TreeRoot:    root,
+		OnUnmatched: "info",
+		LinterConfigs: map[string]*config.Linter{
+			"gen": {
+				Command: "true", // bare no-op check
+				// shell line (`&&` + redirect): writes out.txt iff marker is in cwd.
+				RepairCommand: `[ -f marker ] && printf gen > out.txt`,
+				Includes:      []string{"sub/*.go"},
+				PassesFiles:   &passesFiles,
+				WorkingDir:    "sub",
+			},
+		},
+	}
+
+	linter, err := format.NewCompositeLinter(cfg, &statz)
+	as.NoError(err)
+
+	as.NoError(linter.Repair(context.Background(), []*walk.File{walkFile(t, root, "sub/x.go")}))
+
+	// the repair ran in sub/ (where marker lives), writing sub/out.txt
+	out, err := os.ReadFile(filepath.Join(root, "sub", "out.txt"))
+	as.NoError(err)
+	as.Equal("gen", string(out))
+
+	// and nothing was written at the tree root
+	_, err = os.Stat(filepath.Join(root, "out.txt"))
+	as.True(os.IsNotExist(err), "the repair must not run at the tree root")
+}
+
+// TestFormatterShellCommand verifies a formatter whose `command` is a shell line
+// (a `for` loop) runs through the interpreter and is checked via the sandbox
+// (conformist#38): the change it would make is reported, the source untouched.
+func TestFormatterShellCommand(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	writeFile(t, root, "a.txt", "hello", 0o644)
+
+	statz := stats.New()
+	cfg := &config.Config{
+		TreeRoot:    root,
+		OnUnmatched: "info",
+		FormatterConfigs: map[string]*config.Formatter{
+			// shell line: append X to each passed file.
+			"shell": {Command: `for f in "$@"; do printf X >> "$f"; done`, Includes: []string{"*.txt"}},
+		},
+	}
+
+	checker, err := format.NewCompositeChecker(cfg, &statz)
+	as.NoError(err)
+
+	findings, err := checker.Check(context.Background(), []*walk.File{walkFile(t, root, "a.txt")})
+	as.NoError(err)
+	as.Len(findings, 1)
+	as.Equal(format.FindingFormat, findings[0].Kind)
+	as.Equal("a.txt", findings[0].Path)
+
+	after, err := os.ReadFile(filepath.Join(root, "a.txt"))
+	as.NoError(err)
+	as.Equal("hello", string(after), "the sandbox check must never write the source")
+}
+
 // TestCompositeCheckerSandbox verifies that a fix-only formatter is checked via
 // the sandbox: a file that would change is reported, and the original is never
 // modified on disk.

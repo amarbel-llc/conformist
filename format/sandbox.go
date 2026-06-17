@@ -3,10 +3,8 @@ package format
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -71,22 +69,15 @@ func (f *Formatter) checkNative(ctx context.Context, files []*walk.File) (nonzer
 			args = append(args, relocateFileArg(f.treeRoot, f.workingDir, file.RelPath, ""))
 		}
 
-		cmd := exec.CommandContext(ctx, f.checkExecutable, args...) //nolint:gosec
-		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-		cmd.Dir = f.workingDir
-
-		out, runErr := cmd.CombinedOutput()
-		combined.Write(out)
+		batchNonzero, out, runErr := f.checkInv.run(ctx, f.workingDir, args)
+		combined.WriteString(out)
 
 		if runErr != nil {
-			var exitErr *exec.ExitError
-			if errors.As(runErr, &exitErr) {
-				nonzero = true
-
-				continue
-			}
-
 			return false, combined.String(), fmt.Errorf("formatter '%s' check command failed: %w", f.name, runErr)
+		}
+
+		if batchNonzero {
+			nonzero = true
 		}
 	}
 
@@ -146,12 +137,15 @@ func (f *Formatter) checkSandbox(ctx context.Context, treeRoot string, files []*
 			args = append(args, relocateFileArg(dir, sandboxToolDir, file.RelPath, ""))
 		}
 
-		cmd := exec.CommandContext(ctx, f.executable, args...) //nolint:gosec
-		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-		cmd.Dir = sandboxToolDir
-
-		if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		nonzero, out, runErr := f.commandInv.run(ctx, sandboxToolDir, args)
+		if runErr != nil {
 			return nil, fmt.Errorf("formatter '%s' failed in sandbox: %w\n%s", f.name, runErr, out)
+		}
+
+		// a fix-only formatter must exit 0; a non-zero exit is an operational
+		// failure, not a "finding" here.
+		if nonzero {
+			return nil, fmt.Errorf("formatter '%s' exited non-zero in sandbox:\n%s", f.name, out)
 		}
 	}
 
