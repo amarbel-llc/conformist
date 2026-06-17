@@ -52,6 +52,30 @@ Enforced by the *flake-outputs* linter (conformist#9), which reads the declared
 inputs from _flake.lock_ and fails when the _outputs_ formal is a closed set
 that omits one.
 
+# GO MODULE LOCK
+
+A repo that builds with *gomod2nix* MUST keep _gomod2nix.toml_ in sync with
+_go.mod_/_go.sum_.
+
+_gomod2nix.toml_ is generated from the Go module graph by the *gomod2nix* CLI
+and pins each dependency's version and source hash for the Nix build. When
+_go.mod_/_go.sum_ change but _gomod2nix.toml_ is not regenerated, the Nix build
+sees a stale dependency set — at best a build failure, at worst a silently
+wrong closure.
+
+Enforced by the *gomod2nix* linter. Its read-only *command* regenerates the
+lock into a scratch directory (*gomod2nix --outdir*) and diffs it against the
+committed _gomod2nix.toml_, failing on any difference; its *repair-command*
+regenerates _gomod2nix.toml_ in place and stages it. Because regeneration needs
+the real module graph (network / module cache) and the repair stages via
+_git_, the linter runs in the impure working-tree lane, not the sandboxed
+formatting check. It gates on _flake.nix_ (a non-excluded tree-root file), since
+_go.mod_/_go.sum_ are in conformist's default *excludes* and so never reach
+per-linter matching.
+
+The *gomod2nix* CLI has no native non-writing check mode; the regenerate-and-
+diff check is a workaround pending amarbel-llc/gomod2nix#14.
+
 # SEE ALSO
 
 *conformist*(7), *conformist.toml*(5)

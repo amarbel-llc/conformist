@@ -174,11 +174,16 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
   `.custom-gcl.yml`), `git-remotes`, `git-default-branch`, `sweatfile`,
-  `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair).
+  `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair), `gomod2nix`
+  (conformist-nix(7) GO MODULE LOCK — gomod2nix.toml in sync with go.mod/go.sum;
+  check regenerates-to-temp + diffs, repair regenerates + `git add`s; impure
+  because regen needs the module graph and repair stages; gates on flake.nix
+  since go.mod/go.sum are default-excluded; native check pending
+  amarbel-llc/gomod2nix#14).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the
   seven `justfile-*`) and `eng-impure.nix` (git-state lane: `git-remotes`,
-  `git-default-branch`, `sweatfile`, `agents-md`). Exposed as
+  `git-default-branch`, `sweatfile`, `agents-md`, `gomod2nix`). Exposed as
   `conformist.lib.presets.{eng,eng-impure}`, so a downstream repo's roster is
   `imports = [ conformist.lib.presets.eng ]`. conformist self-consumes them
   (below), so the presets can't drift from what conformist itself runs.
