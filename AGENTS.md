@@ -25,8 +25,9 @@ Justfile recipes are **paved paths** — prefer them over ad-hoc
 exactly what `spinclass merge-this-session`'s pre-merge hook runs (`just`), so do
 not run `just`/`just lint` again right before merging.
 
-- `just` (= `just default` = `build test verify lint`) — full local CI lane;
-  the merge hook runs the Go test suite (`test`) too.
+- `just` (= `just default` = `validate build test verify lint`) — full local CI
+  lane; the merge hook runs the devshell `validate` gate and the Go test suite
+  (`test`) too.
 - `just build` — `build-gomod2nix` + `build-godyn-graph` + `build-go` +
   `build-nix`.
 - `just build-go` — fast out-of-nix `go build -o build/conformist .` (version
