@@ -1,7 +1,7 @@
 # conformist justfile. Conventions: eng-design_patterns-justfile(7),
 # eng-versioning(7). `default` runs the full local CI lane.
 
-default: build verify lint
+default: build test verify lint
 
 # --- validate (cheap pre-build gate) ---
 
