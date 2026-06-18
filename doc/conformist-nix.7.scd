@@ -70,10 +70,10 @@ regenerates _gomod2nix.toml_ in place and stages it. Because regeneration needs
 the real module graph (network / module cache) and the repair stages via
 _git_, the linter runs in the impure working-tree lane, not the sandboxed
 formatting check. It watches _go.mod_/_go.sum_ directly: those files are in
-conformist's default *excludes* (so no formatter rewrites them) and would
-normally be invisible to linters too, but the linter sets
-*ignore-global-excludes* (see *conformist.toml*(5)) so it can trigger when they
-change.
+conformist's default *excludes* (so no formatter rewrites them), but as a
+whole-tree check (_passes-files = false_; see *conformist.toml*(5)) it is exempt
+from the global *excludes* --- its *includes* are a trigger gate, not an input
+set --- so it still fires when _go.mod_/_go.sum_ change.
 
 The *gomod2nix* CLI has no native non-writing check mode; the regenerate-and-
 diff check is a workaround pending amarbel-llc/gomod2nix#14.

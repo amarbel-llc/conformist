@@ -178,7 +178,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   (conformist-nix(7) GO MODULE LOCK — gomod2nix.toml in sync with go.mod/go.sum;
   check regenerates-to-temp + diffs, repair regenerates + `git add`s; impure
   because regen needs the module graph and repair stages; watches the
-  default-excluded go.mod/go.sum via `ignore-global-excludes` (conformist#44);
+  default-excluded go.mod/go.sum — a whole-tree check (`passes-files=false`) is
+  exempt from the global excludes by design, its includes being a trigger gate
+  (conformist#45, retiring the conformist#44 `ignore-global-excludes` flag);
   native check pending amarbel-llc/gomod2nix#14).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the

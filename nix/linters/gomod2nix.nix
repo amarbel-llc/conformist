@@ -105,16 +105,16 @@ in
       "repair-command" = lib.getExe repair;
       # Watch the real Go module files. go.mod/go.sum are in conformist's GLOBAL
       # excludes (module-options.nix default-excludes them so formatters never
-      # rewrite them), and globally-excluded files are normally dropped before
-      # per-linter matching — so ignore-global-excludes (conformist#44) is what
-      # lets this whole-tree check trigger when go.mod/go.sum change. The matched
-      # files are only a trigger; the script reads the real go.mod itself.
+      # rewrite them). A whole-tree check (passes-files=false) is exempt from the
+      # global excludes by design — its includes are a trigger gate, not an input
+      # set — so it still fires when go.mod/go.sum change (conformist#45, which
+      # retired the conformist#44 ignore-global-excludes flag). The matched files
+      # are only a trigger; the script reads the real go.mod itself.
       includes = [
         "go.mod"
         "go.sum"
         "gomod2nix.toml"
       ];
-      ignore-global-excludes = true;
       passes-files = false;
     };
   };

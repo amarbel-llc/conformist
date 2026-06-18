@@ -158,8 +158,8 @@ formatter name; the two are independent tools.
 | `excludes` | array of string | MAY | Glob patterns removing files from this linter. |
 | `priority` | integer | MAY | Execution order within a file's tool sequence; lower runs first. Default `0`. |
 | `no-positional-arg-support` | boolean | MAY | If `true`, the tool MUST be invoked with at most one file at a time. |
-| `passes-files` | boolean | MAY | Default `true`. If `false`, the linter is a **whole-tree check**: it is invoked once with no file arguments. See below. |
-| `ignore-global-excludes` | boolean | MAY | Default `false`. If `true`, the linter is matched against files in the top-level `excludes` list (its own `includes`/`excludes` still apply). See below. |
+| `passes-files` | boolean | MAY | Default `true`. If `false`, the linter is a **whole-tree check**: it is invoked once with no file arguments, and its `includes` are matched against the top-level `excludes` list (a trigger gate, not a rewrite target). See below. |
+| ~~`ignore-global-excludes`~~ | boolean | — | **Removed (conformist#45).** Superseded by `passes-files`: a whole-tree check (`passes-files = false`) bypasses the global excludes intrinsically. The key is no longer a recognized field; a config that still sets it is silently ignored (unknown keys are dropped on load), so it is harmless but inert. See below. |
 | `repair-command` | string | MAY | An autofix action used in repair mode — a bare executable or a shell line (see Command forms). See below. |
 | `repair-options` | array of string | MAY | Arguments for `repair-command`. |
 | `working-dir` | string | MAY | Subdirectory (relative to the tree root) to run the check/repair in. See Command forms. |
@@ -189,15 +189,37 @@ like a per-file linter. (Whole-tree checks are not yet incrementally cached — 
 run on every `check` invocation; see the follow-up tracked separately.)
 
 The top-level `excludes` list expresses a **formatter** concern — "no tool may
-rewrite these files" (e.g. lockfiles, `go.mod`). conformist MUST drop a
-globally-excluded file before formatter matching, and by default before linter
-matching too. But a linter MAY set `ignore-global-excludes = true` to opt out of
-the global excludes, so it can *watch* a file that formatters are forbidden to
-rewrite — e.g. a whole-tree drift check that triggers on `go.mod`. With the flag
-set, conformist MUST still offer a globally-excluded file to the linter's own
-`includes`/`excludes`; without it (the default), a globally-excluded file remains
-invisible to the linter. The flag has no meaning for formatters, whose contract is
-precisely to honor "don't rewrite".
+rewrite these files" (e.g. lockfiles, `go.mod`). For a **per-file** linter
+(`passes-files = true`), that concern carries over directly: conformist MUST drop a
+globally-excluded file before matching it to formatters AND to per-file linters,
+because a per-file linter receives the matched file as input and a "don't rewrite"
+file is equally a "don't inspect the contents of" file (e.g. a spell-checker with
+`includes = ["*"]` must not be fed `*.lock` or `LICENSE`).
+
+A **whole-tree check** (`passes-files = false`) is different in kind: its
+`includes` are a *trigger gate*, not an input set — the matched files are never
+passed to the command (it reads what it wants itself; see above). conformist MUST
+therefore match a whole-tree check's `includes` against globally-excluded files,
+so such a check can *watch* a file that formatters are forbidden to rewrite — e.g.
+a drift gate that triggers on `go.mod`. The "don't rewrite" intent is irrelevant
+to a tool that is not being handed the file to rewrite. A globally-excluded file
+that only a whole-tree check matched does not count as "unmatched".
+
+Rationale (conformist#45): an earlier revision gated this on a per-linter
+`ignore-global-excludes` flag (conformist#44). That flag is now redundant — the
+only intent it ever expressed is "this is a watch trigger, not a rewrite target,"
+which is exactly what `passes-files = false` already declares. Keying the
+exclude-bypass off `passes-files` removes a confusing double-negative bool and the
+author burden of knowing a watched file is globally excluded and remembering to
+flip the flag. The flag is removed rather than kept as a deprecated field;
+because conformist ignores unknown config keys on load, an old config that still
+sets `ignore-global-excludes` parses cleanly with the key dropped — harmless but
+inert. A per-file linter that wishes to watch a globally-excluded file
+(receive it as input despite the formatter exclude) is intentionally NOT supported
+— no such linter exists, and a per-file linter's input set SHOULD honor the
+"don't rewrite/inspect" excludes; a tool needing this should be modelled as a
+whole-tree check. The global `excludes` list has no meaning for formatters beyond
+"don't rewrite", whose contract is precisely that.
 
 In repair mode, conformist determines a linter's repair action as follows:
 

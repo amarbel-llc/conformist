@@ -36,13 +36,14 @@ func (c *CompositeLinter) Repair(ctx context.Context, files []*walk.File) error 
 	linterFiles := map[*Linter][]*walk.File{}
 
 	for _, file := range files {
-		// A globally-excluded file is still offered to linters that opt out of
-		// global excludes via ignore-global-excludes (conformist#44); others
-		// skip it as before.
+		// A globally-excluded file is offered only to whole-tree checks
+		// (passes-files=false), whose includes are a trigger gate rather than an
+		// input set; per-file linters skip it, mirroring the formatter "don't
+		// rewrite" intent (conformist#45, retiring the conformist#44 flag).
 		globallyExcluded := pathMatches(file.RelPath, c.globalExcludes)
 
 		for _, l := range c.linters {
-			if globallyExcluded && !l.IgnoresGlobalExcludes() {
+			if globallyExcluded && l.passesFiles {
 				continue
 			}
 

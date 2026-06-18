@@ -40,12 +40,6 @@ func (l *Linter) hasNoPositionalArgSupport() bool {
 	return l.config.NoPositionalArgSupport != nil && *l.config.NoPositionalArgSupport
 }
 
-// IgnoresGlobalExcludes reports whether this linter opts out of the global
-// excludes list, so it can watch a file formatters may not rewrite (conformist#44).
-func (l *Linter) IgnoresGlobalExcludes() bool {
-	return l.config.IgnoreGlobalExcludes != nil && *l.config.IgnoreGlobalExcludes
-}
-
 // Wants reports whether this linter should inspect the given file, per its
 // includes/excludes globs.
 func (l *Linter) Wants(file *walk.File) bool {

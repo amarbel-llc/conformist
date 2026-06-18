@@ -73,8 +73,13 @@ func (c *CompositeChecker) Check(ctx context.Context, files []*walk.File) ([]Fin
 
 	for _, file := range files {
 		// A globally-excluded file is kept from formatters (the "don't rewrite"
-		// intent), but still offered to linters that opt out of global excludes
-		// via ignore-global-excludes (the "watch" intent — conformist#44).
+		// intent) and from per-file linters (which receive the file as input, so
+		// "don't rewrite" is equally "don't inspect the contents of"). A
+		// whole-tree check (passes-files=false) is exempt: its includes are a
+		// trigger gate, not an input set — the matched file is never passed to
+		// it — so the "don't rewrite" intent is irrelevant and it may watch a
+		// globally-excluded file like go.mod (conformist#45, retiring the
+		// conformist#44 ignore-global-excludes flag).
 		globallyExcluded := pathMatches(file.RelPath, c.globalExcludes)
 
 		matched := false
@@ -89,7 +94,7 @@ func (c *CompositeChecker) Check(ctx context.Context, files []*walk.File) ([]Fin
 		}
 
 		for _, l := range c.linters {
-			if globallyExcluded && !l.IgnoresGlobalExcludes() {
+			if globallyExcluded && l.passesFiles {
 				continue
 			}
 

@@ -83,11 +83,10 @@ func TestLinterConfig(tt *testing.T) {
 				RepairOptions: []string{"check", "--fix"},
 			},
 			"drift": {
-				Command:              "dagnabit",
-				Options:              []string{"export", "--check"},
-				Includes:             []string{"libs/**"},
-				PassesFiles:          ptr(false),
-				IgnoreGlobalExcludes: ptr(true),
+				Command:     "dagnabit",
+				Options:     []string{"export", "--check"},
+				Includes:    []string{"libs/**"},
+				PassesFiles: ptr(false),
 			},
 		},
 	}
@@ -109,18 +108,14 @@ func TestLinterConfig(tt *testing.T) {
 	as.Equal([]string{"check", "--fix"}, ruff.RepairOptions)
 
 	// a whole-tree check round-trips passes-files=false; the per-file linters
-	// leave it unset (nil => defaults to true).
+	// leave it unset (nil => defaults to true). passes-files also governs the
+	// global-excludes interaction now (conformist#45), so there is no separate
+	// ignore-global-excludes field to round-trip.
 	drift := decoded.LinterConfigs["drift"]
 	as.NotNil(drift)
 	as.NotNil(drift.PassesFiles)
 	as.False(*drift.PassesFiles)
 	as.Nil(sc.PassesFiles)
-
-	// ignore-global-excludes round-trips for the opt-in linter; others leave it
-	// unset (nil => defaults to false / honors global excludes — conformist#44).
-	as.NotNil(drift.IgnoreGlobalExcludes)
-	as.True(*drift.IgnoreGlobalExcludes)
-	as.Nil(sc.IgnoreGlobalExcludes)
 }
 
 func ptr[T any](v T) *T { return &v }
