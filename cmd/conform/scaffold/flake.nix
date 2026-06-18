@@ -52,9 +52,21 @@
         checks.formatting = eval.config.build.check self;
         packages.conformist-impure-config = impureEval.config.build.configFile;
 
+        # A git pre-commit hook running THIS repo's config (conformist#47/#51):
+        # `conformist --staged --exit-zero-on-fix` wrapped with the generated
+        # store-path config, so it formats staged files with the SAME pinned
+        # toolchain as `nix fmt` — no reliance on the formatters being on the
+        # author's PATH (the silent-skip trap of a bare `conformist --staged`).
+        # It is on the devShell PATH as `conformist-pre-commit`; wire the
+        # sweatfile hook to that name (see ./sweatfile).
+        packages.conformist-pre-commit = eval.config.build.preCommit;
+
         devShells.default = pkgs.mkShell {
           packages = [
             conformistPkg
+            # The config-specific, toolchain-hermetic pre-commit hook, on PATH
+            # as `conformist-pre-commit` so the sweatfile can name it.
+            eval.config.build.preCommit
             pkgs.just
           ];
         };

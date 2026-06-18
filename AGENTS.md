@@ -282,9 +282,16 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
 - `templates.eng` (`templates/eng/`) — `nix flake init -t
   github:amarbel-llc/conformist#eng` scaffolds an adopter repo wired to the eng
   preset (flake.nix + conformist.nix + a conformist-justfile(7)-conformant
-  justfile + version.env + .envrc). `templates/**` is excluded from conformist's
-  own self-lint (consumer-facing scaffold, e.g. a direnv `.envrc` has no
-  shebang); the `explore-template-eng` recipe smoke-tests instantiation.
+  justfile + version.env + .envrc + a sweatfile wiring the config-specific
+  `conformist-pre-commit` hook — conformist#47/#51). The flake's
+  `build.preCommit` is exposed both as `packages.conformist-pre-commit` and on
+  the devShell PATH, so the sweatfile's `pre-commit = "conformist-pre-commit"`
+  resolves to the toolchain-hermetic hook rather than a bare `conformist
+  --staged` (which silently skips file types whose formatter isn't on PATH).
+  `cmd/conform`'s scaffold ships the same flake.nix/justfile/sweatfile
+  byte-identically (a drift test guards it). `templates/**` is excluded from
+  conformist's own self-lint (consumer-facing scaffold, e.g. a direnv `.envrc`
+  has no shebang); the `explore-template-eng` recipe smoke-tests instantiation.
   Downstream consumers MUST set `conformist.package` — conformist is not in
   nixpkgs, so the module's `package` option has no default.
 

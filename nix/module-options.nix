@@ -280,6 +280,19 @@ in
           its installed name — it is placed on the devShell PATH as
           `conformist-pre-commit` — e.g. `pre-commit = "conformist-pre-commit"`.
 
+          A consumer MUST get this hook from its OWN module eval
+          (`<its-eval>.config.build.preCommit`), NOT from a bare
+          `pre-commit = "conformist --staged --exit-zero-on-fix"` string and NOT
+          from conformist's own `packages.conformist-pre-commit` (which is built
+          from conformist's config, runs conformist's formatters on the
+          consumer's tree, and is not config-specific). The bare-string form is
+          the silent-skip trap of conformist#51: it resolves formatters from
+          PATH, so if the author's shell lacks gofumpt/nixfmt/… the staged repair
+          quietly skips those file types. This wrapper avoids that because its
+          formatter commands are store paths from the consumer's own generated
+          config. The `#eng` template wires this output + a sweatfile example
+          (templates/eng/) as the reference consumer path.
+
           Like build.wrapper it locates the live worktree via
           `--tree-root-file=${config.projectRootFile}` (NOT a store --tree-root):
           the hook runs in the author's checkout at commit time, where `--staged`

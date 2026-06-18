@@ -1,8 +1,8 @@
 // Package conform scaffolds a repo into the amarbel-llc conformist shape. It
-// writes every shape file that is absent — conformist.nix, version.env, and (for
-// a greenfield repo) a complete flake.nix and justfile — and never edits a file
-// that already exists. When flake.nix or justfile is already present, conform
-// leaves it untouched and instead prints the wiring to paste, because
+// writes every shape file that is absent — conformist.nix, version.env, sweatfile,
+// and (for a greenfield repo) a complete flake.nix and justfile — and never edits
+// a file that already exists. When flake.nix or justfile is already present,
+// conform leaves it untouched and instead prints the wiring to paste, because
 // auto-rewriting an arbitrary flake.nix is fragile.
 package conform
 
@@ -25,6 +25,9 @@ var flakeNix []byte
 
 //go:embed scaffold/justfile
 var justfile []byte
+
+//go:embed scaffold/sweatfile
+var sweatfile []byte
 
 //go:embed scaffold/flake-snippet.txt
 var flakeSnippet string
@@ -53,6 +56,7 @@ type scaffold struct {
 var scaffolds = []scaffold{
 	{name: "conformist.nix", content: conformistNix},
 	{name: "version.env", content: versionEnv},
+	{name: "sweatfile", content: sweatfile},
 	{name: "flake.nix", content: flakeNix, reportSnippet: flakeSnippet},
 	{name: "justfile", content: justfile, reportSnippet: recipesJust},
 }

@@ -1,0 +1,24 @@
+# vim: ft=toml
+#
+# spinclass sweatfile for a conformist-adopting repo (the #eng template).
+
+[hooks]
+# Pre-merge gate: `just` runs this repo's default recipe (the CI-equivalent
+# lane — build + the conformance checks). See eng-design_patterns-justfile(7).
+pre-merge = "just"
+
+# Per-commit repair (conformist#47/#51): format the index-staged content at
+# authoring time so every commit is conformant. This names `conformist-pre-commit`
+# — the CONFIG-SPECIFIC, TOOLCHAIN-HERMETIC hook this template exposes from
+# `eval.config.build.preCommit` (flake.nix), placed on the devShell PATH under
+# that name. It wraps `conformist --staged --exit-zero-on-fix` with this repo's
+# generated store-path config, so the staged repair formats *.nix/*.go/etc. with
+# the SAME pinned formatters as `nix fmt`.
+#
+# Do NOT use a bare `pre-commit = "conformist --staged --exit-zero-on-fix"` here:
+# that resolves formatters from PATH, and if your shell lacks gofumpt/nixfmt/…
+# the staged repair SILENTLY SKIPS those file types (conformist#51). The
+# `conformist-pre-commit` wrapper avoids that — its tools are store-pinned.
+#
+# Requires the devShell active (direnv) so `conformist-pre-commit` is on PATH.
+pre-commit = "conformist-pre-commit"

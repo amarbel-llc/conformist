@@ -11,7 +11,7 @@ import (
 )
 
 // allScaffolds is every file conform writes into a greenfield repo.
-var allScaffolds = []string{"conformist.nix", "version.env", "flake.nix", "justfile"}
+var allScaffolds = []string{"conformist.nix", "version.env", "sweatfile", "flake.nix", "justfile"}
 
 // TestRunScaffoldsGreenfield verifies conform writes the full eng shape —
 // including complete, buildable flake.nix and justfile — into an empty dir, and
@@ -81,7 +81,7 @@ func TestRunReportsExistingFlakeAndJustfile(t *testing.T) {
 	res, err := conform.Run(dir, &out)
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, []string{"conformist.nix", "version.env"}, res.Wrote)
+	require.ElementsMatch(t, []string{"conformist.nix", "version.env", "sweatfile"}, res.Wrote)
 	require.ElementsMatch(t, []string{"flake.nix", "justfile"}, res.Skipped)
 
 	gotFlake, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
@@ -111,7 +111,7 @@ func TestRunPreservesExistingFiles(t *testing.T) {
 	res, err := conform.Run(dir, &bytes.Buffer{})
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, []string{"version.env", "flake.nix", "justfile"}, res.Wrote)
+	require.ElementsMatch(t, []string{"version.env", "sweatfile", "flake.nix", "justfile"}, res.Wrote)
 	require.Equal(t, []string{"conformist.nix"}, res.Skipped)
 
 	got, err := os.ReadFile(existing)
@@ -124,7 +124,7 @@ func TestRunPreservesExistingFiles(t *testing.T) {
 // template files (templates/eng), so `conformist conform` and
 // `nix flake init -t …#eng` produce the same eng shape.
 func TestScaffoldFlakeAndJustfileMatchTemplate(t *testing.T) {
-	for _, name := range []string{"flake.nix", "justfile"} {
+	for _, name := range []string{"flake.nix", "justfile", "sweatfile"} {
 		embedded, err := os.ReadFile(filepath.Join("scaffold", name))
 		require.NoError(t, err, "read embedded scaffold/%s", name)
 
