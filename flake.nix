@@ -286,6 +286,13 @@
           # The generated config for the impure (git-state) self-checks, consumed
           # by `just check-worktree`.
           conformist-impure-config = conformistImpureEval.config.build.configFile;
+          # conformist's own store-pinned pre-commit hook (issue #47):
+          # `conformist --staged --exit-zero-on-fix` wrapped with the generated
+          # config. Exposing it here dogfoods build.preCommit — `nix build
+          # .#conformist-pre-commit` forces the new module output to build, and
+          # it is on the devShell PATH as `conformist-pre-commit` for use as the
+          # hook command.
+          conformist-pre-commit = conformistEval.config.build.preCommit;
           # The custom golangci-lint carrying dewey's analyzers, re-exported from
           # purse-first (#134) so `just lint-go` builds it via `.#golangci-lint-dewey`
           # (binary: bin/golangci-lint-dewey). conformist#10.

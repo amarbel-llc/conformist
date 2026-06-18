@@ -1,5 +1,9 @@
-# The conformist settings schema plus the build.{configFile,wrapper,check,programs}
-# outputs. Ported from treefmt-nix's module-options.nix with these adaptations
+# The conformist settings schema plus the
+# build.{configFile,wrapper,preCommit,check,programs} outputs. preCommit is a
+# conformist addition (issue #47): a store-pinned `conformist --staged
+# --exit-zero-on-fix` hook command, so a consumer can drive a git pre-commit
+# hook from the module instead of a hand-written PATH-relative config.
+# Ported from treefmt-nix's module-options.nix with these adaptations
 # (see nix/default.nix and issue #4 for rationale):
 #   - the wrapped/checked binary is `conformist`, not `treefmt`;
 #   - `package` has NO default (conformist is not in nixpkgs) — the consumer MUST
@@ -259,6 +263,56 @@ in
             meta = config.package.meta // prev.meta;
           });
       };
+      preCommit = mkOption {
+        description = ''
+          A git pre-commit hook command: the conformist package wrapped with the
+          generated config file, run as `conformist --staged --exit-zero-on-fix`.
+          It formats only the index-staged files and restages the formatted
+          content (lint-staged semantics, conformist#25/#40), creating no commit,
+          and exits 0 even when it applied fixes so a `nonzero = abort` hook
+          treats a successful repair as success (conformist#35/#39).
+
+          This is the supported way to drive a pre-commit hook FROM the module
+          (conformist#47): the config (and therefore every formatter/linter's
+          command) is pinned to the store at build time and rebuilds when inputs
+          change, so the hook needs no hand-written, PATH-relative
+          `conformist.toml`. Wire it into a sweatfile (or other hook runner) by
+          its installed name — it is placed on the devShell PATH as
+          `conformist-pre-commit` — e.g. `pre-commit = "conformist-pre-commit"`.
+
+          Like build.wrapper it locates the live worktree via
+          `--tree-root-file=${config.projectRootFile}` (NOT a store --tree-root):
+          the hook runs in the author's checkout at commit time, where `--staged`
+          needs the real git worktree. The store config is a read-only input;
+          --staged only writes to the index/worktree of that checkout.
+
+          Caveat: a linter whose command shells out to an AMBIENT tool (e.g. a
+          `go vet ./...` linter needs `go` on PATH) still depends on the dev
+          environment at commit time — the store-pinned config makes conformist
+          and its directly-named tools hermetic, but it cannot supply a tool the
+          linter itself execs by bare name. Such linters behave exactly as they
+          do under a hand-written config.
+        '';
+        type = types.package;
+        defaultText = lib.literalMD "conformist pre-commit hook command";
+        default =
+          let
+            code = ''
+              set -euo pipefail
+              unset PRJ_ROOT
+              exec ${config.package}/bin/conformist \
+                --staged \
+                --exit-zero-on-fix \
+                --config-file=${config.build.configFile} \
+                --tree-root-file=${config.projectRootFile} \
+                "$@"
+            '';
+            x = pkgs.writeShellScriptBin "conformist-pre-commit" code;
+          in
+          x.overrideAttrs (prev: {
+            meta = config.package.meta // prev.meta;
+          });
+      };
       programs = mkOption {
         type = types.attrsOf types.package;
         description = ''
@@ -316,7 +370,11 @@ in
   config.build = {
     inherit configFile;
     devShell = pkgs.mkShell {
-      nativeBuildInputs = [ config.build.wrapper ] ++ (lib.attrValues config.build.programs);
+      nativeBuildInputs = [
+        config.build.wrapper
+        config.build.preCommit
+      ]
+      ++ (lib.attrValues config.build.programs);
     };
   };
 }

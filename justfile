@@ -84,6 +84,18 @@ build-nix:
 run-nix *ARGS:
     nix run . -- {{ ARGS }}
 
+# Build conformist's own store-pinned pre-commit hook (build.preCommit, #47) and
+# run it against the currently-staged files, exactly as a sweatfile
+# `pre-commit = "conformist-pre-commit"` would. Verifies the new module output
+# end-to-end (`conformist --staged --exit-zero-on-fix` with the store config);
+# stage some files first. Manual dogfood loop, not in any aggregate / the CI lane.
+[group("explore")]
+explore-pre-commit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hook=$(nix build --no-link --print-out-paths '.#conformist-pre-commit')
+    "$hook/bin/conformist-pre-commit"
+
 # Build conformist's own generated conformist.toml via self.lib.evalModule and
 # cat it, to inspect the emitted [formatter.*] / [linter.*] stanzas. Verifies the
 # Nix module's config generation (issue #4) without a full check run.
