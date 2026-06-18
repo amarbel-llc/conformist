@@ -47,6 +47,17 @@ in
       '';
     };
 
+    caseIndent = lib.mkOption {
+      type = lib.types.bool;
+      default = !cfg.useEditorConfig;
+      description = ''
+        Enables the `-ci` (`--case-indent`) flag, which indents `case` branches
+        under their pattern. Defaults on (off only in `useEditorConfig` mode):
+        the indented form is the eng house style (conformist#52). Set to false
+        to keep `case` branches at the `case` keyword's indentation.
+      '';
+    };
+
     useEditorConfig = lib.mkEnableOption ''
       Use .editorconfig file for
       formatting. This is mutually exlusive with all other settings. See [shfmt
@@ -62,7 +73,8 @@ in
             "-i"
             (toString cfg.indent_size)
           ])
-          ++ (lib.optionals (cfg.simplify) [ "-s" ]);
+          ++ (lib.optionals (cfg.simplify) [ "-s" ])
+          ++ (lib.optionals (cfg.caseIndent) [ "-ci" ]);
       in
       assert cfg.useEditorConfig -> builtins.length options == 0;
       options;
