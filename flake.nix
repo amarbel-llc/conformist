@@ -23,21 +23,14 @@
 
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
 
-    # Source of the custom golangci-lint built with dewey's gclplugin
-    # (purse-first#134): `packages.<system>.golangci-lint-dewey`, a complete
-    # golangci-lint v2.12.2 with the `dewey` module-plugin analyzers registered.
-    # conformist consumes it for the dewey lint lane (conformist#10).
-    purse-first.url = "github:amarbel-llc/purse-first";
-    # Mirror eng's follows on purse-first (igloo/nixpkgs-master/utils) so the
-    # standalone lock matches the build-home closure and the duplicate
-    # igloo/nixpkgs-master/utils subtree collapses to single nodes. Note
-    # purse-first still consumes igloo via the follows-immune
-    # `import igloo {}` shim (igloo#37), so the igloo follows redirects which
-    # igloo *tree* it builds with (whose committed lock pins the nixpkgs
-    # sha), not the sha directly.
-    purse-first.inputs.igloo.follows = "igloo";
-    purse-first.inputs.nixpkgs-master.follows = "nixpkgs-master";
-    purse-first.inputs.utils.follows = "utils";
+    # NOTE: conformist deliberately does NOT take purse-first as a flake input.
+    # conformist must be strictly UPSTREAM of purse-first (no cycle), but it
+    # still dogfoods purse-first's dewey golangci-lint plugin on its own Go
+    # (conformist#10). It consumes that as a fixed-output source fetch
+    # (golangciLintDeweySrc in outputs, pinned by rev + hash) and builds the
+    # golangci-lint-dewey binary itself — an FOD leaf that pins source by commit
+    # and pulls NO flake graph, so purse-first can import conformist without
+    # closing a loop. See conformist#45 coordination / the upstream-flip plan.
   };
 
   outputs =
@@ -46,7 +39,6 @@
       igloo,
       nixpkgs-master,
       utils,
-      purse-first,
     }:
     let
       # conformist's own Nix module library (issue #4). Exposed as `self.lib` so
@@ -81,6 +73,49 @@
         # package is buildable on the current system. Re-promotion is a future
         # session, pending igloo#33 (per-system graphs) + dropping the JSON.
         godynSystem = system == "x86_64-linux";
+
+        # The dewey golangci-lint plugin, consumed WITHOUT a flake input so
+        # conformist stays upstream of purse-first (conformist#10 / the
+        # upstream-flip plan). golangciLintDeweySrc is a fixed-output source
+        # fetch — it pins purse-first by commit + hash and pulls no flake graph,
+        # so there is no conformist->purse-first edge and purse-first may import
+        # conformist without a cycle. Bump rev+hash deliberately to track the
+        # plugin; re-prefetch with `nix-prefetch-github amarbel-llc purse-first
+        # --rev <sha>`.
+        golangciLintDeweySrc = pkgs.fetchFromGitHub {
+          owner = "amarbel-llc";
+          repo = "purse-first";
+          rev = "00c193ed49b477fdf6c23450c35256c2251e3b72";
+          hash = "sha256-5XL6TDTVUmVGj177DTtTUCDZoaLp/xGdv4b5oA/iM5c=";
+        };
+
+        # Build golangci-lint-dewey from the fetched source with the SAME recipe
+        # purse-first uses (gomod.nix), minus the commit/date/version -X ldflags:
+        # dropping them keeps this output reproducible across purse-first commits
+        # (the upstream build stamps -X main.commit/date, which would churn the
+        # hash). cmd/golangci-lint-dewey is a standalone module (own
+        # gomod2nix.toml, GOWORK=off) whose only purse-first coupling is
+        # `replace => ../../libs/dewey`, satisfied by the whole-repo fetch.
+        golangciLintDeweyDir = "cmd/golangci-lint-dewey";
+        golangciLintDewey = pkgs.buildGoApplication {
+          pname = "golangci-lint-dewey";
+          version = "dewey";
+          go = pkgs.go;
+          src = golangciLintDeweySrc;
+          pwd = golangciLintDeweySrc + "/${golangciLintDeweyDir}";
+          modRoot = golangciLintDeweyDir;
+          modules = golangciLintDeweySrc + "/${golangciLintDeweyDir}/gomod2nix.toml";
+          subPackages = [ "." ];
+          GOWORK = "off";
+          ldflags = [
+            "-s"
+            "-w"
+          ];
+          meta = {
+            description = "golangci-lint with the dewey module plugin linked in (built from pinned purse-first source)";
+            mainProgram = "golangci-lint-dewey";
+          };
+        };
 
         # bga (buildGoApplication) build — the ca-derivations-free backend behind
         # `.#conformist-bga` and the DEFAULT on every system (godynSystem above;
@@ -293,10 +328,13 @@
           # it is on the devShell PATH as `conformist-pre-commit` for use as the
           # hook command.
           conformist-pre-commit = conformistEval.config.build.preCommit;
-          # The custom golangci-lint carrying dewey's analyzers, re-exported from
-          # purse-first (#134) so `just lint-go` builds it via `.#golangci-lint-dewey`
-          # (binary: bin/golangci-lint-dewey). conformist#10.
-          golangci-lint-dewey = purse-first.packages.${system}.golangci-lint-dewey;
+          # The custom golangci-lint carrying dewey's analyzers, built locally
+          # from pinned purse-first source (golangciLintDewey above) so `just
+          # lint-go` builds it via `.#golangci-lint-dewey` (binary:
+          # bin/golangci-lint-dewey). No longer re-exported from a purse-first
+          # flake input — that edge was removed to keep conformist upstream of
+          # purse-first (conformist#10 / upstream-flip).
+          golangci-lint-dewey = golangciLintDewey;
         };
 
         # `nix fmt` writes (repair mode); `checks.formatting` is the sandboxed

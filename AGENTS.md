@@ -45,9 +45,10 @@ not run `just`/`just lint` again right before merging.
   fails if the working tree is mutated during the run.
 - `just lint` — `lint-fmt` (sandboxed `checks.formatting`, file-based linters) +
   `lint-worktree` (impure git-state linters against the working tree, where
-  `.git` is available) + `lint-go` (golangci-lint via the purse-first custom
-  build carrying the dewey analyzers; `.golangci.yaml` is `default: all` minus a
-  curated disable list, plus the `dewey` custom linter — conformist#10/#22).
+  `.git` is available) + `lint-go` (golangci-lint carrying the dewey analyzers,
+  built locally from a pinned purse-first source fetch — see the flake inputs
+  note below; `.golangci.yaml` is `default: all` minus a curated disable list,
+  plus the `dewey` custom linter — conformist#10/#22).
 - `just codemod-fmt` — `nix fmt` (write/repair mode on conformist's own tree).
 - `just build-gomod2nix` — regenerate `gomod2nix.toml`; run after changing deps.
 - `just update-go` — `go mod tidy` then regenerate gomod2nix.
@@ -216,16 +217,21 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   the build-backend bench uses to force cold rebuilds), igloo#29/#28),
   `nixpkgs-master`
   (pinned, source of the devShell Go dev tools `gofumpt`/`golangci-lint`/`gopls`;
-  no longer the `go` source), `utils`, and `purse-first` (source of
-  `packages.<sys>.golangci-lint-dewey`, the custom golangci-lint carrying dewey's
-  analyzers, re-exported as `.#golangci-lint-dewey` for the `lint-go` lane —
-  purse-first#134 / conformist#10). **`nixpkgs-master` is the single sha
-  source**: igloo's `nixpkgs-master` input follows ours — which only works
-  because `pkgs` is `igloo.legacyPackages.<sys>`, NOT the `import igloo {}`
-  shim, which reads igloo's committed flake.lock and is follows-immune
-  (igloo#37) — and purse-first's `igloo`/`nixpkgs-master`/`utils` follow ours
-  too, mirroring eng's follows so the standalone lock matches the build-home
-  closure with no duplicate igloo/nixpkgs subtree.
+  no longer the `go` source), and `utils`. **conformist deliberately does NOT
+  take `purse-first` as a flake input** — it must stay strictly upstream of
+  purse-first (no cycle). It still dogfoods purse-first's dewey golangci-lint
+  plugin on its own Go (`.#golangci-lint-dewey`, the `lint-go` lane —
+  purse-first#134 / conformist#10), but consumes it as a **fixed-output source
+  fetch** (`golangciLintDeweySrc`: `fetchFromGitHub` pinned by rev + hash) and
+  builds the binary itself via `buildGoApplication` (the recipe ported from
+  purse-first's `gomod.nix`, ldflags trimmed to `-s -w` so the output is
+  reproducible across purse-first commits). An FOD leaf pins source by commit
+  and pulls no flake graph, so purse-first may import conformist without closing
+  a loop; bump the rev+hash deliberately to track the plugin. **`nixpkgs-master`
+  is the single sha source**: igloo's `nixpkgs-master` input follows ours —
+  which only works because `pkgs` is `igloo.legacyPackages.<sys>`, NOT the
+  `import igloo {}` shim, which reads igloo's committed flake.lock and is
+  follows-immune (igloo#37).
 - `packages.{default,conformist}` — on **every** system, the **bga** join: a
   `symlinkJoin` of the `buildGoApplication` binary + its `manpages` (`manpagesBga`).
   Platform-agnostic, ca-derivations-free, no per-system graph. `packages.conformist-bga`
