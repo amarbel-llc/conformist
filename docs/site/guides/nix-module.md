@@ -165,6 +165,42 @@ conformistEval = conformist.lib.evalModule pkgs {
     `writeCheckScript` resolves the shebang for you; if you must hand-roll, run
     `patchShebangs $out/bin` **before** `wrapProgram`.
 
+### A toolchain-hermetic wrapper without the module (pre-commit hooks)
+
+If you keep a **hand-written `conformist.toml`** (rather than generating config
+from this module) but still want a pre-commit hook that doesn't depend on the
+formatter toolchain being on the author's PATH, use
+`conformist.lib.wrapWithToolchain`. It builds a wrapper that execs conformist
+with `tools` on `PATH`, so `nix fmt`, `conformist check`, and the `--staged`
+hook all run with the same pinned formatters:
+
+```nix
+conformistFmt = conformist.lib.wrapWithToolchain pkgs {
+  conformist = conformist.packages.${system}.default;
+  tools = [ pkgs.gotools pkgs.gofumpt pkgs.nixfmt pkgs.shfmt ]; # goimports ships in gotools
+  name = "conformist-fmt";        # wrapper binary name
+  configFile = ./conformist.toml;  # optional; pins --config-file
+};
+# expose it: formatter = conformistFmt; and put it on the devShell PATH.
+```
+
+Then the sweatfile hook just adds the staged flags to the wrapper:
+
+```toml
+[hooks]
+pre-commit = "conformist-fmt --staged --exit-zero-on-fix"
+```
+
+!!! warning "Why the bare hook silently skips files"
+    The canonical `pre-commit = "conformist --staged --exit-zero-on-fix"` runs
+    the **bare** conformist, which resolves each formatter's `command` from
+    `PATH`. If gofumpt/nixfmt/… aren't on the author's PATH at commit time, the
+    staged repair **silently skips** those file types
+    ([conformist#51](https://github.com/amarbel-llc/conformist/issues/51)).
+    Module adopters avoid this with `build.preCommit` (store-pinned commands);
+    a hand-written-config repo uses `wrapWithToolchain` as above. See
+    `eng-design_patterns-conformist(7)` "THE CWD-AWARE WRAPPER".
+
 ## How the wrapper and check resolve the tree root
 
 The two build outputs run conformist in different modes and resolve the tree root

@@ -154,10 +154,14 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   `mkConfigFile` / `mkWrapper`, plus `mkFormatterModule` (ported ~verbatim from
   treefmt-nix, so `programs/<name>.nix` modules port unchanged) and its linter
   analog `mkLinterModule` (emits `[linter.<name>]` with optional
-  `repair-command`/`repair-options`), and `writeCheckScript`
+  `repair-command`/`repair-options`), `writeCheckScript`
   (`nix/write-check-script.nix`) for packaging a local script as a sandbox-safe
-  linter command (`patchShebangs` + wrap, #19). `module-options.nix` declares the
-  settings surface and the `build.{wrapper,check,configFile}` outputs.
+  linter command (`patchShebangs` + wrap, #19), and `wrapWithToolchain`
+  (`nix/wrap-with-toolchain.nix`) for a conformist wrapper carrying its formatter
+  toolchain on PATH — the non-module hermetic `nix fmt`/`--staged` hook for a
+  repo with a hand-written `conformist.toml` (#51). `module-options.nix` declares
+  the settings surface and the `build.{wrapper,preCommit,check,configFile}`
+  outputs.
 - `nix/programs/` + `programs.nix` — the formatter registry.
 - `nix/linters/` + `linters.nix` — the linter registry. Beyond general linters
   (shellcheck, ruff, statix, deadnix, typos, yamllint, …), this holds the

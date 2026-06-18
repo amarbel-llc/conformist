@@ -22,6 +22,14 @@ let
   # sandbox), and optionally wraps a PATH. See ./write-check-script.nix.
   writeCheckScript = import ./write-check-script.nix;
 
+  # A conformist wrapper carrying its formatter/linter toolchain on PATH
+  # (conformist#51). `wrapWithToolchain pkgs { conformist; tools; name ?
+  # "conformist"; configFile ? null }` builds a writeShellApplication that execs
+  # conformist with `tools` on PATH, so a repo with a hand-written
+  # conformist.toml gets a toolchain-hermetic `nix fmt` / `--staged` hook without
+  # adopting the nix module. See ./wrap-with-toolchain.nix.
+  wrapWithToolchain = import ./wrap-with-toolchain.nix;
+
   # mkFormatterModule builds a module that declares `programs.<name>.*` options
   # and, when enabled, emits a `[formatter.<name>]` stanza. Ported verbatim from
   # treefmt-nix so the ~155 programs/<name>.nix modules port unchanged.
@@ -336,6 +344,7 @@ in
     programs
     linters
     writeCheckScript
+    wrapWithToolchain
     all-modules
     submodule-modules
     evalModule

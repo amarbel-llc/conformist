@@ -373,6 +373,44 @@
                 touch $out
               '';
 
+            # Regression for the toolchain wrapper helper (conformist#51): wrap a
+            # STUB conformist (which fails unless a stub formatter is on PATH)
+            # with that formatter as a `tools` entry, then exec the wrapper with a
+            # DELIBERATELY EMPTY ambient PATH. If the helper did not put `tools`
+            # on PATH, the stub formatter would be unresolved and the wrapper
+            # would fail here — so a green build proves the wrapper is
+            # toolchain-hermetic (does not rely on the ambient environment) and
+            # passes "$@" through to conformist.
+            wrap-with-toolchain =
+              let
+                # Stub formatter the wrapped "conformist" requires on PATH.
+                stubTool = pkgs.writeShellScriptBin "stub-formatter" "echo formatted";
+                # Stub conformist: echoes its args (proves pass-through) and
+                # invokes stub-formatter by bare name (proves tools are on PATH).
+                stubConformist = pkgs.writeShellScriptBin "conformist" ''
+                  stub-formatter >/dev/null
+                  echo "conformist-args: $*"
+                '';
+                wrapper = conformistLib.wrapWithToolchain pkgs {
+                  conformist = stubConformist;
+                  tools = [ stubTool ];
+                  name = "conformist-fmt";
+                };
+              in
+              pkgs.runCommand "conformist-wrap-with-toolchain-test" { } ''
+                # Empty ambient PATH: the only way stub-formatter resolves is via
+                # the wrapper's own runtimeInputs.
+                got=$(PATH= ${wrapper}/bin/conformist-fmt --staged --exit-zero-on-fix) || {
+                  echo "wrap-with-toolchain: wrapper failed to exec with empty PATH — toolchain not hermetic (#51)" >&2
+                  exit 1
+                }
+                [ "$got" = "conformist-args: --staged --exit-zero-on-fix" ] || {
+                  echo "wrap-with-toolchain: args not passed through; got '$got'" >&2
+                  exit 1
+                }
+                touch $out
+              '';
+
             # True-positive regression for the eng-versioning deprecated-file rule
             # (conformist#14): run the linter's own command against fixtures and
             # assert it passes a clean tree but FLAGS a `version.txt` and a flake.nix

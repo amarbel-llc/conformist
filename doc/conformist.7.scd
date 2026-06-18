@@ -74,6 +74,21 @@ conformist has two modes of operation.
 	_conformist --staged --exit-zero-on-fix_ proceeds with the commit when the
 	staged content was repaired in place.
 
+	That command runs the *bare* _conformist_ binary, which resolves each
+	formatter's _command_ from PATH. If the formatter toolchain (gofumpt,
+	goimports, nixfmt, …) is not on the author's PATH at commit time, the staged
+	repair *silently skips* those file types. Two supported ways to get a
+	*toolchain-hermetic* hook:
+
+	- *Nix module adopters:* use the _build.preCommit_ output (its formatter
+	  commands are store paths, not bare names). The _#eng_ template wires it as
+	  _conformist-pre-commit_; see *conformist-nix*(7).
+	- *Hand-written conformist.toml:* wrap conformist with its toolchain on PATH
+	  — _conformist.lib.wrapWithToolchain pkgs { conformist; tools; }_ builds a
+	  wrapper whose PATH carries _tools_ — and point the hook at the wrapper,
+	  e.g. _pre-commit = "conformist-fmt --staged --exit-zero-on-fix"_. See
+	  *eng-design_patterns-conformist*(7) "THE CWD-AWARE WRAPPER".
+
 *Check* (read-only)
 	Runs every formatter and linter without writing to the tree, reporting what
 	would change. This is the *conformist check* subcommand. It exits 0 when
@@ -128,4 +143,4 @@ retained; conformist is released under the MIT license.
 # SEE ALSO
 
 *conformist*(1), *conformist.toml*(5), *conformist-nix*(7),
-*conformist-justfile*(7)
+*conformist-justfile*(7), *eng-design_patterns-conformist*(7)
