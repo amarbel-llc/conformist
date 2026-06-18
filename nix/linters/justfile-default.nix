@@ -16,7 +16,8 @@ let
     name = "conformist-justfile-default";
     runtimeInputs = with pkgs; [
       coreutils
-      gawk
+      jq
+      just
     ];
     text = ''
       [ -f justfile ] || {
@@ -24,41 +25,55 @@ let
         exit 1
       }
 
-      # The first recipe = first column-0 line that is a recipe (not a comment,
-      # blank, [attribute], or `name :=` assignment) and contains a `:`.
-      first=$(awk '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        /^\[/ { next }
-        /^[A-Za-z_]/ {
-          if ($0 ~ /:=/) next
-          if ($0 !~ /:/) next
-          n = $0
-          sub(/[[:space:]:].*/, "", n)
-          print n
-          exit
-        }
-      ' justfile)
+      # Read the parsed recipe model from just itself rather than sniffing raw
+      # text. `.first` is just's own first-recipe-in-file; a recipe is an
+      # aggregate iff its `.body` is empty. The earlier awk heuristic decided
+      # "has a body" by checking whether the NEXT PHYSICAL LINE after a dep's
+      # definition was indented, which misread a backslash-continued aggregate
+      # (`foo: \` then an indented continuation line) as a body and
+      # false-positived (conformist#51, reported by purse-first). just's parser
+      # handles line continuations correctly — same plumbing as
+      # justfile-task-hierarchy.
+      #
+      # jq emits one tagged finding per problem (FIRST:<name> for a wrong first
+      # recipe, DEP:<name> for a non-aggregate dependency) or nothing when clean.
+      # $root is a jq binding, not a shell var — keep it literal in the
+      # single-quoted program.
+      # shellcheck disable=SC2016
+      filter='. as $root
+        | if $root.first != "default" then
+            "FIRST:\($root.first // "<none>")"
+          else
+            ($root.recipes.default.dependencies // [])
+            | map(.recipe)[]
+            | . as $dep
+            | select(($root.recipes[$dep].body | length) > 0)
+            | "DEP:\($dep)"
+          end'
 
-      if [ "$first" != "default" ]; then
-        echo "justfile-default: the first recipe must be 'default' (found: '$first') — eng-design_patterns-justfile(7)" >&2
-        exit 1
+      # Capture (not process substitution) so a just/jq failure aborts loudly
+      # rather than yielding an empty stream that reads as "no findings".
+      if ! findings=$(just --dump --dump-format json | jq -r "$filter"); then
+        echo "justfile-default: failed to read recipes via just/jq" >&2
+        exit 2
       fi
 
-      # `default` must list only aggregate targets: each dependency recipe must
-      # have no body of its own (the line after its definition is not indented).
-      deps=$(awk '/^default[[:space:]]*:/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/#.*/, ""); print; exit }' justfile)
       fail=0
-      for dep in $deps; do
-        body=$(awk -v r="$dep" '
-          !found && $0 ~ ("^" r "([[:space:]].*)?:") { found = 1; next }
-          found { if ($0 ~ /^[[:space:]]/ && $0 !~ /^[[:space:]]*$/) print "body"; exit }
-        ' justfile)
-        if [ -n "$body" ]; then
-          echo "justfile-default: 'default' lists leaf recipe '$dep' (it has a body); default must contain only aggregate targets — eng-design_patterns-justfile(7)" >&2
-          fail=1
-        fi
-      done
+      while read -r line; do
+        case "$line" in
+          "") continue ;;
+          FIRST:*)
+            name=''${line#FIRST:}
+            echo "justfile-default: the first recipe must be 'default' (found: '$name') — eng-design_patterns-justfile(7)" >&2
+            fail=1
+            ;;
+          DEP:*)
+            name=''${line#DEP:}
+            echo "justfile-default: 'default' lists leaf recipe '$name' (it has a body); default must contain only aggregate targets — eng-design_patterns-justfile(7)" >&2
+            fail=1
+            ;;
+        esac
+      done <<< "$findings"
       [ "$fail" -eq 0 ] || exit 1
 
       echo "justfile-default: 'default' is the first recipe and lists only aggregates"

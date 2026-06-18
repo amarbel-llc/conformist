@@ -386,6 +386,60 @@ let
       expectFail = true;
       expectToken = "doc comment";
     })
+
+    # justfile-default: `default` is first and lists only aggregates
+    # (conformist-justfile(7) DEFAULT RECIPE / AGGREGATES AND LEAVES). The
+    # aggregate-pass case is the conformist#51 regression: a BACKSLASH-CONTINUED
+    # aggregate must not be misread as a leaf-with-a-body (the old awk indent
+    # heuristic flagged it; the `just --dump` rewrite parses it correctly).
+    (mkLinterFixtureCheck {
+      name = "justfile-default";
+      label = "backslash-aggregate-pass";
+      files = {
+        "justfile" = ''
+          default: test
+
+          test: \
+              test-go \
+              test-bats
+
+          test-go:
+              echo go
+
+          test-bats:
+              echo bats
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-default";
+      label = "lists-leaf-fail";
+      files = {
+        # `default` depends on a leaf that has a body — not an aggregate.
+        "justfile" = ''
+          default: run-thing
+
+          run-thing:
+              echo x
+        '';
+      };
+      expectFail = true;
+      expectToken = "lists leaf recipe";
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-default";
+      label = "first-not-default-fail";
+      files = {
+        "justfile" = ''
+          build-go:
+              echo go
+
+          default: build-go
+        '';
+      };
+      expectFail = true;
+      expectToken = "first recipe must be 'default'";
+    })
   ];
 in
 builtins.listToAttrs (
