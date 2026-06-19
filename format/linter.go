@@ -36,6 +36,16 @@ func (l *Linter) Priority() int { return l.config.Priority }
 // HasRepair reports whether a repair (autofix) command is configured.
 func (l *Linter) HasRepair() bool { return l.config.RepairCommand != "" }
 
+// IsRestageRepairOutputs reports whether this is a whole-tree
+// (passes-files=false) linter that opts into restaging its repair outputs and
+// actually has a repair command to produce them (conformist#55). The staged
+// lane runs exactly these linters under an individual git-status snapshot so it
+// can restage their writes; every other linter stays on the safe staged-set
+// scoping.
+func (l *Linter) IsRestageRepairOutputs() bool {
+	return l.config.RestageRepairOutputs && !l.passesFiles && l.HasRepair()
+}
+
 func (l *Linter) hasNoPositionalArgSupport() bool {
 	return l.config.NoPositionalArgSupport != nil && *l.config.NoPositionalArgSupport
 }

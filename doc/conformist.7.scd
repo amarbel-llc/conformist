@@ -65,7 +65,11 @@ conformist has two modes of operation.
 	conformant content. A fully staged file is formatted in the working tree
 	and restaged. A partially staged file (staged with additional unstaged
 	edits) has its staged blob formatted in isolation and restaged via the
-	object store, leaving the working tree's unstaged hunks untouched. Exits 0
+	object store, leaving the working tree's unstaged hunks untouched. A
+	whole-tree codegen-repair linter that sets *restage-repair-outputs*
+	(*conformist.toml*(5)) also has the files its repair regenerates restaged,
+	even when they were not staged, so a stale generated sibling does not strand
+	the commit. Exits 0
 	when the staged content was already conformant, 3 when files were
 	reformatted and restaged, and 2 when refused — outside a git worktree, in
 	stdin mode, or under fail-on-change. With *--exit-zero-on-fix*, conformist exits 0 (not 3) on a

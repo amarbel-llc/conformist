@@ -146,6 +146,25 @@ plus:
 	*ignore-global-excludes* flag for this; it was retired in favor of
 	*passes-files*.)
 
+*restage-repair-outputs*
+	Defaults to false. Set true on a whole-tree codegen-repair linter
+	(*passes-files* = false with a *repair-command*) to widen the *--staged*
+	hook's restage scope to the files its repair regenerates.
+
+	The *--staged* hook (see *conformist*(7)) otherwise restages only files that
+	were already in the index, which is correct for formatters and per-file
+	linters but strands the outputs of a whole-tree repair that regenerates files
+	_other_ than the staged ones --- e.g. editing a staged source makes a
+	generated sibling stale; the repair regenerates the sibling, but it was never
+	staged, so the commit lands stale. With this set, *--staged* also restages the
+	paths this linter's *repair-command* actually wrote, detected by a git-status
+	delta taken around that linter's repair so only its own writes are captured
+	(not another linter's). Ignored unless the linter is whole-tree
+	(*passes-files* = false) and has a *repair-command*.
+
+	Only modified _tracked_ outputs are restaged: a brand-new (untracked) output
+	or a deletion the repair performs is not staged by this flag.
+
 # ENVIRONMENT
 
 Every option has an environment override named by upper-casing the key and

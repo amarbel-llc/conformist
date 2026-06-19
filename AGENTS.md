@@ -85,8 +85,12 @@ no commit. A fully-staged file is formatted in the working tree and `git add`ed;
 a partially staged file (staged with additional unstaged edits) is no longer
 refused — its STAGED blob is formatted in isolation and restaged via the object
 store (`git hash-object` + `git update-index --cacheinfo`), leaving the working
-tree's unstaged hunks untouched (#40). It still refuses (exit 2) outside a git
-worktree, in stdin mode, or under fail-on-change.
+tree's unstaged hunks untouched (#40). A whole-tree codegen-repair linter
+(`passes-files=false` + `repair-command`) that sets `restage-repair-outputs`
+also has the (tracked) files its repair regenerates restaged — even when they
+were never staged — detected by a git-status delta taken around that linter's
+repair, so a stale generated sibling does not strand the commit (#55). It still
+refuses (exit 2) outside a git worktree, in stdin mode, or under fail-on-change.
 
 ## Architecture
 

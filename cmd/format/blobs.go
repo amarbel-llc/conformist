@@ -72,7 +72,11 @@ func formatStagedBlobs(
 	isolated.Quiet = true
 
 	throwaway := stats.New()
-	if runErr := formatTree(ctx, &isolated, &throwaway, nil, paths); runErr != nil {
+	// The blob-isolation lane formats staged blobs in a throwaway temp tree;
+	// restage-repair-outputs (conformist#55) is a working-tree concern handled by
+	// the fully-staged lane, so this run uses the no-op runRepair observer and
+	// ignores any reported paths.
+	if _, runErr := formatTree(ctx, &isolated, &throwaway, nil, paths, runRepair); runErr != nil {
 		return nil, fmt.Errorf("failed to format staged blobs: %w", runErr)
 	}
 

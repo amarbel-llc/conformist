@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/amarbel-llc/conformist/config"
+	"github.com/amarbel-llc/conformist/format"
 	"github.com/amarbel-llc/conformist/git"
 	"github.com/amarbel-llc/conformist/stats"
 	"github.com/amarbel-llc/conformist/walk"
@@ -172,6 +173,14 @@ func RunStaged(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 // run changed. It returns the number of files restaged. Safe because, with no
 // pre-existing unstaged delta, any post-run worktree change on a staged file is
 // formatter output.
+//
+// It additionally restages the outputs of opt-in restage-repair-outputs linters
+// (conformist#55): a whole-tree codegen-repair linter that regenerates files
+// OTHER than the staged ones would otherwise leave its output dirty-but-unstaged,
+// so the commit lands stale. runWithObserver reports those paths via a
+// git-status snapshot around each opt-in linter's repair, and they are restaged
+// regardless of stagedSet membership — the explicit, configured intent of the
+// opt-in flag.
 func restageFullyStaged(
 	ctx context.Context,
 	v *viper.Viper,
@@ -187,7 +196,8 @@ func restageFullyStaged(
 
 	slices.Sort(toFormat)
 
-	if err := Run(v, statz, cmd, toFormat); err != nil {
+	repairOutputs, err := runWithObserver(v, statz, cmd, toFormat, stagedRepairObserver(cfg.TreeRoot))
+	if err != nil {
 		return 0, err
 	}
 
@@ -196,7 +206,10 @@ func restageFullyStaged(
 		return 0, fmt.Errorf("failed to detect formatted files: %w", err)
 	}
 
-	var toRestage []string
+	// Restage the union of: the formatter/per-file restage (a staged file the run
+	// left dirty) and the opt-in linters' repair outputs (restaged regardless of
+	// stagedSet, conformist#55). Sort+compact dedups a path that is both.
+	toRestage := slices.Clone(repairOutputs)
 
 	for _, entry := range post {
 		if entry.Unstaged != ' ' && stagedSet[entry.Path] {
@@ -209,12 +222,57 @@ func restageFullyStaged(
 	}
 
 	slices.Sort(toRestage)
+	toRestage = slices.Compact(toRestage)
 
 	if err := git.AddPaths(ctx, cfg.TreeRoot, toRestage); err != nil {
 		return 0, fmt.Errorf("failed to restage formatted files: %w", err)
 	}
 
 	return len(toRestage), nil
+}
+
+// stagedRepairObserver returns a repairObserver that wraps an opt-in
+// restage-repair-outputs linter's repair (conformist#55) in a git-status
+// snapshot, reporting the toplevel-relative tracked paths the repair newly made
+// dirty. Brand-new (untracked) outputs are NOT reported — StatusEntries uses
+// --untracked-files=no, and staging untracked files is a separate, more
+// dangerous capability tier (see the staged-restage RFC). A path already dirty
+// before the repair is excluded, so only this linter's own writes are captured.
+func stagedRepairObserver(treeRoot string) repairObserver {
+	return func(ctx context.Context, l *format.Linter, repair func(context.Context) error) ([]string, error) {
+		before, err := git.StatusEntries(ctx, treeRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to snapshot tree before %q repair: %w", l.Name(), err)
+		}
+
+		if err := repair(ctx); err != nil {
+			return nil, err
+		}
+
+		after, err := git.StatusEntries(ctx, treeRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to snapshot tree after %q repair: %w", l.Name(), err)
+		}
+
+		dirtyBefore := make(map[string]bool, len(before))
+		for _, e := range before {
+			dirtyBefore[e.Path] = true
+		}
+
+		var outputs []string
+
+		for _, e := range after {
+			if !dirtyBefore[e.Path] {
+				outputs = append(outputs, e.Path)
+			}
+		}
+
+		if len(outputs) > 0 {
+			log.Debugf("--staged: linter %q repair wrote %d path(s) to restage", l.Name(), len(outputs))
+		}
+
+		return outputs, nil
+	}
 }
 
 // restagePartialBlobs formats the staged blob of each partially-staged file in

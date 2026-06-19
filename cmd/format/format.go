@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/pprof"
+	"slices"
 	"syscall"
 	"time"
 
@@ -24,12 +25,32 @@ import (
 
 var ErrFailOnChange = errors.New("unexpected changes detected, --fail-on-change is enabled")
 
+// Run formats/repairs the tree and discards the repair-output paths
+// (conformist#55), which only the --staged lane consumes. It is the entry point
+// for the bare `conformist` command and `nix fmt`.
 func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string) error {
+	_, err := runWithObserver(v, statz, cmd, paths, runRepair)
+
+	return err
+}
+
+// runWithObserver is the shared body of Run and the --staged restage lane. It
+// sets up config/cache/signals, runs the format+repair pipeline, and returns the
+// opt-in linters' repair-output paths (conformist#55) as reported by observe.
+// Run passes the no-op runRepair observer; the staged lane passes a
+// git-status-delta observer to learn what to restage.
+func runWithObserver(
+	v *viper.Viper,
+	statz *stats.Stats,
+	cmd *cobra.Command,
+	paths []string,
+	observe repairObserver,
+) ([]string, error) {
 	cmd.SilenceUsage = true
 
 	cfg, err := config.FromViper(v)
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	if cfg.CI {
@@ -57,9 +78,9 @@ func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string)
 	if cfg.CPUProfile != "" {
 		cpuProfile, err := os.Create(cfg.CPUProfile)
 		if err != nil {
-			return fmt.Errorf("failed to open file for writing cpu profile: %w", err)
+			return nil, fmt.Errorf("failed to open file for writing cpu profile: %w", err)
 		} else if err = pprof.StartCPUProfile(cpuProfile); err != nil {
-			return fmt.Errorf("failed to start cpu profile: %w", err)
+			return nil, fmt.Errorf("failed to start cpu profile: %w", err)
 		}
 
 		defer func() {
@@ -74,7 +95,7 @@ func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string)
 	// Remove the cache first before potentially opening a new one.
 	if cfg.ClearCache {
 		if err := cache.Remove(cfg.TreeRoot); err != nil {
-			return fmt.Errorf("failed to clear cache: %w", err)
+			return nil, fmt.Errorf("failed to clear cache: %w", err)
 		}
 	}
 
@@ -84,7 +105,7 @@ func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string)
 	if !cfg.NoCache {
 		db, err = cache.Open(cfg.TreeRoot)
 		if err != nil {
-			return fmt.Errorf("failed to open cache: %w", err)
+			return nil, fmt.Errorf("failed to open cache: %w", err)
 		}
 
 		// ensure db is closed after we're finished
@@ -107,7 +128,7 @@ func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string)
 		cancel()
 	}()
 
-	return formatTree(ctx, cfg, statz, db, paths)
+	return formatTree(ctx, cfg, statz, db, paths, observe)
 }
 
 // formatTree runs the linter-repair + formatter pipeline over cfg.TreeRoot,
@@ -115,44 +136,54 @@ func Run(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string)
 // is the shared core of Run and the staged-blob isolation lane (#40), which
 // points cfg.TreeRoot at a temp tree of materialized staged blobs so the working
 // tree is never touched.
+//
+// observe wraps the repair of each opt-in restage-repair-outputs linter
+// (conformist#55); formatTree returns the union of paths those linters wrote, as
+// reported by the observer. The staged lane passes a git-status-delta observer
+// to learn what to restage; every other caller passes runRepair and ignores the
+// returned paths.
 func formatTree(
 	ctx context.Context,
 	cfg *config.Config,
 	statz *stats.Stats,
 	db *bolt.DB,
 	paths []string,
-) error {
+	observe repairObserver,
+) ([]string, error) {
 	// parse the walk type
 	walkType, err := walk.TypeString(cfg.Walk)
 	if err != nil {
-		return fmt.Errorf("invalid walk type: %w", err)
+		return nil, fmt.Errorf("invalid walk type: %w", err)
 	}
 
 	if walkType == walk.Stdin && len(paths) != 1 {
 		// check we have only received one path arg which we use for the file extension / matching to formatters
-		return errors.New("exactly one path should be specified when using the --stdin flag")
+		return nil, errors.New("exactly one path should be specified when using the --stdin flag")
 	}
 
 	// Repair-mode linter autofix (RFC 0001 §4): apply configured linter repair
 	// commands before formatting, so formatters normalise the autofixed output.
 	// This is a separate, cache-less pass so it does not perturb the formatter
 	// scheduler/cache below. Skipped in stdin mode.
+	var repairOutputs []string
+
 	if walkType != walk.Stdin {
-		if err := applyLinterRepairs(ctx, cfg, statz, walkType, paths); err != nil {
-			return fmt.Errorf("failed to apply linter repairs: %w", err)
+		repairOutputs, err = applyLinterRepairs(ctx, cfg, statz, walkType, paths, observe)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply linter repairs: %w", err)
 		}
 	}
 
 	// create a composite formatter which will handle applying the correct formatters to each file we traverse
 	formatter, err := format.NewCompositeFormatter(cfg, statz, format.BatchSize)
 	if err != nil {
-		return fmt.Errorf("failed to create composite formatter: %w", err)
+		return nil, fmt.Errorf("failed to create composite formatter: %w", err)
 	}
 
 	// create a new walker for traversing the paths
 	walker, err := walk.NewCompositeReader(walkType, cfg.TreeRoot, paths, db, statz)
 	if err != nil {
-		return fmt.Errorf("failed to create walker: %w", err)
+		return nil, fmt.Errorf("failed to create walker: %w", err)
 	}
 
 	// start traversing
@@ -205,58 +236,88 @@ func formatTree(
 		log.Debugf("context cancelled")
 	case errors.Is(readErr, context.DeadlineExceeded):
 		// the read timed-out
-		return errors.New("timeout reading files")
+		return nil, errors.New("timeout reading files")
 	case readErr != nil:
 		// something unexpected happened
-		return fmt.Errorf("failed to read files: %w", readErr)
+		return nil, fmt.Errorf("failed to read files: %w", readErr)
 	}
 
 	if formatErr != nil {
-		return fmt.Errorf("failed to format files: %w", formatErr)
+		return nil, fmt.Errorf("failed to format files: %w", formatErr)
 	}
 
 	if formatCloseErr != nil {
-		return fmt.Errorf("failed to finalise formatting: %w", formatCloseErr)
+		return nil, fmt.Errorf("failed to finalise formatting: %w", formatCloseErr)
 	}
 
 	if walkerCloseErr != nil {
-		return fmt.Errorf("failed to close walker: %w", walkerCloseErr)
+		return nil, fmt.Errorf("failed to close walker: %w", walkerCloseErr)
 	}
 
 	if cfg.FailOnChange && statz.Value(stats.Changed) != 0 {
 		// if fail on change has been enabled, check that no files were actually changed, throwing an error if so
-		return ErrFailOnChange
+		return nil, ErrFailOnChange
 	}
 
-	return nil
+	return repairOutputs, nil
+}
+
+// repairObserver wraps the repair of a single opt-in (restage-repair-outputs)
+// linter so a caller can observe which paths it wrote (conformist#55). It is
+// given the running linter and a closure that performs its repair, and returns
+// the toplevel-relative paths the repair touched. The staged lane supplies a
+// git-status-delta observer (stagedRepairObserver); a plain repair run supplies
+// runRepair, which just runs the repair and reports no paths.
+type repairObserver func(ctx context.Context, l *format.Linter, repair func(context.Context) error) ([]string, error)
+
+// runRepair is the no-op observer for non-staged repair runs: it runs the
+// opt-in linter's repair and reports no touched paths (nothing consumes them
+// outside the staged lane).
+func runRepair(ctx context.Context, _ *format.Linter, repair func(context.Context) error) ([]string, error) {
+	return nil, repair(ctx)
 }
 
 // applyLinterRepairs runs configured linter repair (autofix) commands over the
 // tree in a separate, cache-less walk before the formatter pass (RFC 0001 §4).
 // It is a no-op when no linter declares a repair command.
+//
+// Opt-in restage-repair-outputs linters (conformist#55) are run AFTER the walk,
+// once over their full accumulated match set, each through observe so the staged
+// lane can snapshot around them and learn which paths they wrote. The returned
+// slice is the union of those touched paths (sorted, de-duped); it is empty for
+// a plain repair run, whose observer (runRepair) reports nothing.
 func applyLinterRepairs(
 	ctx context.Context,
 	cfg *config.Config,
 	statz *stats.Stats,
 	walkType walk.Type,
 	paths []string,
-) error {
+	observe repairObserver,
+) ([]string, error) {
 	linter, err := format.NewCompositeLinter(cfg, statz)
 	if err != nil {
-		return fmt.Errorf("failed to create linter: %w", err)
+		return nil, fmt.Errorf("failed to create linter: %w", err)
 	}
 
 	if linter.Empty() {
-		return nil
+		return nil, nil
 	}
 
 	// no cache db: repair always re-runs and never writes cache state
 	walker, err := walk.NewCompositeReader(walkType, cfg.TreeRoot, paths, nil, statz)
 	if err != nil {
-		return fmt.Errorf("failed to create walker for linting: %w", err)
+		return nil, fmt.Errorf("failed to create walker for linting: %w", err)
 	}
 
 	files := make([]*walk.File, format.BatchSize)
+
+	// Accumulate, across batches, the files each opt-in linter matches. Their
+	// repair is deferred until the walk completes so it runs once over the full
+	// set under a single snapshot (conformist#55). The *walk.File pointers stay
+	// valid after Release (Release only runs hooks; it does not recycle File
+	// values), and Read writes new pointers into the reused buffer each batch, so
+	// appending the pointers out is safe.
+	optIn := map[*format.Linter][]*walk.File{}
 
 	for {
 		readCtx, cancelRead := context.WithTimeout(ctx, 10*time.Second)
@@ -266,7 +327,11 @@ func applyLinterRepairs(
 		if repairErr := linter.Repair(ctx, files[:n]); repairErr != nil {
 			_ = walker.Close()
 
-			return fmt.Errorf("linter repair failed: %w", repairErr)
+			return nil, fmt.Errorf("linter repair failed: %w", repairErr)
+		}
+
+		for l, fs := range linter.MatchOptInRepair(files[:n]) {
+			optIn[l] = append(optIn[l], fs...)
 		}
 
 		releaseCtx := walk.SetNoCache(ctx, true)
@@ -274,7 +339,7 @@ func applyLinterRepairs(
 			if releaseErr := file.Release(releaseCtx); releaseErr != nil {
 				_ = walker.Close()
 
-				return fmt.Errorf("failed to release file: %w", releaseErr)
+				return nil, fmt.Errorf("failed to release file: %w", releaseErr)
 			}
 		}
 
@@ -285,13 +350,30 @@ func applyLinterRepairs(
 
 			_ = walker.Close()
 
-			return fmt.Errorf("failed to read files for linting: %w", readErr)
+			return nil, fmt.Errorf("failed to read files for linting: %w", readErr)
 		}
 	}
 
 	if err := walker.Close(); err != nil {
-		return fmt.Errorf("failed to close walker: %w", err)
+		return nil, fmt.Errorf("failed to close walker: %w", err)
 	}
 
-	return nil
+	// Run each opt-in linter's repair once over its full match set, through the
+	// observer, collecting the union of touched paths (conformist#55).
+	var touched []string
+
+	for l, fs := range optIn {
+		paths, err := observe(ctx, l, func(ctx context.Context) error {
+			return linter.RepairLinter(ctx, l, fs)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("linter repair failed: %w", err)
+		}
+
+		touched = append(touched, paths...)
+	}
+
+	slices.Sort(touched)
+
+	return slices.Compact(touched), nil
 }

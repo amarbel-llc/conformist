@@ -124,6 +124,20 @@ type Linter struct {
 	RepairCommand string `mapstructure:"repair-command,omitempty" toml:"repair-command,omitempty"`
 	// RepairOptions are the args passed to RepairCommand.
 	RepairOptions []string `mapstructure:"repair-options,omitempty" toml:"repair-options,omitempty"`
+	// RestageRepairOutputs widens the --staged hook's restage scope for a
+	// whole-tree codegen-repair linter (conformist#55). The --staged restage
+	// otherwise covers only files that were already in the index, which strands
+	// the outputs of a whole-tree (passes-files=false) repair-command that
+	// regenerates files OTHER than the staged ones (e.g. editing a staged source
+	// file makes a generated sibling stale; the repair regenerates the sibling,
+	// but it was never staged so the commit lands stale). When this is true on
+	// such a linter, --staged also restages the paths the linter's repair-command
+	// actually wrote — detected by a git-status delta around that linter's
+	// repair, so only its own writes are captured (not another linter's). Default
+	// false: repair outputs stay scoped to the staged set like formatter output.
+	// Has effect only on a whole-tree linter (passes-files=false) with a
+	// repair-command; ignored otherwise.
+	RestageRepairOutputs bool `mapstructure:"restage-repair-outputs,omitempty" toml:"restage-repair-outputs,omitempty"`
 	// WorkingDir is an optional subdirectory (relative to the tree root) in which
 	// to run this linter's check/repair commands, e.g. a Go submodule whose
 	// codegen must run from there. Empty (the default) runs at the tree root,
