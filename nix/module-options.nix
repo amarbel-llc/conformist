@@ -1,8 +1,10 @@
 # The conformist settings schema plus the
-# build.{configFile,wrapper,preCommit,check,programs} outputs. preCommit is a
-# conformist addition (issue #47): a store-pinned `conformist --staged
-# --exit-zero-on-fix` hook command, so a consumer can drive a git pre-commit
-# hook from the module instead of a hand-written PATH-relative config.
+# build.{configFile,wrapper,preCommit,repair,check,programs} outputs. preCommit
+# (issue #47) and repair (issue #54) are conformist additions: store-pinned hook
+# commands (`conformist --staged --exit-zero-on-fix` and `conformist --commit
+# --amend --exit-zero-on-fix`, sharing one wrapper body via mkHookWrapper), so a
+# consumer can drive git pre-commit / spinclass repair hooks from the module
+# instead of a hand-written PATH-relative config.
 # Ported from treefmt-nix's module-options.nix with these adaptations
 # (see nix/default.nix and issue #4 for rationale):
 #   - the wrapped/checked binary is `conformist`, not `treefmt`;
@@ -168,6 +170,41 @@ let
     };
   };
 
+  # Shared body for the store-pinned git-hook wrappers (build.preCommit and
+  # build.repair, conformist#47/#51/#54). Both run the consumer's pinned
+  # conformist over the LIVE worktree with the store config; they differ only in
+  # the mode flags (`--staged` restage vs `--commit --amend` repair) and the
+  # installed name. Deriving both from one definition is why #54 asked for a
+  # factored body instead of a second hand-rolled wrapper that drifts from the
+  # first. Like build.wrapper, the hook locates the live worktree via
+  # `--tree-root-file` (NOT a store --tree-root): the hook runs in the author's
+  # checkout at commit time, where these modes write to the index/worktree of
+  # that checkout. `unset PRJ_ROOT` keeps direnv's PRJ_ROOT from overriding the
+  # baked --tree-root-file. `--exit-zero-on-fix` maps exit-3 (fixes applied) to
+  # 0 so a `nonzero = abort` hook treats a successful repair as success
+  # (conformist#35/#39).
+  mkHookWrapper =
+    {
+      name,
+      modeFlags,
+    }:
+    let
+      flagLines = lib.concatMapStringsSep "\n" (f: "  ${f} \\") (modeFlags ++ [ "--exit-zero-on-fix" ]);
+      code = ''
+        set -euo pipefail
+        unset PRJ_ROOT
+        exec ${config.package}/bin/conformist \
+        ${flagLines}
+          --config-file=${config.build.configFile} \
+          --tree-root-file=${config.projectRootFile} \
+          "$@"
+      '';
+      x = pkgs.writeShellScriptBin name code;
+    in
+    x.overrideAttrs (prev: {
+      meta = config.package.meta // prev.meta;
+    });
+
   # Accumulate the enabled tool packages from both the formatter (programs.*)
   # and linter (linters.*) namespaces, for the devShell.
   enabledPackages =
@@ -308,23 +345,52 @@ in
         '';
         type = types.package;
         defaultText = lib.literalMD "conformist pre-commit hook command";
-        default =
-          let
-            code = ''
-              set -euo pipefail
-              unset PRJ_ROOT
-              exec ${config.package}/bin/conformist \
-                --staged \
-                --exit-zero-on-fix \
-                --config-file=${config.build.configFile} \
-                --tree-root-file=${config.projectRootFile} \
-                "$@"
-            '';
-            x = pkgs.writeShellScriptBin "conformist-pre-commit" code;
-          in
-          x.overrideAttrs (prev: {
-            meta = config.package.meta // prev.meta;
-          });
+        default = mkHookWrapper {
+          name = "conformist-pre-commit";
+          modeFlags = [ "--staged" ];
+        };
+      };
+      repair = mkOption {
+        description = ''
+          A repair hook command: the conformist package wrapped with the
+          generated config file, run as
+          `conformist --commit --amend --exit-zero-on-fix`. It is the
+          `--commit --amend` sibling of build.preCommit (conformist#54) —
+          everything in build.preCommit's contract applies, with one mode
+          difference: instead of restaging staged files (`--staged`), it
+          repairs the worktree and folds the run's fixes into HEAD via
+          `git commit --amend --no-edit` (conformist#24/#33), exiting 0 even
+          when it amended so a `nonzero = abort` hook treats a successful
+          repair as success (conformist#35/#39).
+
+          This is the supported way to drive a spinclass pre-merge REPAIR hook
+          (FDR 0018) FROM the module: name it in a sweatfile by its installed
+          name — it is placed on the devShell PATH as `conformist-repair` —
+          e.g. `repair = "conformist-repair"`. Consumers MUST get it from their
+          OWN module eval (`<its-eval>.config.build.repair`), NOT from a bare
+          `repair = "conformist --commit --amend --exit-zero-on-fix"` string,
+          which is the silent-skip trap of conformist#51 (it resolves
+          formatters from PATH, so a shell missing gofumpt/nixfmt/… quietly
+          skips those file types). This wrapper avoids that because its
+          formatter commands are store paths from the consumer's own generated
+          config — exactly as build.preCommit does, sharing one definition so
+          the two can't drift.
+
+          Like build.preCommit it requires the devShell active (the wrapper is
+          on the devShell PATH) and depends on the dev environment for any
+          linter that execs an ambient tool by bare name. Additionally, because
+          `--amend` re-signs HEAD, a locked commit-signing agent fails the
+          amend rather than producing an unsigned commit.
+        '';
+        type = types.package;
+        defaultText = lib.literalMD "conformist repair hook command";
+        default = mkHookWrapper {
+          name = "conformist-repair";
+          modeFlags = [
+            "--commit"
+            "--amend"
+          ];
+        };
       };
       programs = mkOption {
         type = types.attrsOf types.package;
@@ -386,6 +452,7 @@ in
       nativeBuildInputs = [
         config.build.wrapper
         config.build.preCommit
+        config.build.repair
       ]
       ++ (lib.attrValues config.build.programs);
     };

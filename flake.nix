@@ -328,6 +328,14 @@
           # it is on the devShell PATH as `conformist-pre-commit` for use as the
           # hook command.
           conformist-pre-commit = conformistEval.config.build.preCommit;
+          # conformist's own store-pinned repair hook (conformist#54): the
+          # `--commit --amend` sibling of conformist-pre-commit,
+          # `conformist --commit --amend --exit-zero-on-fix` wrapped with the
+          # generated config. Exposing it here dogfoods build.repair — `nix build
+          # .#conformist-repair` forces the new module output to build, and it is
+          # on the devShell PATH as `conformist-repair` for use as a spinclass
+          # pre-merge repair hook (`repair = "conformist-repair"`).
+          conformist-repair = conformistEval.config.build.repair;
           # The custom golangci-lint carrying dewey's analyzers, built locally
           # from pinned purse-first source (golangciLintDewey above) so `just
           # lint-go` builds it via `.#golangci-lint-dewey` (binary:
