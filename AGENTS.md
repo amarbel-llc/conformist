@@ -296,11 +296,15 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   github:amarbel-llc/conformist#eng` scaffolds an adopter repo wired to the eng
   preset (flake.nix + conformist.nix + a conformist-justfile(7)-conformant
   justfile + version.env + .envrc + a sweatfile wiring the config-specific
-  `conformist-pre-commit` hook — conformist#47/#51). The flake's
-  `build.preCommit` is exposed both as `packages.conformist-pre-commit` and on
-  the devShell PATH, so the sweatfile's `pre-commit = "conformist-pre-commit"`
-  resolves to the toolchain-hermetic hook rather than a bare `conformist
-  --staged` (which silently skips file types whose formatter isn't on PATH).
+  `conformist-pre-commit` hook plus the opt-in `conformist-repair` merge-time
+  hook — conformist#47/#51/#54/#59). The flake's `build.preCommit` and
+  `build.repair` are exposed both as `packages.conformist-pre-commit` /
+  `packages.conformist-repair` and on the devShell PATH, so the sweatfile's
+  `pre-commit = "conformist-pre-commit"` resolves to the toolchain-hermetic hook
+  rather than a bare `conformist --staged` (which silently skips file types whose
+  formatter isn't on PATH); `repair = "conformist-repair"` ships commented (the
+  per-commit hook already keeps the tree conformant, and `--amend` re-signs HEAD),
+  a documented opt-in with a path to flip the default later.
   `cmd/conform`'s scaffold ships the same flake.nix/justfile/sweatfile
   byte-identically (a drift test guards it). `templates/**` is excluded from
   conformist's own self-lint (consumer-facing scaffold, e.g. a direnv `.envrc`

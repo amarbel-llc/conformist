@@ -18,8 +18,9 @@ func newConformCmd() *cobra.Command {
 		Use:   "conform",
 		Short: "Scaffold this repo into the amarbel-llc conformist shape",
 		Long: "Transition the current repo toward the amarbel-llc conformist shape. Writes " +
-			"each shape file that is absent — conformist.nix, version.env, and (for a greenfield " +
-			"repo) a complete flake.nix and justfile — skipping any that already exist. It is " +
+			"each shape file that is absent — conformist.nix, version.env, a sweatfile wiring " +
+			"conformist's pre-commit and (opt-in) repair hooks, and (for a greenfield repo) a " +
+			"complete flake.nix and justfile — skipping any that already exist. It is " +
 			"idempotent and never edits an existing file: when flake.nix or justfile is already " +
 			"present, conform leaves it untouched and prints the wiring to paste instead, since " +
 			"auto-rewriting an arbitrary flake.nix is fragile. Exits 0 when nothing was written, " +

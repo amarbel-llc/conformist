@@ -61,12 +61,23 @@
         # sweatfile hook to that name (see ./sweatfile).
         packages.conformist-pre-commit = eval.config.build.preCommit;
 
+        # The merge-time repair sibling (conformist#54): `conformist --commit
+        # --amend --exit-zero-on-fix`, same store-pinned toolchain, on the
+        # devShell PATH as `conformist-repair`. It is the supported command for a
+        # spinclass pre-merge REPAIR hook. Exposed and available here; the
+        # sweatfile leaves `repair = "conformist-repair"` as a documented opt-in,
+        # since with the per-commit hook active the tree is already conformant at
+        # merge time (see ./sweatfile).
+        packages.conformist-repair = eval.config.build.repair;
+
         devShells.default = pkgs.mkShell {
           packages = [
             conformistPkg
-            # The config-specific, toolchain-hermetic pre-commit hook, on PATH
-            # as `conformist-pre-commit` so the sweatfile can name it.
+            # The config-specific, toolchain-hermetic hooks, on PATH as
+            # `conformist-pre-commit` / `conformist-repair` so the sweatfile can
+            # name them.
             eval.config.build.preCommit
+            eval.config.build.repair
             pkgs.just
           ];
         };

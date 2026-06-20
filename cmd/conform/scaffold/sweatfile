@@ -22,3 +22,18 @@ pre-merge = "just"
 #
 # Requires the devShell active (direnv) so `conformist-pre-commit` is on PATH.
 pre-commit = "conformist-pre-commit"
+
+# Merge-time repair (conformist#54), OPT-IN — uncomment to enable. Runs
+# `conformist --commit --amend --exit-zero-on-fix` as a spinclass pre-merge
+# repair hook: it repairs the worktree and folds the fixes into HEAD before the
+# pre-merge gate. `conformist-repair` is the CONFIG-SPECIFIC, TOOLCHAIN-HERMETIC
+# wrapper this template exposes from `eval.config.build.repair` (flake.nix), on
+# the devShell PATH under that name. Left commented because with `pre-commit`
+# above active the tree is already conformant at merge time (so repair is
+# redundant), and `--amend` re-signs HEAD — a locked signing agent would fail
+# the merge. Enable it if you prefer merge-time repair over the per-commit hook.
+#
+# Opt-in today, by design — but with a path to flip: a future conformist release
+# may make merge-time repair the scaffold default, at which point this line
+# ships UNCOMMENTED and you opt OUT by removing it. Track conformist#59.
+# repair = "conformist-repair"

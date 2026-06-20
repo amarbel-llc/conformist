@@ -29,4 +29,18 @@ Add conformist to flake.nix and wire it into your per-system outputs
         package = conformistPkg;
         projectRootFile = "flake.nix";
       }).config.build.configFile;
+
+    # git pre-commit + (opt-in) merge-time repair hooks for THIS repo's config,
+    # on the devShell PATH as `conformist-pre-commit` / `conformist-repair` (the
+    # sweatfile names them). See conformist#47/#54 and conformist.7 PRE-COMMIT.
+    packages.conformist-pre-commit = eval.config.build.preCommit;
+    packages.conformist-repair = eval.config.build.repair;
+    devShells.default = pkgs.mkShell {
+      packages = [
+        conformistPkg
+        eval.config.build.preCommit
+        eval.config.build.repair
+        pkgs.just
+      ];
+    };
   }
