@@ -160,12 +160,17 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   analog `mkLinterModule` (emits `[linter.<name>]` with optional
   `repair-command`/`repair-options`), `writeCheckScript`
   (`nix/write-check-script.nix`) for packaging a local script as a sandbox-safe
-  linter command (`patchShebangs` + wrap, #19), and `wrapWithToolchain`
-  (`nix/wrap-with-toolchain.nix`) for a conformist wrapper carrying its formatter
-  toolchain on PATH — the non-module hermetic `nix fmt`/`--staged` hook for a
-  repo with a hand-written `conformist.toml` (#51). `module-options.nix` declares
-  the settings surface and the `build.{wrapper,preCommit,check,configFile}`
-  outputs.
+  linter command (`patchShebangs` + wrap, #19), `wrapWithToolchain`
+  (`nix/wrap-with-toolchain.nix`) for a single conformist wrapper carrying its
+  formatter toolchain on PATH — the non-module hermetic `nix fmt`/`--staged` hook
+  for a repo with a hand-written `conformist.toml` (#51), and `mkToolchainHooks`
+  (`nix/mk-toolchain-hooks.nix`) which returns the three named wrappers
+  `{ formatter, preCommit, repair }` (named `conformist` /
+  `conformist-pre-commit` / `conformist-repair`) — the TOML-consumer mirror of
+  the module's `build.{wrapper,preCommit,repair}`, so a hand-written-config repo
+  wires its hooks 1:1 with how a module adopter does (#59). `module-options.nix`
+  declares the settings surface and the
+  `build.{devShell,configFile,wrapper,preCommit,repair,programs,check}` outputs.
 - `nix/programs/` + `programs.nix` — the formatter registry.
 - `nix/linters/` + `linters.nix` — the linter registry. Beyond general linters
   (shellcheck, ruff, statix, deadnix, typos, yamllint, …), this holds the

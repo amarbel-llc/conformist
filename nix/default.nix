@@ -30,6 +30,17 @@ let
   # adopting the nix module. See ./wrap-with-toolchain.nix.
   wrapWithToolchain = import ./wrap-with-toolchain.nix;
 
+  # The three named, toolchain-hermetic hook wrappers for a hand-written
+  # conformist.toml — the TOML-consumer mirror of build.{wrapper,preCommit,
+  # repair} (conformist#59). `mkToolchainHooks pkgs { conformist; tools;
+  # configFile ? null; projectRootFile ? "flake.nix" }` returns
+  # `{ formatter, preCommit, repair }` (named conformist / conformist-pre-commit
+  # / conformist-repair), each execing conformist with `tools` on PATH. Use this
+  # over wrapWithToolchain when you want the module-shaped named siblings (so the
+  # sweatfile names `conformist-pre-commit` / `conformist-repair`) rather than a
+  # single wrapper. See ./mk-toolchain-hooks.nix.
+  mkToolchainHooks = import ./mk-toolchain-hooks.nix;
+
   # mkFormatterModule builds a module that declares `programs.<name>.*` options
   # and, when enabled, emits a `[formatter.<name>]` stanza. Ported verbatim from
   # treefmt-nix so the ~155 programs/<name>.nix modules port unchanged.
@@ -345,6 +356,7 @@ in
     linters
     writeCheckScript
     wrapWithToolchain
+    mkToolchainHooks
     all-modules
     submodule-modules
     evalModule

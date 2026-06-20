@@ -87,10 +87,16 @@ conformist has two modes of operation.
 	- *Nix module adopters:* use the _build.preCommit_ output (its formatter
 	  commands are store paths, not bare names). The _#eng_ template wires it as
 	  _conformist-pre-commit_; see *conformist-nix*(7).
-	- *Hand-written conformist.toml:* wrap conformist with its toolchain on PATH
-	  — _conformist.lib.wrapWithToolchain pkgs { conformist; tools; }_ builds a
-	  wrapper whose PATH carries _tools_ — and point the hook at the wrapper,
-	  e.g. _pre-commit = "conformist-fmt --staged --exit-zero-on-fix"_. See
+	- *Hand-written conformist.toml:* _conformist.lib.mkToolchainHooks pkgs {
+	  conformist; tools; configFile ? ./conformist.toml; }_ returns three
+	  toolchain-carrying wrappers — _formatter_ (named _conformist_), _preCommit_
+	  (_conformist-pre-commit_) and _repair_ (_conformist-repair_) — the
+	  TOML-consumer mirror of the module's _build.{wrapper,preCommit,repair}_.
+	  Put them on the devShell and name each hook by its wrapper, e.g.
+	  _pre-commit = "conformist-pre-commit"_ / _repair = "conformist-repair"_.
+	  For a single combined wrapper instead of the three named siblings,
+	  _conformist.lib.wrapWithToolchain pkgs { conformist; tools; }_ builds one
+	  wrapper whose PATH carries _tools_. See
 	  *eng-design_patterns-conformist*(7) "THE CWD-AWARE WRAPPER".
 
 *Check* (read-only)

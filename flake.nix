@@ -419,6 +419,49 @@
                 touch $out
               '';
 
+            # Regression for mkToolchainHooks (conformist#59): the TOML-consumer
+            # mirror of build.{wrapper,preCommit,repair}. Wrap a STUB conformist
+            # (which fails unless a stub formatter is on PATH) and assert each of
+            # the three returned wrappers (a) execs hermetically under an EMPTY
+            # ambient PATH — proving `tools` is on PATH — and (b) bakes the right
+            # mode flags plus the subdir-robust --tree-root-file. A green build
+            # proves the helper produces three correctly-shaped, toolchain-hermetic
+            # wrappers that pass "$@" through.
+            mk-toolchain-hooks =
+              let
+                stubTool = pkgs.writeShellScriptBin "stub-formatter" "echo formatted";
+                stubConformist = pkgs.writeShellScriptBin "conformist" ''
+                  stub-formatter >/dev/null
+                  echo "conformist-args: $*"
+                '';
+                hooks = conformistLib.mkToolchainHooks pkgs {
+                  conformist = stubConformist;
+                  tools = [ stubTool ];
+                };
+              in
+              pkgs.runCommand "conformist-mk-toolchain-hooks-test" { } ''
+                # Each wrapper is exec'd with an EMPTY ambient PATH: stub-formatter
+                # resolves only via the wrapper's own runtimeInputs (hermetic).
+                check() {
+                  local bin="$1" want="$2" got
+                  got=$(PATH= "$bin") || {
+                    echo "mk-toolchain-hooks: $bin failed under empty PATH — not hermetic (#59)" >&2
+                    exit 1
+                  }
+                  [ "$got" = "$want" ] || {
+                    echo "mk-toolchain-hooks: $bin args wrong; got '$got' want '$want'" >&2
+                    exit 1
+                  }
+                }
+                check ${hooks.formatter}/bin/conformist \
+                  "conformist-args: --tree-root-file=flake.nix"
+                check ${hooks.preCommit}/bin/conformist-pre-commit \
+                  "conformist-args: --tree-root-file=flake.nix --staged --exit-zero-on-fix"
+                check ${hooks.repair}/bin/conformist-repair \
+                  "conformist-args: --tree-root-file=flake.nix --commit --amend --exit-zero-on-fix"
+                touch $out
+              '';
+
             # True-positive regression for the eng-versioning deprecated-file rule
             # (conformist#14): run the linter's own command against fixtures and
             # assert it passes a clean tree but FLAGS a `version.txt` and a flake.nix
