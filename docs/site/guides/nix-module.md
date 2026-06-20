@@ -7,7 +7,8 @@ and get, for free:
 
 - a generated `conformist.toml` (`build.configFile`),
 - a `nix fmt` entry point that runs conformist in repair mode (`build.wrapper`),
-  and
+- toolchain-hermetic git **pre-commit** and **repair** hook commands
+  (`build.preCommit` / `build.repair`), and
 - a read-only flake check that runs `conformist check` (`build.check`).
 
 Tools resolve from your pinned nixpkgs, so you never hand-write `/nix/store`
@@ -89,6 +90,106 @@ By default this wires `formatter.<system>` (for `nix fmt`) and
 `checks.<system>.conformist` (the read-only gate). Set `conformist.flakeFormatter`
 or `conformist.flakeCheck` to `false` to opt out of either.
 
+## Pre-commit and repair hooks
+
+conformist's defining adoption win is a **toolchain-hermetic** git hook: one that
+formats staged files with the *same* pinned formatters as `nix fmt`, never
+silently skipping a file type because its formatter happens to be absent from the
+author's `PATH` (the silent-skip trap of
+[conformist#51](https://github.com/amarbel-llc/conformist/issues/51)). How you
+obtain it depends on which of two **consumer shapes** you are. Both yield the
+same two named hook commands — `conformist-pre-commit`
+(`--staged --exit-zero-on-fix`) and `conformist-repair`
+(`--commit --amend --exit-zero-on-fix`) — so a repo can move between the shapes
+without renaming its hooks.
+
+!!! tip "Hooks are orthogonal to the eng convention linters"
+    Getting hermetic hooks does **not** require `conformist.lib.presets.eng`. The
+    eng-convention linters (eng-versioning, flake-outputs, the justfile checks, …)
+    are a separate, opt-in roster. A repo can adopt the pre-commit/repair hooks
+    while importing **zero** eng linters, and add the conventions later on its own
+    schedule.
+
+### Shape 1 — you use the Nix module
+
+If you declare formatters/linters through this module (`programs.*` / `linters.*`
+/ `settings.*`), the hook commands come for free and store-pinned as
+`build.preCommit` / `build.repair`. Expose them as packages and put them on your
+devShell `PATH` so the sweatfile can name them — the easiest way is `inputsFrom`,
+which pulls conformist's wrapper, both hooks, and every enabled tool from
+`build.devShell` into your own shell:
+
+```nix
+# plain flake (lib.evalModule):
+packages.conformist-pre-commit = conformistEval.config.build.preCommit;
+packages.conformist-repair     = conformistEval.config.build.repair;
+devShells.default = pkgs.mkShell {
+  inputsFrom = [ conformistEval.config.build.devShell ]; # wrapper + both hooks + tools
+  packages = [ /* your language toolchain */ ];
+};
+```
+
+```nix
+# flake-parts: the flakeModule auto-wires formatter + checks; add the hooks to
+# your devShell with the same one-liner (config.conformist.build.devShell):
+perSystem = { config, pkgs, ... }: {
+  devShells.default = pkgs.mkShell {
+    inputsFrom = [ config.conformist.build.devShell ];
+    packages = [ /* your language toolchain */ ];
+  };
+};
+```
+
+```toml
+# sweatfile:
+[hooks]
+pre-commit = "conformist-pre-commit"
+# repair = "conformist-repair"   # opt-in; see the #eng template's sweatfile
+```
+
+### Shape 2 — you keep a hand-written `conformist.toml`
+
+If you do NOT generate config from the module (bespoke tools, an existing
+`conformist.toml` you'd rather not port), use `conformist.lib.mkToolchainHooks` —
+the toml-shape mirror of `build.{wrapper,preCommit,repair}`. It returns the same
+three named wrappers, each carrying your `tools` on `PATH`:
+
+```nix
+hooks = conformist.lib.mkToolchainHooks pkgs {
+  conformist = conformist.packages.${system}.default;
+  tools = [ pkgs.gofumpt pkgs.gotools pkgs.nixfmt pkgs.shfmt ]; # goimports ships in gotools
+  configFile = ./conformist.toml;  # optional; pins --config-file
+};
+formatter = hooks.formatter;        # nix fmt (the wrapper is named `conformist`)
+devShells.default = pkgs.mkShell {
+  packages = [ hooks.formatter hooks.preCommit hooks.repair ]
+    ++ [ /* the tools above + any ambient deps a linter execs, e.g. go */ ];
+};
+```
+
+```toml
+# sweatfile — name the wrappers, exactly like Shape 1:
+[hooks]
+pre-commit = "conformist-pre-commit"
+# repair = "conformist-repair"
+```
+
+Put `hooks.formatter` (named `conformist`) on the devShell **in place of** the
+bare conformist package, not alongside it — otherwise a bare `conformist`
+invocation resolves to whichever lands first on `PATH`. `mkToolchainHooks` bakes
+the toolchain you pass; a linter that itself execs an **ambient** tool by bare
+name (e.g. a `golangci-lint run ./...` linter needs `go`) still expects that tool
+from your devShell, so keep it in `packages`. For a single combined wrapper
+instead of the three named siblings, `conformist.lib.wrapWithToolchain` returns
+one wrapper you point every mode at (next section).
+
+!!! warning "Don't take the hook from conformist's own package"
+    Get the hook from your OWN module eval / `mkToolchainHooks` call — never from
+    conformist's packaged `conformist-pre-commit` (built from *conformist's*
+    config, running *conformist's* formatters on *your* tree), and never from a
+    bare `pre-commit = "conformist --staged"` string (not toolchain-hermetic, the
+    conformist#51 trap).
+
 ## Formatters vs linters
 
 Formatters and linters live in **separate option namespaces** — `programs.*`
@@ -165,14 +266,14 @@ conformistEval = conformist.lib.evalModule pkgs {
     `writeCheckScript` resolves the shebang for you; if you must hand-roll, run
     `patchShebangs $out/bin` **before** `wrapProgram`.
 
-### A toolchain-hermetic wrapper without the module (pre-commit hooks)
+### A single combined wrapper (`wrapWithToolchain`)
 
-If you keep a **hand-written `conformist.toml`** (rather than generating config
-from this module) but still want a pre-commit hook that doesn't depend on the
-formatter toolchain being on the author's PATH, use
-`conformist.lib.wrapWithToolchain`. It builds a wrapper that execs conformist
-with `tools` on `PATH`, so `nix fmt`, `conformist check`, and the `--staged`
-hook all run with the same pinned formatters:
+Shape 2 above recommends `mkToolchainHooks` for a hand-written `conformist.toml`,
+because it returns the three named hook wrappers a sweatfile references by name. If you instead want a
+**single** wrapper you point every mode at — `nix fmt`, `conformist check`, and
+the `--staged` hook all off one binary — use `conformist.lib.wrapWithToolchain`.
+It builds a wrapper that execs conformist with `tools` on `PATH`, so all three
+run with the same pinned formatters:
 
 ```nix
 conformistFmt = conformist.lib.wrapWithToolchain pkgs {
@@ -198,8 +299,8 @@ pre-commit = "conformist-fmt --staged --exit-zero-on-fix"
     staged repair **silently skips** those file types
     ([conformist#51](https://github.com/amarbel-llc/conformist/issues/51)).
     Module adopters avoid this with `build.preCommit` (store-pinned commands);
-    a hand-written-config repo uses `wrapWithToolchain` as above. See
-    `eng-design_patterns-conformist(7)` "THE CWD-AWARE WRAPPER".
+    a hand-written-config repo uses `mkToolchainHooks` (or `wrapWithToolchain`)
+    as above. See `eng-design_patterns-conformist(7)` "THE CWD-AWARE WRAPPER".
 
 ## How the wrapper and check resolve the tree root
 
@@ -221,6 +322,8 @@ differently — by design, because the two tree-root flags are mutually exclusiv
 |--------|------------|
 | `config.build.configFile` | The generated `conformist.toml` (a `/nix/store` path). |
 | `config.build.wrapper` | A `conformist` wrapper that runs repair mode against the config. Use as `formatter.<system>`. |
+| `config.build.preCommit` | A `conformist-pre-commit` hook command (`--staged --exit-zero-on-fix`), store-pinned. Put on the devShell; name it in a sweatfile. |
+| `config.build.repair` | A `conformist-repair` hook command (`--commit --amend --exit-zero-on-fix`), store-pinned. The merge-time sibling of `preCommit`. |
 | `config.build.check` | A function `self -> derivation` that runs `conformist check` read-only. Use as a `checks.<system>.*`. |
 | `config.build.programs` | Attrset of the enabled formatter + linter packages (for a devShell). |
 | `config.build.devShell` | A shell with the wrapper and all enabled tools on `PATH`. |
