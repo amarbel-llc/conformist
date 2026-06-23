@@ -168,7 +168,16 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   `{ formatter, preCommit, repair }` (named `conformist` /
   `conformist-pre-commit` / `conformist-repair`) — the TOML-consumer mirror of
   the module's `build.{wrapper,preCommit,repair}`, so a hand-written-config repo
-  wires its hooks 1:1 with how a module adopter does (#59). `module-options.nix`
+  wires its hooks 1:1 with how a module adopter does (#59), and
+  `mkTomlFormat`/`mkYamlFormat` — remarshal-free replacements for
+  `pkgs.formats.toml`/`pkgs.formats.yaml` (whose `.generate` serializes via
+  remarshal, dragging `matplotlib`→`ffmpeg` into EVERY generated config as a
+  build-time dep — #60). They keep `pkgs.formats.<fmt>.type` for value validation
+  and swap `.generate` for a `yj` json→toml/yaml step; passed to all modules via
+  `defaultSpecialArgs` so every TOML/YAML config generator (the conformist config
+  itself plus statix/stylua/taplo/yamllint/… settings files) is remarshal-free.
+  `just verify-no-remarshal` guards against new direct `pkgs.formats.{toml,yaml}`
+  uses creeping back in. `module-options.nix`
   declares the settings surface and the
   `build.{devShell,configFile,wrapper,preCommit,repair,programs,check}` outputs.
 - `nix/programs/` + `programs.nix` — the formatter registry.

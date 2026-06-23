@@ -10,11 +10,12 @@
   pkgs,
   config,
   mkLinterModule,
+  mkTomlFormat,
   ...
 }:
 let
   cfg = config.linters.statix;
-  configFormat = pkgs.formats.toml { };
+  configFormat = mkTomlFormat pkgs; # remarshal-free TOML (conformist#60)
   settingsFile = configFormat.generate "statix.toml" { disabled = cfg.disabled-lints; };
 
   # statix requires its configuration file to be named statix.toml exactly.

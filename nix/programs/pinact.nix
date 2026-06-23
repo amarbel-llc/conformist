@@ -3,13 +3,14 @@
   pkgs,
   config,
   mkFormatterModule,
+  mkYamlFormat,
   ...
 }:
 
 let
   cfg = config.programs.pinact;
 
-  settingsFormat = pkgs.formats.yaml { };
+  settingsFormat = mkYamlFormat pkgs; # remarshal-free YAML (conformist#60)
 in
 
 {

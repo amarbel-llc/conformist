@@ -41,6 +41,41 @@ let
   # single wrapper. See ./mk-toolchain-hooks.nix.
   mkToolchainHooks = import ./mk-toolchain-hooks.nix;
 
+  # Remarshal-free config generators (conformist#60). nixpkgs'
+  # `pkgs.formats.{toml,yaml}` serialize via `remarshal` (a Python tool) whose
+  # build/test closure drags `matplotlib` -> `ffmpeg-headless` in as a BUILD-TIME
+  # dependency of EVERY generated config — bloating every consumer's cold
+  # `nix fmt` / `checks.formatting` build by hundreds of MB, even for a Nix+Go
+  # repo (traced via `just debug-why-depends ffmpeg`). We keep
+  # `pkgs.formats.<fmt>`'s `.type` (pure Nix — the value-validation schema, no
+  # remarshal) and replace ONLY `.generate` with a `yj` json->fmt step (yj is a
+  # tiny Go binary). Verified semantically identical to remarshal's output and
+  # parseable by the consuming tool via `just debug-{toml,yaml}-roundtrip`.
+  # mkTomlFormat / mkYamlFormat are passed to every module via defaultSpecialArgs
+  # so the program/linter modules that emit their own TOML/YAML settings files
+  # (statix, stylua, taplo, yamllint, …) drop remarshal too.
+  mkYjFormat =
+    { format, yjFlag }:
+    pkgs:
+    (pkgs.formats.${format} { })
+    // {
+      generate =
+        name: value:
+        pkgs.runCommandLocal name {
+          nativeBuildInputs = [ pkgs.yj ];
+          jsonText = builtins.toJSON value;
+          passAsFile = [ "jsonText" ];
+        } ''yj ${yjFlag} < "$jsonTextPath" > "$out"'';
+    };
+  mkTomlFormat = mkYjFormat {
+    format = "toml";
+    yjFlag = "-jt";
+  };
+  mkYamlFormat = mkYjFormat {
+    format = "yaml";
+    yjFlag = "-jy";
+  };
+
   # mkFormatterModule builds a module that declares `programs.<name>.*` options
   # and, when enabled, emits a `[formatter.<name>]` stanza. Ported verbatim from
   # treefmt-nix so the ~155 programs/<name>.nix modules port unchanged.
@@ -310,7 +345,12 @@ let
     These are module arguments passed to all conformist-nix modules.
   */
   defaultSpecialArgs = {
-    inherit mkFormatterModule mkLinterModule;
+    inherit
+      mkFormatterModule
+      mkLinterModule
+      mkTomlFormat
+      mkYamlFormat
+      ;
   };
 
   /**
@@ -357,6 +397,8 @@ in
     writeCheckScript
     wrapWithToolchain
     mkToolchainHooks
+    mkTomlFormat
+    mkYamlFormat
     all-modules
     submodule-modules
     evalModule

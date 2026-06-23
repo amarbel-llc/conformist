@@ -7,11 +7,12 @@
   pkgs,
   config,
   mkLinterModule,
+  mkYamlFormat,
   ...
 }:
 let
   cfg = config.linters.yamllint;
-  settingsFormat = pkgs.formats.yaml { };
+  settingsFormat = mkYamlFormat pkgs; # remarshal-free YAML (conformist#60)
 in
 {
   meta.maintainers = [

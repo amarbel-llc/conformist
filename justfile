@@ -297,7 +297,7 @@ debug-bench-backends iterations="3":
 
 # --- verify ---
 
-verify: verify-linter-fixtures
+verify: verify-linter-fixtures verify-no-remarshal
 
 # Behavioral fixture tests for the nix/linters/ whole-tree checks: build the
 # `linter-fixtures` aggregate, which runs each compiled linter against pass/fail
@@ -309,6 +309,30 @@ verify-linter-fixtures:
     set -euo pipefail
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${system}.linter-fixtures" --no-link --print-build-logs
+
+# Guard the conformist#60 fix: `pkgs.formats.toml` / `pkgs.formats.yaml` serialize
+# via remarshal, whose closure drags matplotlib -> ffmpeg into EVERY generated
+# config as a build-time dep. All TOML/YAML config generation must go through
+# mkTomlFormat / mkYamlFormat (defined in nix/default.nix — the ONLY sanctioned
+# reference, since they reuse `pkgs.formats.<fmt>.type` for validation). Fail if
+# any other nix file reaches for the remarshal-backed generators directly, so the
+# ffmpeg chain cannot creep back in. Source-level grep (the remarshal dep is a
+# build-time, not runtime, closure member, so it can't be asserted against a
+# realized closure).
+verify-no-remarshal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `|| true` on the whole pipeline: grep exits 1 on zero matches (the clean
+    # state), which would otherwise abort under `set -o pipefail`.
+    hits=$(grep -rnE 'pkgs\.formats\.(toml|yaml)' nix --include='*.nix' \
+        | grep -vE '^nix/default\.nix:' || true)
+    if [ -n "$hits" ]; then
+        echo "verify-no-remarshal: remarshal-backed pkgs.formats.{toml,yaml} used outside nix/default.nix (conformist#60):" >&2
+        echo "$hits" >&2
+        echo "Use mkTomlFormat / mkYamlFormat (passed via defaultSpecialArgs) instead." >&2
+        exit 1
+    fi
+    echo "verify-no-remarshal: no remarshal-backed format generators outside the sanctioned helper"
 
 # OPT-IN: drift check for the committed godyn-graph.json — regenerate the graph
 # into a scratch file and diff it against the committed copy, failing if they
@@ -329,6 +353,158 @@ debug-godyn-graph-drift:
         echo "debug-godyn-graph-drift: committed godyn-graph.json is stale — run 'just debug-godyn-graph' and commit the result." >&2
         exit 1
     fi
+
+# Trace why a build pulls in a package — the diagnostic for the closure-bloat
+# work (conformist#60). Builds TARGET (default the `nix fmt` wrapper, i.e. the
+# cold-build a consumer pays for) and reports members matching NEEDLE (e.g.
+# `ffmpeg`, `matplotlib`, `python3`) in BOTH the runtime closure (what
+# `path-info -r` / `why-depends` see) AND the build-time `.drv` requisite closure
+# (the deps a cold build realizes — e.g. a tool's checkPhase test deps — which
+# slow the build but are NOT runtime-closure members, so a runtime-only trace
+# misses them). For a devShell pass `.inputDerivation`: a bare `nix build` of an
+# mkShell yields a near-empty $out whose runtime closure omits the dev tools.
+# Mirrors papi's `debug-why-depends ffmpeg-headless`. Diagnostic only — not in any
+# aggregate / the CI lane.
+[group("debug")]
+debug-why-depends needle target="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tgt="{{ target }}"
+    if [ -z "$tgt" ]; then
+        sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+        tgt=".#formatter.$sys"
+    fi
+
+    out=$(nix build --no-link --print-out-paths "$tgt")
+    rt=$(nix path-info -r "$out" | grep -- "{{ needle }}" || true)
+    if [ -n "$rt" ]; then
+        echo "RUNTIME closure members of $tgt matching '{{ needle }}':"
+        echo "$rt"
+        echo
+        echo "--- why-depends (runtime) chain to the first match ---"
+        nix why-depends "$out" "$(echo "$rt" | head -1)"
+    else
+        echo "debug-why-depends: no RUNTIME closure member of $tgt matches '{{ needle }}'"
+    fi
+    echo
+
+    drv=$(nix path-info --derivation "$tgt")
+    bt=$(nix-store --query --requisites "$drv" | grep -- "{{ needle }}" || true)
+    if [ -n "$bt" ]; then
+        echo "BUILD-TIME (.drv) requisites of $tgt matching '{{ needle }}':"
+        echo "$bt"
+        echo
+        echo "--- why-depends --derivation chain to the first build-time match ---"
+        nix why-depends --derivation "$drv" "$(echo "$bt" | head -1)" || true
+    else
+        echo "debug-why-depends: no BUILD-TIME requisite of $tgt matches '{{ needle }}'"
+    fi
+
+# Verify a remarshal-free TOML serializer (yj) round-trips conformist's generated
+# config identically before swapping it in (conformist#60). Builds the real
+# impure self-config (remarshal-generated, exercises arrays/bools/nested tables/
+# repair-command), extracts its canonical data as JSON, re-serializes that JSON to
+# TOML with BOTH remarshal (incumbent) and `yj -jt` (candidate), reparses each back
+# to JSON with a neutral parser, and asserts semantic equality. Finally feeds the
+# yj-generated TOML to conformist itself to confirm it parses (exit 0/1 = parsed;
+# 2 = config/operational error). Diagnostic only — not in any aggregate / the CI lane.
+[group("debug")]
+debug-toml-roundtrip:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    ref=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
+    conf=$(nix build --no-link --print-out-paths ".#packages.$sys.default")/bin/conformist
+    # Put the converters on PATH via one `nix shell` and call them by name (a
+    # multi-output package like jq breaks `$(print-out-paths)/bin/x`). The body is
+    # one single-quoted `bash -c` arg — no nested heredoc (its terminator must be
+    # unindented, which would end the just recipe) and no apostrophes inside.
+    # remarshal is already realized (it generated the ref config); yj/jq are tiny.
+    nix shell nixpkgs#yj nixpkgs#remarshal nixpkgs#jq --command bash -c '
+        set -euo pipefail
+        ref="$1"; conf="$2"
+        tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT
+
+        # Canonical data the config encodes (parsed by the incumbent, remarshal).
+        remarshal -if toml -of json < "$ref" | jq -S . > "$tmp/in.json"
+
+        # Re-serialize that JSON to TOML two ways.
+        remarshal -if json -of toml < "$tmp/in.json" > "$tmp/remarshal.toml"
+        yj -jt                      < "$tmp/in.json" > "$tmp/yj.toml"
+
+        # Reparse each TOML back to canonical JSON (neutral parser = remarshal) and
+        # compare. Semantic equality is what matters; byte differences (key order,
+        # quoting, array layout) are fine if conformist parses them the same.
+        remarshal -if toml -of json < "$tmp/remarshal.toml" | jq -S . > "$tmp/remarshal.rt.json"
+        remarshal -if toml -of json < "$tmp/yj.toml"        | jq -S . > "$tmp/yj.rt.json"
+
+        fail=0
+        if diff -u "$tmp/in.json" "$tmp/yj.rt.json"; then
+            echo "OK: yj json-to-toml round-trips identically to the input data"
+        else
+            echo "MISMATCH: yj output reparses to different data than the input" >&2; fail=1
+        fi
+        if diff -u "$tmp/remarshal.rt.json" "$tmp/yj.rt.json"; then
+            echo "OK: yj output is semantically identical to remarshal output"
+        else
+            echo "MISMATCH: yj vs remarshal semantic diff above" >&2; fail=1
+        fi
+
+        echo "--- informational: byte diff remarshal.toml vs yj.toml ---"
+        diff -u "$tmp/remarshal.toml" "$tmp/yj.toml" || true
+
+        echo "--- conformist parses the yj-generated TOML? ---"
+        work=$(mktemp -d)
+        set +e
+        "$conf" check --config-file="$tmp/yj.toml" --tree-root="$work" "$work"
+        rc=$?
+        set -e
+        rm -rf "$work"
+        # 0 (clean) or 1 (findings) means parsed fine; 2 means config/operational error.
+        if [ "$rc" -eq 2 ]; then
+            echo "MISMATCH: conformist rejected the yj-generated TOML (exit 2)" >&2; fail=1
+        else
+            echo "OK: conformist accepted the yj-generated TOML (exit $rc)"
+        fi
+        exit "$fail"
+    ' bash "$ref" "$conf"
+
+# Verify `yj -jy` round-trips a YAML settings config identically before swapping
+# it in for remarshal (conformist#60) — the YAML sibling of debug-toml-roundtrip.
+# Uses a representative settings shape (nested maps, lists, bools, ints, strings),
+# since no consumer enables a yaml-config tool to harvest a real one. Serializes
+# to YAML with both remarshal (incumbent) and yj, reparses each back to JSON with
+# a neutral parser, and asserts semantic equality. Diagnostic only — not in any
+# aggregate / the CI lane.
+[group("debug")]
+debug-yaml-roundtrip:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    printf '%s\n' '{"extends":"default","rules":{"line-length":{"max":120},"trailing-spaces":{}},"ignore":["foo/","bar.yaml"],"strict":true,"depth":3}' > "$tmp/in.json"
+    nix shell nixpkgs#yj nixpkgs#remarshal nixpkgs#jq --command bash -c '
+        set -euo pipefail
+        tmp="$1"
+        jq -S . < "$tmp/in.json" > "$tmp/in.norm.json"
+        remarshal -if json -of yaml < "$tmp/in.json" > "$tmp/remarshal.yaml"
+        yj -jy                      < "$tmp/in.json" > "$tmp/yj.yaml"
+        remarshal -if yaml -of json < "$tmp/remarshal.yaml" | jq -S . > "$tmp/remarshal.rt.json"
+        remarshal -if yaml -of json < "$tmp/yj.yaml"        | jq -S . > "$tmp/yj.rt.json"
+        fail=0
+        if diff -u "$tmp/in.norm.json" "$tmp/yj.rt.json"; then
+            echo "OK: yj json-to-yaml round-trips identically to the input data"
+        else
+            echo "MISMATCH: yj yaml reparses to different data than the input" >&2; fail=1
+        fi
+        if diff -u "$tmp/remarshal.rt.json" "$tmp/yj.rt.json"; then
+            echo "OK: yj output is semantically identical to remarshal output"
+        else
+            echo "MISMATCH: yj vs remarshal semantic diff above" >&2; fail=1
+        fi
+        echo "--- informational: byte diff remarshal.yaml vs yj.yaml ---"
+        diff -u "$tmp/remarshal.yaml" "$tmp/yj.yaml" || true
+        exit "$fail"
+    ' bash "$tmp"
 
 # --- test ---
 

@@ -3,12 +3,13 @@
   pkgs,
   config,
   mkFormatterModule,
+  mkYamlFormat,
   ...
 }:
 let
   cfg = config.programs.yamlfmt;
 
-  settingsFormat = pkgs.formats.yaml { };
+  settingsFormat = mkYamlFormat pkgs; # remarshal-free YAML (conformist#60)
 in
 {
   meta.maintainers = [

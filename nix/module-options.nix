@@ -26,6 +26,7 @@
   options,
   lib,
   pkgs,
+  mkTomlFormat,
   ...
 }:
 let
@@ -44,7 +45,10 @@ let
       if lib.isString res || builtins.isPath res then "${res}" else lib.getExe res;
   };
 
-  configFormat = pkgs.formats.toml { };
+  # Remarshal-free TOML generator (conformist#60): keeps formats.toml's `.type`
+  # for value validation, swaps `.generate` for a yj json->toml step so the
+  # generated config no longer build-time-depends on remarshal -> ffmpeg.
+  configFormat = mkTomlFormat pkgs;
 
   # Remove keys in the setting that are "empty" to keep the config file lean.
   emptySettingsKeys =

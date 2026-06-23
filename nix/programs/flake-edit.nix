@@ -3,11 +3,12 @@
   pkgs,
   config,
   mkFormatterModule,
+  mkTomlFormat,
   ...
 }:
 let
   cfg = config.programs.flake-edit;
-  configFormat = pkgs.formats.toml { };
+  configFormat = mkTomlFormat pkgs; # remarshal-free TOML (conformist#60)
 
   settingsFile =
     let

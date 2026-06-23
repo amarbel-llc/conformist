@@ -20,8 +20,8 @@
 # miss on all ~130 checks. Instead we toJSON the evaluated settings (same deep
 # eval, same package resolution) and unsafeDiscardStringContext the result, so
 # the marker derivation carries no tool in its inputDrvs. The only thing dropped
-# is the build-time remarshal JSON->TOML step, which always round-trips for
-# these flat tables.
+# is the build-time `yj` JSON->TOML step (conformist#60 swapped it in for
+# remarshal), which always round-trips for these flat tables.
 #
 # Usage (see flake.nix): import ./nix/checks.nix { inherit pkgs; lib = conformistLib; }
 {

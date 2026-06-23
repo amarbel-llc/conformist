@@ -3,13 +3,14 @@
   pkgs,
   config,
   mkFormatterModule,
+  mkTomlFormat,
   ...
 }:
 let
   inherit (lib) mkOption types;
 
   cfg = config.programs.sizelint;
-  configFormat = pkgs.formats.toml { };
+  configFormat = mkTomlFormat pkgs; # remarshal-free TOML (conformist#60)
   settingsSchema = mkOption {
     description = "Configuration to generate sizelint.toml with";
     default = { };

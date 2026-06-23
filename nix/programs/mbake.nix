@@ -3,10 +3,11 @@
   pkgs,
   config,
   mkFormatterModule,
+  mkTomlFormat,
   ...
 }:
 let
-  configFormat = pkgs.formats.toml { };
+  configFormat = mkTomlFormat pkgs; # remarshal-free TOML (conformist#60)
   cfg = config.programs.mbake;
 
   settingsSchema = {

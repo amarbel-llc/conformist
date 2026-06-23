@@ -3,6 +3,7 @@
   pkgs,
   config,
   mkFormatterModule,
+  mkTomlFormat,
   ...
 }:
 let
@@ -14,7 +15,7 @@ let
     ;
 
   cfg = config.programs.stylua;
-  configFormat = pkgs.formats.toml { };
+  configFormat = mkTomlFormat pkgs; # remarshal-free TOML (conformist#60)
 
   /*
     The schema and descriptions were taken from the StyLua README
