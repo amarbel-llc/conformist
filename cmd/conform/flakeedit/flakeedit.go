@@ -153,6 +153,16 @@ func Apply(src []byte) ([]byte, EditReport, error) {
 	report.Added = append(report.Added, added...)
 	report.Conflicts = append(report.Conflicts, conflicts...)
 
+	// 5. devShell packages-list merge (#63): when devShells.default already
+	// exists and we located its packages list, splice conformist's tools into
+	// that list instead of leaving it a conflict (returnSplice skips it).
+	if outs.devShellPackages != nil {
+		if s, ok := devShellMergeSplice(src, *outs.devShellPackages); ok {
+			splices = append(splices, s)
+			report.Added = append(report.Added, "devShells.default packages")
+		}
+	}
+
 	if len(splices) == 0 {
 		return src, report, nil
 	}
@@ -292,6 +302,13 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired bool) (splice, []
 	)
 	for _, a := range returnAttrs() {
 		if outs.retExisting[a.path] {
+			// devShells.default with a locatable packages list is merged into
+			// by the caller's devShell step, so it is neither re-added nor
+			// reported as a conflict here.
+			if a.path == "devShells.default" && outs.devShellPackages != nil {
+				continue
+			}
+
 			if !alreadyWired {
 				conflicts = append(conflicts, a.path)
 			}
@@ -308,6 +325,38 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired bool) (splice, []
 
 	// Separate the new attributes from the existing ones with a blank line.
 	return beforeCloser(src, outs.retCloseOff, "\n"+body.String()), added, conflicts
+}
+
+// devShellPackages are the tools conform merges into an existing
+// devShells.default packages list (#63), in order.
+var devShellPackages = []string{
+	"conformistPkg",
+	"eval.config.build.preCommit",
+	"eval.config.build.repair",
+	"pkgs.just",
+}
+
+// devShellMergeSplice builds the insertion that adds conformist's tools to an
+// existing devShells.default packages list, skipping any already present so a
+// re-run is a no-op. ok is false when every tool is already in the list.
+func devShellMergeSplice(src []byte, ls listSplice) (splice, bool) {
+	indent := lineIndent(src, ls.closeOff) + "  "
+
+	var body strings.Builder
+
+	for _, pkg := range devShellPackages {
+		if strings.Contains(ls.inner, pkg) {
+			continue
+		}
+
+		body.WriteString(indent + pkg + "\n")
+	}
+
+	if body.Len() == 0 {
+		return splice{}, false
+	}
+
+	return beforeCloser(src, ls.closeOff, body.String()), true
 }
 
 // beforeCloser builds a splice that inserts body just before a closer

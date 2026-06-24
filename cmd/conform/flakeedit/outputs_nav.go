@@ -1,6 +1,7 @@
 package flakeedit
 
 import (
+	"regexp"
 	"strings"
 
 	langlang "github.com/clarete/langlang/go"
@@ -64,6 +65,22 @@ type parsedOutputs struct {
 	retCloseOff int
 	retIndent   string
 	retExisting map[string]bool
+
+	// devShellPackages, when non-nil, locates the `packages = [ … ]` list
+	// inside an existing devShells.default binding, so conform can merge its
+	// tools into that list (#63) instead of reporting a conflict. It is nil
+	// when devShells.default is absent or its packages list could not be
+	// located (an unusual mkShell shape), in which case an existing
+	// devShells.default stays a conflict.
+	devShellPackages *listSplice
+}
+
+// listSplice locates an existing Nix list for in-place merging: closeOff is the
+// absolute byte offset of its closing `]`, and inner is the list's full text
+// (brackets included) used to skip items already present.
+type listSplice struct {
+	closeOff int
+	inner    string
 }
 
 // parseOutputs runs the outputs-shape grammar over the outputs value at
@@ -147,7 +164,111 @@ func parseOutputs(src []byte, base, end int) (parsedOutputs, bool) {
 	out.retIndent = lineIndent(src, out.retCloseOff) + "  "
 	out.retExisting = bindingPaths(tree, retSet)
 
+	// If devShells.default already exists, locate its packages list so conform
+	// can merge into it rather than report a conflict (#63).
+	if out.retExisting["devShells.default"] {
+		if val, ok := bindingValue(tree, retSet, "devShells.default"); ok {
+			if ls, ok := findPackagesList(tree, val, base); ok {
+				out.devShellPackages = &ls
+			}
+		}
+	}
+
 	return out, true
+}
+
+// bindingValue returns the Value node of the top-level binding whose dotted
+// attr-path equals path, within an attrset node.
+func bindingValue(tree langlang.Tree, block langlang.NodeID, path string) (langlang.NodeID, bool) {
+	for _, b := range collectBindings(tree, block) {
+		kv, ok := bindingKeyVal(tree, b)
+		if !ok {
+			continue
+		}
+
+		segs, val, ok := keyValPath(tree, kv)
+		if ok && strings.Join(segs, ".") == path {
+			return val, true
+		}
+	}
+
+	return 0, false
+}
+
+// findPackagesList locates a `packages = [ … ]` list inside val (typically a
+// devShells.default value, `pkgs.mkShell { packages = [ … ]; }`) and returns the
+// absolute offset of its closing `]` plus the list's text. It finds the first
+// bracket group whose immediately-preceding sibling text is a `packages =`
+// assignment, so a sibling `buildInputs`/`nativeBuildInputs` list is not
+// mistaken for it. ok is false when no such list is found.
+func findPackagesList(tree langlang.Tree, val langlang.NodeID, base int) (listSplice, bool) {
+	var (
+		result listSplice
+		found  bool
+	)
+
+	var walk func(n langlang.NodeID)
+	walk = func(n langlang.NodeID) {
+		var prev string
+
+		for _, c := range valueItems(tree, n) {
+			if found {
+				return
+			}
+
+			if isBracketGroup(tree, c) && packagesAssignment(prev) {
+				if bc, ok := childNamed(tree, c, "BracketClose"); ok {
+					result = listSplice{
+						closeOff: base + tree.Span(bc).Start.Cursor,
+						inner:    tree.Text(c),
+					}
+					found = true
+
+					return
+				}
+			}
+
+			walk(c)
+			prev = tree.Text(c)
+		}
+	}
+	walk(val)
+
+	return result, found
+}
+
+// isBracketGroup reports whether group is a `[ … ]` list (its opener is a
+// BracketOpen), checking the opener directly rather than via childNamed so a
+// brace/paren group that merely contains a nested list is not misclassified.
+func isBracketGroup(tree langlang.Tree, group langlang.NodeID) bool {
+	if nodeName(tree, group) != "Group" {
+		return false
+	}
+
+	seq, ok := firstSequence(tree, group)
+	if !ok {
+		return false
+	}
+
+	for _, c := range tree.Children(seq) {
+		switch nodeName(tree, c) {
+		case "BracketOpen":
+			return true
+		case "BraceOpen", "ParenOpen":
+			return false
+		}
+	}
+
+	return false
+}
+
+// packagesAssignmentRE matches text that ends in a `packages =` binding LHS
+// (optionally `packages = with <ns>;`), with a non-identifier boundary before
+// `packages` so `buildPackages`/`extraPackages` do not match.
+var packagesAssignmentRE = regexp.MustCompile(`(?s)(?:^|[^\w.])packages\s*=\s*(?:with\s+[\w.]+\s*;\s*)?$`)
+
+func packagesAssignment(prev string) bool {
+	return packagesAssignmentRE.MatchString(prev)
 }
 
 // nodeText returns the source text spanned by a node.

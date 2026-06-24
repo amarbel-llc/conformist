@@ -165,6 +165,75 @@ func TestApplyUnrecognized(t *testing.T) {
 	}
 }
 
+// devShellFlake is a brownfield flake whose devShells.default already declares
+// a packages list — the merge target for #63's devShell list-merge.
+const devShellFlake = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    {
+      self,
+      nixpkgs,
+      utils,
+    }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        packages.default = pkgs.hello;
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.go
+          ];
+        };
+      }
+    );
+}
+`
+
+// TestApplyMergesDevShellPackages pins #63's devShell list-merge: when
+// devShells.default already exists with a packages list, conform splices its
+// tools into that list instead of reporting a conflict.
+func TestApplyMergesDevShellPackages(t *testing.T) {
+	out, report, err := flakeedit.Apply([]byte(devShellFlake))
+	require.NoError(t, err)
+	require.True(t, report.Changed())
+
+	got := string(out)
+
+	// devShells.default is merged, not a conflict.
+	require.NotContains(t, report.Conflicts, "devShells.default")
+	require.Contains(t, report.Added, "devShells.default packages")
+
+	// the existing item is preserved and conformist's tools are added to the
+	// SAME list (no second devShells.default binding).
+	require.Contains(t, got, "pkgs.go")
+	require.Contains(t, got, "conformistPkg")
+	require.Contains(t, got, "eval.config.build.preCommit")
+	require.Contains(t, got, "eval.config.build.repair")
+	require.Equal(t, 1, strings.Count(got, "devShells.default ="),
+		"must merge into the existing devShells.default, not add a second one")
+	require.NotContains(t, got, "devShells.default = pkgs.mkShell {\n          packages = [\n            conformistPkg",
+		"sanity: the original pkgs.go must remain the first item")
+}
+
+// TestApplyDevShellMergeIdempotent verifies a second Apply over a merged flake
+// adds nothing to the packages list.
+func TestApplyDevShellMergeIdempotent(t *testing.T) {
+	once, _, err := flakeedit.Apply([]byte(devShellFlake))
+	require.NoError(t, err)
+
+	twice, report, err := flakeedit.Apply(once)
+	require.NoError(t, err)
+	require.False(t, report.Changed(), "second apply must add nothing")
+	require.Equal(t, string(once), string(twice))
+}
+
 func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
 	// A flake whose inputs block has none of conformist/nixpkgs/utils:
 	// all three conformist inputs are added.
