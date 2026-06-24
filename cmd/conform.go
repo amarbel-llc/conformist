@@ -14,7 +14,10 @@ import (
 var ErrScaffolded = errors.New("scaffolded conformist files")
 
 func newConformCmd() *cobra.Command {
-	var noEdit bool
+	var (
+		noEdit         bool
+		forceFormatter bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "conform",
@@ -26,8 +29,9 @@ func newConformCmd() *cobra.Command {
 			"that is the recognized eachDefaultSystem shape is edited IN PLACE to add the " +
 			"conformist input and the per-system outputs wiring; any other shape (or --no-edit) " +
 			"falls back to printing the wiring to paste. An existing justfile is never edited; " +
-			"its recipes are printed. It is idempotent. Exits 0 when nothing changed, 3 when it " +
-			"wrote or edited files.",
+			"its recipes are printed. An existing formatter is left as a conflict unless " +
+			"--force-formatter replaces it with conformist's wrapper. It is idempotent. Exits 0 " +
+			"when nothing changed, 3 when it wrote or edited files.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
@@ -37,7 +41,10 @@ func newConformCmd() *cobra.Command {
 				return fmt.Errorf("failed to resolve working directory: %w", err)
 			}
 
-			res, err := conform.Run(dir, cmd.OutOrStdout(), conform.Options{NoEdit: noEdit})
+			res, err := conform.Run(dir, cmd.OutOrStdout(), conform.Options{
+				NoEdit:         noEdit,
+				ForceFormatter: forceFormatter,
+			})
 			if err != nil {
 				return fmt.Errorf("conform: %w", err)
 			}
@@ -52,6 +59,8 @@ func newConformCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false,
 		"do not edit an existing flake.nix in place; print the wiring to paste instead")
+	cmd.Flags().BoolVar(&forceFormatter, "force-formatter", false,
+		"replace an existing flake.nix `formatter` with conformist's wrapper instead of reporting a conflict")
 
 	return cmd
 }

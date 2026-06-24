@@ -73,6 +73,11 @@ type parsedOutputs struct {
 	// located (an unusual mkShell shape), in which case an existing
 	// devShells.default stays a conflict.
 	devShellPackages *listSplice
+
+	// formatterValue, when non-nil, is the byte range of an existing formatter
+	// attribute's value, so conform can replace it under --force-formatter
+	// (#63). Nil when formatter is absent.
+	formatterValue *valueRange
 }
 
 // listSplice locates an existing Nix list for in-place merging: closeOff is the
@@ -81,6 +86,12 @@ type parsedOutputs struct {
 type listSplice struct {
 	closeOff int
 	inner    string
+}
+
+// valueRange is the absolute [start, end) byte range of a binding's value.
+type valueRange struct {
+	start int
+	end   int
 }
 
 // parseOutputs runs the outputs-shape grammar over the outputs value at
@@ -171,6 +182,15 @@ func parseOutputs(src []byte, base, end int) (parsedOutputs, bool) {
 			if ls, ok := findPackagesList(tree, val, base); ok {
 				out.devShellPackages = &ls
 			}
+		}
+	}
+
+	// If formatter already exists, record its value range so conform can
+	// replace it under --force-formatter (#63).
+	if out.retExisting["formatter"] {
+		if val, ok := bindingValue(tree, retSet, "formatter"); ok {
+			span := tree.Span(val)
+			out.formatterValue = &valueRange{start: base + span.Start.Cursor, end: base + span.End.Cursor}
 		}
 	}
 

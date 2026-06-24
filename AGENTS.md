@@ -130,7 +130,11 @@ under fail-on-change.
   PEG (two grammars, `nix.peg` + `outputs.peg`, via the `clarete/langlang/go`
   runtime — modelled on amarbel-llc/doppelgang's `nixedit`), splicing by byte
   offset so the rest of the file is preserved verbatim; it is per-target
-  idempotent and never clobbers an output attr it did not write. Idempotent
+  idempotent and never clobbers an output attr it did not write. An existing
+  `devShells.default` is merged into (conformist's tools spliced into its
+  `packages` list) and an existing `formatter` is replaced only under
+  `--force-formatter`; otherwise a pre-existing attr is reported as a conflict
+  to reconcile by hand (#63). Idempotent
   overall, exits 3 when it wrote or edited files (`ErrScaffolded`);
   a hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via

@@ -100,13 +100,13 @@ const brownfieldEdited = `{
 `
 
 func TestApplyBrownfieldGolden(t *testing.T) {
-	out, _, err := flakeedit.Apply([]byte(brownfield))
+	out, _, err := flakeedit.Apply([]byte(brownfield), flakeedit.Options{})
 	require.NoError(t, err)
 	require.Equal(t, brownfieldEdited, string(out))
 }
 
 func TestApplyBrownfield(t *testing.T) {
-	out, report, err := flakeedit.Apply([]byte(brownfield))
+	out, report, err := flakeedit.Apply([]byte(brownfield), flakeedit.Options{})
 	require.NoError(t, err)
 	require.True(t, report.Changed())
 
@@ -138,10 +138,10 @@ func TestApplyBrownfield(t *testing.T) {
 // TestApplyIdempotent verifies a second Apply over the output of the
 // first is a no-op: the wired flake re-parses and nothing is re-added.
 func TestApplyIdempotent(t *testing.T) {
-	once, _, err := flakeedit.Apply([]byte(brownfield))
+	once, _, err := flakeedit.Apply([]byte(brownfield), flakeedit.Options{})
 	require.NoError(t, err)
 
-	twice, report, err := flakeedit.Apply(once)
+	twice, report, err := flakeedit.Apply(once, flakeedit.Options{})
 	require.NoError(t, err)
 	require.False(t, report.Changed(), "second apply must add nothing")
 	require.Empty(t, report.Conflicts, "an already-wired flake reports no conflicts")
@@ -158,11 +158,38 @@ func TestApplyUnrecognized(t *testing.T) {
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
-			out, _, err := flakeedit.Apply([]byte(src))
+			out, _, err := flakeedit.Apply([]byte(src), flakeedit.Options{})
 			require.ErrorIs(t, err, flakeedit.ErrUnrecognized)
 			require.Equal(t, src, string(out), "source must be returned unchanged on fallback")
 		})
 	}
+}
+
+// TestApplyForceFormatter pins #63's --force-formatter: the existing formatter
+// value is replaced with conformist's wrapper instead of being a conflict.
+func TestApplyForceFormatter(t *testing.T) {
+	out, report, err := flakeedit.Apply([]byte(brownfield), flakeedit.Options{ForceFormatter: true})
+	require.NoError(t, err)
+
+	got := string(out)
+
+	require.NotContains(t, report.Conflicts, "formatter", "formatter must be replaced, not a conflict")
+	require.Contains(t, report.Added, "formatter (replaced)")
+	require.Contains(t, got, "formatter = eval.config.build.wrapper;")
+	require.NotContains(t, got, "pkgs.nixfmt-rfc-style", "the old formatter value must be gone")
+	require.Equal(t, 1, strings.Count(got, "formatter ="), "must not add a second formatter binding")
+}
+
+// TestApplyForceFormatterIdempotent verifies re-running with --force-formatter
+// over an already-wired flake replaces nothing further.
+func TestApplyForceFormatterIdempotent(t *testing.T) {
+	once, _, err := flakeedit.Apply([]byte(brownfield), flakeedit.Options{ForceFormatter: true})
+	require.NoError(t, err)
+
+	twice, report, err := flakeedit.Apply(once, flakeedit.Options{ForceFormatter: true})
+	require.NoError(t, err)
+	require.False(t, report.Changed(), "second force-formatter apply must change nothing")
+	require.Equal(t, string(once), string(twice))
 }
 
 // devShellFlake is a brownfield flake whose devShells.default already declares
@@ -200,7 +227,7 @@ const devShellFlake = `{
 // devShells.default already exists with a packages list, conform splices its
 // tools into that list instead of reporting a conflict.
 func TestApplyMergesDevShellPackages(t *testing.T) {
-	out, report, err := flakeedit.Apply([]byte(devShellFlake))
+	out, report, err := flakeedit.Apply([]byte(devShellFlake), flakeedit.Options{})
 	require.NoError(t, err)
 	require.True(t, report.Changed())
 
@@ -225,10 +252,10 @@ func TestApplyMergesDevShellPackages(t *testing.T) {
 // TestApplyDevShellMergeIdempotent verifies a second Apply over a merged flake
 // adds nothing to the packages list.
 func TestApplyDevShellMergeIdempotent(t *testing.T) {
-	once, _, err := flakeedit.Apply([]byte(devShellFlake))
+	once, _, err := flakeedit.Apply([]byte(devShellFlake), flakeedit.Options{})
 	require.NoError(t, err)
 
-	twice, report, err := flakeedit.Apply(once)
+	twice, report, err := flakeedit.Apply(once, flakeedit.Options{})
 	require.NoError(t, err)
 	require.False(t, report.Changed(), "second apply must add nothing")
 	require.Equal(t, string(once), string(twice))
@@ -255,7 +282,7 @@ func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
     );
 }
 `
-	out, _, err := flakeedit.Apply([]byte(fresh))
+	out, _, err := flakeedit.Apply([]byte(fresh), flakeedit.Options{})
 	require.NoError(t, err)
 	got := string(out)
 	require.Contains(t, got, `conformist.url = "github:amarbel-llc/conformist";`)

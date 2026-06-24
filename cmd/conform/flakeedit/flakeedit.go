@@ -58,6 +58,14 @@ type EditReport struct {
 // Changed reports whether Apply modified the source.
 func (r EditReport) Changed() bool { return len(r.Added) > 0 }
 
+// Options tunes Apply.
+type Options struct {
+	// ForceFormatter replaces an existing `formatter` attribute's value with
+	// conformist's wrapper instead of leaving it a conflict (#63). Off by
+	// default: a repo's own formatter is preserved unless the caller opts in.
+	ForceFormatter bool
+}
+
 // the three inputs conform wires in, by top-level input name. text is the
 // block-form binding (no leading `inputs.`); flat form prepends it.
 var conformistInputs = []struct{ name, text string }{
@@ -73,7 +81,7 @@ var conformistLetNames = []string{"conformistPkg", "eval", "impureEval"}
 // source plus a report of what changed. It returns ErrUnrecognized (and
 // src unchanged) when the flake is not the recognized shape; the caller
 // then falls back to print-only.
-func Apply(src []byte) ([]byte, EditReport, error) {
+func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 	matcher, err := newMatcher(nixEntry, nixGrammar)
 	if err != nil {
 		return src, EditReport{}, fmt.Errorf("flakeedit: compile grammar: %w", err)
@@ -145,7 +153,7 @@ func Apply(src []byte) ([]byte, EditReport, error) {
 	}
 
 	// 4. return attributes
-	retSplice, added, conflicts := returnSplice(src, outs, alreadyWired)
+	retSplice, added, conflicts := returnSplice(src, outs, alreadyWired, opts.ForceFormatter)
 	if retSplice.text != "" {
 		splices = append(splices, retSplice)
 	}
@@ -163,25 +171,59 @@ func Apply(src []byte) ([]byte, EditReport, error) {
 		}
 	}
 
+	// 6. forced formatter replacement (#63): with --force-formatter, replace an
+	// existing formatter's value with conformist's wrapper rather than leaving
+	// it a conflict (returnSplice skips it). A no-op when the value is already
+	// the wrapper, so re-runs add nothing.
+	if opts.ForceFormatter && outs.formatterValue != nil {
+		const wrapper = "eval.config.build.wrapper"
+		if strings.TrimSpace(string(src[outs.formatterValue.start:outs.formatterValue.end])) != wrapper {
+			splices = append(splices, splice{
+				offset: outs.formatterValue.start,
+				end:    outs.formatterValue.end,
+				text:   wrapper,
+			})
+			report.Added = append(report.Added, "formatter (replaced)")
+		}
+	}
+
 	if len(splices) == 0 {
 		return src, report, nil
 	}
 
-	// Apply highest offset first so earlier offsets stay valid (all
-	// splices are pure insertions).
+	// Apply highest offset first so earlier offsets stay valid. Splices are
+	// non-overlapping insertions plus at most one replacement (the forced
+	// formatter), so descending order keeps every other splice's offsets valid.
 	sort.Slice(splices, func(i, j int) bool { return splices[i].offset > splices[j].offset })
 	out := src
 	for _, s := range splices {
-		out = spliceAt(out, s.offset, s.text)
+		out = s.applyTo(out)
 	}
 
 	return out, report, nil
 }
 
-// splice is one pending insertion: text inserted at byte offset.
+// splice is one pending edit: text inserted at offset, or — when end > offset —
+// replacing the byte range [offset, end).
 type splice struct {
 	offset int
+	end    int
 	text   string
+}
+
+// applyTo returns src with the splice applied: a replacement of [offset, end)
+// when end > offset, otherwise a pure insertion at offset.
+func (s splice) applyTo(src []byte) []byte {
+	if s.end > s.offset {
+		out := make([]byte, 0, len(src)-(s.end-s.offset)+len(s.text))
+		out = append(out, src[:s.offset]...)
+		out = append(out, s.text...)
+		out = append(out, src[s.end:]...)
+
+		return out
+	}
+
+	return spliceAt(src, s.offset, s.text)
 }
 
 // inputsSplice builds the insertion for the conformist input bindings not
@@ -292,7 +334,7 @@ func returnAttrs() []returnAttr {
 // present. When the flake is not yet wired, an existing attribute is
 // reported as a conflict (left untouched); when already wired, an
 // existing attribute is a silent idempotent skip.
-func returnSplice(src []byte, outs parsedOutputs, alreadyWired bool) (splice, []string, []string) {
+func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter bool) (splice, []string, []string) {
 	i := outs.retIndent
 
 	var (
@@ -306,6 +348,12 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired bool) (splice, []
 			// by the caller's devShell step, so it is neither re-added nor
 			// reported as a conflict here.
 			if a.path == "devShells.default" && outs.devShellPackages != nil {
+				continue
+			}
+
+			// formatter with --force-formatter is replaced by the caller's
+			// formatter step, so it is likewise neither re-added nor a conflict.
+			if a.path == "formatter" && forceFormatter && outs.formatterValue != nil {
 				continue
 			}
 

@@ -50,6 +50,9 @@ type Options struct {
 	// left untouched and its wiring is printed to paste instead (the
 	// pre-in-place-editing behavior). It has no effect on a greenfield repo.
 	NoEdit bool
+	// ForceFormatter replaces an existing `formatter` attribute with
+	// conformist's wrapper instead of reporting it as a conflict (#63).
+	ForceFormatter bool
 }
 
 // Result reports what Run did, so a caller can pick an exit code (anything
@@ -118,7 +121,7 @@ func Run(dir string, out io.Writer, opts Options) (Result, error) {
 		printFlake = true
 		flakeNote = "--no-edit"
 	default:
-		edited, report, applyErr := editFlake(flakePath)
+		edited, report, applyErr := editFlake(flakePath, opts)
 		switch {
 		case errors.Is(applyErr, flakeedit.ErrUnrecognized):
 			res.Skipped = append(res.Skipped, "flake.nix")
@@ -156,13 +159,13 @@ func Run(dir string, out io.Writer, opts Options) (Result, error) {
 }
 
 // editFlake reads flake.nix and runs the in-place editor over it.
-func editFlake(path string) ([]byte, flakeedit.EditReport, error) {
+func editFlake(path string, opts Options) ([]byte, flakeedit.EditReport, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return nil, flakeedit.EditReport{}, fmt.Errorf("failed to read flake.nix: %w", err)
 	}
 
-	out, report, err := flakeedit.Apply(src)
+	out, report, err := flakeedit.Apply(src, flakeedit.Options{ForceFormatter: opts.ForceFormatter})
 	if err != nil {
 		return nil, report, fmt.Errorf("editing flake.nix: %w", err)
 	}
