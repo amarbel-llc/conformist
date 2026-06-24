@@ -14,6 +14,14 @@
 // printing the wiring for the user to paste rather than risk corrupting
 // the file.
 //
+// The narrow roster is deliberate: widening it to the eng-style hybrid
+// (`<expr> // eachDefaultSystem (…)` with a non-attrset per-system body)
+// or igloo's raw forAllSystems/genAttrs shape would require parsing
+// arbitrary Nix expressions, abandoning the byte-faithful shallow-PEG
+// approach and adding mis-edit risk to the common path; it is tracked
+// separately (conformist#65) and only worth doing when a repo we want to
+// conform lands outside this shape.
+//
 // The shallow Nix PEG approach is modelled on amarbel-llc/doppelgang's
 // internal/0/nixedit (langlang runtime); doppelgang edits only `inputs`,
 // flakeedit extends it to the four splice targets above.
