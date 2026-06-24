@@ -1,0 +1,110 @@
+// Shallow Nix grammar for flake.nix surgery (CST mode, -disable-spaces).
+//
+// This grammar deliberately does NOT parse all of Nix. It parses just
+// enough structure to navigate a flake.nix to its top-level `inputs`
+// attrset and `outputs` binding, so conformist can splice new bindings
+// in by byte offset while preserving the rest of the file verbatim. The
+// `outputs` value is parsed opaquely here; the recognized
+// eachDefaultSystem shape is parsed in a second pass (outputs.peg) over
+// the located value's byte range.
+//
+// The value side of a binding is skipped opaquely as a trivia-,
+// string-, and comment-aware balanced run (Value/Balanced), rather
+// than parsed as a real Nix expression. That keeps the grammar small
+// while still finding the correct end of each binding's value — even
+// when a sibling binding is `outputs = { self, ... }: <large expr>`
+// containing nested braces, strings with `${}` interpolation, and
+// comments. Anything the grammar cannot parse makes Match fail, and
+// the caller falls back to print-only rather than corrupting the file.
+//
+// Ported from amarbel-llc/doppelgang internal/0/nixedit/nix.peg, which
+// is itself modelled on amarbel-llc/langlang grammars/toml.peg.
+
+// ── Top-level ────────────────────────────────────────────────
+// First rule is the PEG entry point. A flake.nix is a single
+// attribute set (with optional surrounding trivia). We parse its
+// bindings; each binding's key path is structured, its value opaque.
+
+File       <- Trivia AttrSet Trivia EOF
+
+AttrSet    <- BraceOpen Trivia Binding* BraceClose
+
+// A binding is either `inherit ...;` or `attrpath = value;`.
+Binding    <- (Inherit / KeyVal) Trivia
+
+Inherit    <- InheritKw Value Semi
+
+KeyVal     <- AttrPath Trivia Equals Trivia Value Semi
+
+// ── Attribute paths ──────────────────────────────────────────
+// Dotted path of attr names: `inputs.utils.inputs.systems.follows`.
+// Each segment is an identifier or a quoted string (Nix allows
+// `"foo".bar`). String interpolation in attr names (`${e}`) is not
+// supported here; such a file makes Match fail → print-only fallback.
+
+AttrPath   <- AttrName (Trivia Dot Trivia AttrName)*
+AttrName   <- Identifier / String
+Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
+
+// ── Values (opaque) ──────────────────────────────────────────
+// A value is skipped opaquely up to the binding's terminating
+// semicolon. The outer run (Value) stops at a top-level `;`; the inner
+// run (Inner), used inside groups and `${…}`, consumes `;` because a
+// semicolon nested in an attrset/list/paren/interpolation is content,
+// not the binding terminator.
+
+Value      <- (Group / String / Comment / OuterText)*
+Inner      <- (Group / String / Comment / InnerText)*
+Group      <- BraceOpen Inner BraceClose
+            / BracketOpen Inner BracketClose
+            / ParenOpen Inner ParenClose
+// OuterText: a run of chars that are not structural delimiters, string
+// or comment openers, or the terminating `;`.
+OuterText  <- #((!(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
+// InnerText: like OuterText but `;` is allowed (it is group content).
+InnerText  <- #((!('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
+
+// ── Strings ──────────────────────────────────────────────────
+// Double-quoted and indented (''…'') strings, interpolation-aware so
+// a `}` or `;` inside a string or `${…}` does not break balancing.
+
+String        <- DString / IString
+DString       <- '"' #(DStringPart* '"')
+DStringPart   <- Interp / DEscape / DPlain
+DPlain        <- #((!('"' / '\\' / '${') .)+)
+DEscape       <- #('\\' .)
+IString       <- '\'\'' #(IStringPart* '\'\'')
+IStringPart   <- Interp / IEscape / IPlain
+// `''` is the closer; `'''` and `''$`/`''\` are escapes inside it.
+IEscape       <- #('\'\'' ('$' / '\\' / '\'') )
+IPlain        <- #((!('\'\'' / '${') .)+)
+Interp        <- '${' Inner '}'
+
+// ── Comments ─────────────────────────────────────────────────
+
+Comment    <- LineComment / BlockComment
+LineComment <- #('#' (!Newline .)*)
+BlockComment <- #('/*' (!'*/' .)* '*/')
+
+// ── Trivia ───────────────────────────────────────────────────
+
+WS         <- #([ \t\r\n]+)
+Newline    <- #('\r\n' / '\n')
+Trivia     <- (WS / Comment)*
+
+// ── Structural tokens ────────────────────────────────────────
+
+InheritKw    <- 'inherit' ![a-zA-Z0-9_]
+Equals       <- '='
+Dot          <- '.'
+Semi         <- ';'
+BraceOpen    <- '{'
+BraceClose   <- '}'
+BracketOpen  <- '['
+BracketClose <- ']'
+ParenOpen    <- '('
+ParenClose   <- ')'
+
+// ── Sentinel ─────────────────────────────────────────────────
+
+EOF        <- !.

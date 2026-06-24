@@ -108,12 +108,21 @@ refuses (exit 2) outside a git worktree, in stdin mode, or under fail-on-change.
   `chore: conformist fmt+fix`; dirty-tree policy in `commitPreflight`);
   subcommands `check` (`check.go`) and `version` (`version.go`) dispatch
   separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
-  eng shape — writes every absent shape file (`conformist.nix`, `version.env`,
-  and, greenfield, a complete `flake.nix`/`justfile`; all `//go:embed`-ed from
-  `cmd/conform/scaffold/`, the flake.nix/justfile kept byte-identical to
-  `templates/eng/` by a drift test — #41), never edits an existing file: an
-  already-present flake.nix/justfile is left untouched and its wiring is printed
-  to paste instead. Idempotent, exits 3 when it scaffolds (`ErrScaffolded`);
+  eng shape — writes every absent shape file (`conformist.nix`, a `version.env`
+  whose key is derived from the repo name — git origin remote, else the directory
+  basename, via `git.OriginRepoName` — and, greenfield, a complete
+  `flake.nix`/`justfile`; all `//go:embed`-ed from `cmd/conform/scaffold/`, the
+  flake.nix/justfile kept byte-identical to `templates/eng/` by a drift test —
+  #41). An existing `flake.nix` that is the recognized `eachDefaultSystem` shape
+  is edited **in place** to splice the `conformist` input and the per-system
+  outputs wiring (`cmd/conform/flakeedit/`, #61); any other shape (or
+  `--no-edit`) falls back to printing the wiring to paste, and an existing
+  justfile is never edited (its recipes are printed). flakeedit is a shallow Nix
+  PEG (two grammars, `nix.peg` + `outputs.peg`, via the `clarete/langlang/go`
+  runtime — modelled on amarbel-llc/doppelgang's `nixedit`), splicing by byte
+  offset so the rest of the file is preserved verbatim; it is per-target
+  idempotent and never clobbers an output attr it did not write. Idempotent
+  overall, exits 3 when it wrote or edited files (`ErrScaffolded`);
   a hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via
   `cmd/init`, `--completion` emits shell completions. Config flags live on

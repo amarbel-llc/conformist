@@ -21,7 +21,7 @@ func TestRunScaffoldsGreenfield(t *testing.T) {
 
 	var out bytes.Buffer
 
-	res, err := conform.Run(dir, &out)
+	res, err := conform.Run(dir, &out, conform.Options{})
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, allScaffolds, res.Wrote)
@@ -54,20 +54,20 @@ func TestRunScaffoldsGreenfield(t *testing.T) {
 func TestRunIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := conform.Run(dir, &bytes.Buffer{})
+	_, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
 	require.NoError(t, err)
 
-	res, err := conform.Run(dir, &bytes.Buffer{})
+	res, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
 	require.NoError(t, err)
 
 	require.Empty(t, res.Wrote, "second run must not rewrite existing files")
 	require.ElementsMatch(t, allScaffolds, res.Skipped)
 }
 
-// TestRunReportsExistingFlakeAndJustfile verifies the brownfield path: when
-// flake.nix and justfile already exist, conform leaves them untouched (editing
-// an existing flake.nix is the fragile part) and prints the wiring snippets to
-// paste, while still writing the absent conformist.nix / version.env.
+// TestRunReportsExistingFlakeAndJustfile verifies the fallback path: when
+// flake.nix is not the recognized eachDefaultSystem shape (and justfile, which
+// is never edited, exists), conform leaves them untouched and prints the wiring
+// snippets to paste, while still writing the absent conformist.nix / version.env.
 func TestRunReportsExistingFlakeAndJustfile(t *testing.T) {
 	dir := t.TempDir()
 
@@ -78,7 +78,7 @@ func TestRunReportsExistingFlakeAndJustfile(t *testing.T) {
 
 	var out bytes.Buffer
 
-	res, err := conform.Run(dir, &out)
+	res, err := conform.Run(dir, &out, conform.Options{})
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, []string{"conformist.nix", "version.env", "sweatfile"}, res.Wrote)
@@ -108,7 +108,7 @@ func TestRunPreservesExistingFiles(t *testing.T) {
 	existing := filepath.Join(dir, "conformist.nix")
 	require.NoError(t, os.WriteFile(existing, []byte(sentinel), 0o644))
 
-	res, err := conform.Run(dir, &bytes.Buffer{})
+	res, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, []string{"version.env", "sweatfile", "flake.nix", "justfile"}, res.Wrote)
@@ -117,6 +117,99 @@ func TestRunPreservesExistingFiles(t *testing.T) {
 	got, err := os.ReadFile(existing)
 	require.NoError(t, err)
 	require.Equal(t, sentinel, string(got), "existing conformist.nix must be untouched")
+}
+
+// recognizedFlake is a brownfield flake in the eachDefaultSystem shape that
+// does not yet reference conformist — the in-place editing target.
+const recognizedFlake = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    {
+      self,
+      nixpkgs,
+      utils,
+    }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        packages.default = pkgs.hello;
+      }
+    );
+}
+`
+
+// TestRunEditsRecognizedFlake verifies the in-place path: a recognized
+// flake.nix is edited (not printed), and the conformist wiring lands in the
+// file. The edit counts as a tree change (exit 3).
+func TestRunEditsRecognizedFlake(t *testing.T) {
+	dir := t.TempDir()
+	flakePath := filepath.Join(dir, "flake.nix")
+	require.NoError(t, os.WriteFile(flakePath, []byte(recognizedFlake), 0o644))
+
+	var out bytes.Buffer
+	res, err := conform.Run(dir, &out, conform.Options{})
+	require.NoError(t, err)
+
+	require.NotEmpty(t, res.Edited, "a recognized flake.nix must be edited in place")
+	require.True(t, res.Changed())
+	require.NotContains(t, res.Skipped, "flake.nix", "an edited flake.nix is not 'kept'")
+
+	got, err := os.ReadFile(flakePath)
+	require.NoError(t, err)
+	require.Contains(t, string(got), `conformist.url = "github:amarbel-llc/conformist";`)
+	require.Contains(t, string(got), "eval = conformist.lib.evalModule pkgs {")
+	require.Contains(t, string(got), "packages.default = pkgs.hello;", "the repo's own output is preserved")
+
+	report := out.String()
+	require.Contains(t, report, "edited flake.nix")
+	require.NotContains(t, report, "add to flake.nix", "an edited flake.nix must not also print the snippet")
+}
+
+// TestRunNoEditPrintsSnippet verifies --no-edit leaves a recognized flake.nix
+// untouched and prints the wiring instead.
+func TestRunNoEditPrintsSnippet(t *testing.T) {
+	dir := t.TempDir()
+	flakePath := filepath.Join(dir, "flake.nix")
+	require.NoError(t, os.WriteFile(flakePath, []byte(recognizedFlake), 0o644))
+
+	var out bytes.Buffer
+	res, err := conform.Run(dir, &out, conform.Options{NoEdit: true})
+	require.NoError(t, err)
+
+	require.Empty(t, res.Edited, "--no-edit must not edit flake.nix")
+	require.Contains(t, res.Skipped, "flake.nix")
+
+	got, err := os.ReadFile(flakePath)
+	require.NoError(t, err)
+	require.Equal(t, recognizedFlake, string(got), "--no-edit must leave flake.nix byte-identical")
+
+	require.Contains(t, out.String(), "add to flake.nix", "--no-edit must print the wiring to paste")
+}
+
+// TestVersionEnvKeyFromDirName verifies version.env's key is derived from the
+// repo name (here the directory basename, with git's upward search fenced).
+func TestVersionEnvKeyFromDirName(t *testing.T) {
+	parent := t.TempDir()
+	// Fence git so OriginRepoName cannot resolve the enclosing worktree's
+	// origin ($TMPDIR lives inside it), forcing the directory-basename path.
+	t.Setenv("GIT_CEILING_DIRECTORIES", parent)
+	dir := filepath.Join(parent, "my-repo")
+	require.NoError(t, os.Mkdir(dir, 0o755))
+
+	_, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(filepath.Join(dir, "version.env"))
+	require.NoError(t, err)
+	require.Contains(t, string(got), "MY_REPO_VERSION=", "key derives from the repo dir name")
+	require.NotContains(t, string(got), "EXAMPLE_VERSION", "the EXAMPLE placeholder must be replaced")
 }
 
 // TestScaffoldFlakeAndJustfileMatchTemplate guards against drift: the full-file

@@ -14,17 +14,20 @@ import (
 var ErrScaffolded = errors.New("scaffolded conformist files")
 
 func newConformCmd() *cobra.Command {
-	return &cobra.Command{
+	var noEdit bool
+
+	cmd := &cobra.Command{
 		Use:   "conform",
 		Short: "Scaffold this repo into the amarbel-llc conformist shape",
 		Long: "Transition the current repo toward the amarbel-llc conformist shape. Writes " +
-			"each shape file that is absent — conformist.nix, version.env, a sweatfile wiring " +
-			"conformist's pre-commit and (opt-in) repair hooks, and (for a greenfield repo) a " +
-			"complete flake.nix and justfile — skipping any that already exist. It is " +
-			"idempotent and never edits an existing file: when flake.nix or justfile is already " +
-			"present, conform leaves it untouched and prints the wiring to paste instead, since " +
-			"auto-rewriting an arbitrary flake.nix is fragile. Exits 0 when nothing was written, " +
-			"3 when it scaffolded files.",
+			"each shape file that is absent — conformist.nix, a version.env keyed to the repo " +
+			"name, a sweatfile wiring conformist's pre-commit and (opt-in) repair hooks, and " +
+			"(for a greenfield repo) a complete flake.nix and justfile. An existing flake.nix " +
+			"that is the recognized eachDefaultSystem shape is edited IN PLACE to add the " +
+			"conformist input and the per-system outputs wiring; any other shape (or --no-edit) " +
+			"falls back to printing the wiring to paste. An existing justfile is never edited; " +
+			"its recipes are printed. It is idempotent. Exits 0 when nothing changed, 3 when it " +
+			"wrote or edited files.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
@@ -34,16 +37,21 @@ func newConformCmd() *cobra.Command {
 				return fmt.Errorf("failed to resolve working directory: %w", err)
 			}
 
-			res, err := conform.Run(dir, cmd.OutOrStdout())
+			res, err := conform.Run(dir, cmd.OutOrStdout(), conform.Options{NoEdit: noEdit})
 			if err != nil {
 				return fmt.Errorf("conform: %w", err)
 			}
 
-			if len(res.Wrote) > 0 {
+			if res.Changed() {
 				return ErrScaffolded
 			}
 
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&noEdit, "no-edit", false,
+		"do not edit an existing flake.nix in place; print the wiring to paste instead")
+
+	return cmd
 }
