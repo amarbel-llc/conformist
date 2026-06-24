@@ -297,7 +297,7 @@ debug-bench-backends iterations="3":
 
 # --- verify ---
 
-verify: verify-linter-fixtures verify-no-remarshal
+verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse
 
 # Behavioral fixture tests for the nix/linters/ whole-tree checks: build the
 # `linter-fixtures` aggregate, which runs each compiled linter against pass/fail
@@ -333,6 +333,39 @@ verify-no-remarshal:
         exit 1
     fi
     echo "verify-no-remarshal: no remarshal-backed format generators outside the sanctioned helper"
+
+# Parse-safety smoke for the in-place flake editor (conformist#63): run `conform`
+# over the recognized-shape fixtures in test/flakeedit/ in throwaway temp dirs and
+# `nix-instantiate --parse` each rewritten flake, so a flakeedit splice regression
+# that yields unparseable Nix fails the lane. Syntax-only (--parse, no eval), so
+# it stays cheap. --force-formatter exercises the value-replacement splice too.
+verify-flakeedit-parse:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin="$(mktemp -d)/conformist"
+    nix develop --command go build -o "$bin" .
+    shopt -s nullglob
+    fixtures=(test/flakeedit/*.nix)
+    if [ "${#fixtures[@]}" -eq 0 ]; then
+        echo "verify-flakeedit-parse: no fixtures in test/flakeedit/" >&2
+        exit 2
+    fi
+    for f in "${fixtures[@]}"; do
+        d="$(mktemp -d)"
+        cp "$f" "$d/flake.nix"
+        rc=0
+        ( cd "$d" && "$bin" conform --force-formatter ) >/dev/null 2>&1 || rc=$?
+        # conform exits 0 (no change) or 3 (edited); 2 is an operational error.
+        if [ "$rc" = 2 ]; then
+            echo "verify-flakeedit-parse: conform errored on $f" >&2
+            exit 1
+        fi
+        if ! nix-instantiate --parse "$d/flake.nix" >/dev/null; then
+            echo "verify-flakeedit-parse: edited $f is not parseable Nix" >&2
+            exit 1
+        fi
+        echo "verify-flakeedit-parse: ok ($(basename "$f"))"
+    done
 
 # OPT-IN: drift check for the committed godyn-graph.json — regenerate the graph
 # into a scratch file and diff it against the committed copy, failing if they

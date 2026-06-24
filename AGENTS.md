@@ -134,7 +134,10 @@ under fail-on-change.
   `devShells.default` is merged into (conformist's tools spliced into its
   `packages` list) and an existing `formatter` is replaced only under
   `--force-formatter`; otherwise a pre-existing attr is reported as a conflict
-  to reconcile by hand (#63). Idempotent
+  to reconcile by hand (#63). `just verify-flakeedit-parse` (in the `verify`
+  lane) runs `conform` over the `test/flakeedit/` fixtures and
+  `nix-instantiate --parse`s each rewrite, so a splice regression that yields
+  unparseable Nix fails CI. Idempotent
   overall, exits 3 when it wrote or edited files (`ErrScaffolded`);
   a hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via
