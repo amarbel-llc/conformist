@@ -315,7 +315,12 @@ func bindingNames(tree langlang.Tree, block langlang.NodeID) map[string]bool {
 }
 
 // bindingPaths returns the dotted attr-paths bound at the top level of an
-// attrset (formatter, checks.formatting, packages.conformist-repair, …).
+// attrset (formatter, checks.formatting, packages.conformist-repair, …). When a
+// binding's value is itself a sole attrset (the nested form
+// `packages = { conformist-pre-commit = …; }`), its inner keys are registered
+// under the outer path too (`packages.conformist-pre-commit`), so idempotency
+// recognizes a flake hand-wired in nested form and does not duplicate-define it
+// (#63).
 func bindingPaths(tree langlang.Tree, block langlang.NodeID) map[string]bool {
 	paths := map[string]bool{}
 	for _, b := range collectBindings(tree, block) {
@@ -323,8 +328,23 @@ func bindingPaths(tree langlang.Tree, block langlang.NodeID) map[string]bool {
 		if !ok {
 			continue
 		}
-		if path, _, ok := keyValPath(tree, kv); ok && len(path) > 0 {
-			paths[strings.Join(path, ".")] = true
+
+		path, val, ok := keyValPath(tree, kv)
+		if !ok || len(path) == 0 {
+			continue
+		}
+
+		base := strings.Join(path, ".")
+		paths[base] = true
+
+		// Nested attrset form: register base.<innerKey> for each inner binding,
+		// text-scanned from the attrset's opaque inner content.
+		if grp, ok := soleGroup(tree, val); ok {
+			if inner, ok := childNamed(tree, grp, "Inner"); ok {
+				for _, key := range scanBlockKeys(tree.Text(inner)) {
+					paths[base+"."+key] = true
+				}
+			}
 		}
 	}
 

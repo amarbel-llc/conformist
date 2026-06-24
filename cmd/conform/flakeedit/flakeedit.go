@@ -364,6 +364,18 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter b
 			continue
 		}
 
+		// If the attr's parent exists as a nested attrset (`packages = { … }`),
+		// splicing the dotted form (`packages.conformist-* = …`) would
+		// double-define it — invalid Nix. Report a conflict instead of adding
+		// (#63); merging into a nested attrset is out of scope.
+		if parent, ok := dottedParent(a.path); ok && outs.retExisting[parent] {
+			if !alreadyWired {
+				conflicts = append(conflicts, a.path)
+			}
+
+			continue
+		}
+
 		body.WriteString(a.text(i))
 		added = append(added, a.path)
 	}
@@ -373,6 +385,17 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter b
 
 	// Separate the new attributes from the existing ones with a blank line.
 	return beforeCloser(src, outs.retCloseOff, "\n"+body.String()), added, conflicts
+}
+
+// dottedParent returns the parent attr-path of a dotted path
+// ("packages.conformist-pre-commit" → "packages"), and false for a
+// single-segment path with no parent ("formatter").
+func dottedParent(path string) (string, bool) {
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		return path[:i], true
+	}
+
+	return "", false
 }
 
 // devShellPackages are the tools conform merges into an existing

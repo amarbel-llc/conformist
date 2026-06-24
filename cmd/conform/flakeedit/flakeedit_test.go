@@ -261,6 +261,116 @@ func TestApplyDevShellMergeIdempotent(t *testing.T) {
 	require.Equal(t, string(once), string(twice))
 }
 
+// nestedConformist is a flake hand-wired to conformist using NESTED attrsets
+// (`checks = { formatting = …; }`, `packages = { conformist-* = …; }`,
+// `devShells = { default = …; }`) instead of the dotted form conform writes.
+// Apply must recognize these as already present (#63) — keying idempotency on
+// dotted paths alone would re-add them and double-define the attrsets.
+const nestedConformist = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+    conformist.url = "github:amarbel-llc/conformist";
+  };
+
+  outputs =
+    {
+      conformist,
+      self,
+      nixpkgs,
+      utils,
+    }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        conformistPkg = conformist.packages.${system}.default;
+        eval = conformist.lib.evalModule pkgs {
+          imports = [ conformist.lib.presets.eng ./conformist.nix ];
+          package = conformistPkg;
+        };
+        impureEval = conformist.lib.evalModule pkgs {
+          imports = [ conformist.lib.presets.eng-impure ];
+          package = conformistPkg;
+          projectRootFile = "flake.nix";
+        };
+      in
+      {
+        formatter = eval.config.build.wrapper;
+        checks = {
+          formatting = eval.config.build.check self;
+        };
+        packages = {
+          default = pkgs.hello;
+          conformist-impure-config = impureEval.config.build.configFile;
+          conformist-pre-commit = eval.config.build.preCommit;
+          conformist-repair = eval.config.build.repair;
+        };
+        devShells = {
+          default = pkgs.mkShell {
+            packages = [
+              conformistPkg
+              eval.config.build.preCommit
+              eval.config.build.repair
+              pkgs.just
+            ];
+          };
+        };
+      }
+    );
+}
+`
+
+// TestApplyDetectsNestedConformistAttrs pins #63's nested-attrset idempotency: a
+// flake already wired in nested-attrset form is a no-op, not a duplicate-key
+// rewrite.
+func TestApplyDetectsNestedConformistAttrs(t *testing.T) {
+	out, report, err := flakeedit.Apply([]byte(nestedConformist), flakeedit.Options{})
+	require.NoError(t, err)
+	require.False(t, report.Changed(), "a nested-form wired flake must be a no-op, got added=%v", report.Added)
+	require.Equal(t, nestedConformist, string(out))
+}
+
+// TestApplyNestedParentConflict verifies conform does not double-define a
+// nested attrset: a fresh flake whose `packages` is a nested attrset gets the
+// conformist packages.* reported as conflicts rather than spliced in as a
+// second dotted `packages` binding (which would be invalid Nix).
+func TestApplyNestedParentConflict(t *testing.T) {
+	const nestedPackages = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    { self, nixpkgs, utils }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        packages = {
+          default = pkgs.hello;
+        };
+      }
+    );
+}
+`
+	out, report, err := flakeedit.Apply([]byte(nestedPackages), flakeedit.Options{})
+	require.NoError(t, err)
+
+	got := string(out)
+	// the conformist packages.* are reported as conflicts, not spliced in as a
+	// second dotted `packages` binding (which would double-define packages).
+	require.Contains(t, report.Conflicts, "packages.conformist-impure-config")
+	require.Contains(t, report.Conflicts, "packages.conformist-pre-commit")
+	require.Contains(t, report.Conflicts, "packages.conformist-repair")
+	require.NotContains(t, got, "packages.conformist-pre-commit =",
+		"must not splice a dotted packages.* alongside the nested packages attrset")
+	require.Contains(t, got, "packages = {", "the repo's nested packages attrset is untouched")
+}
+
 func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
 	// A flake whose inputs block has none of conformist/nixpkgs/utils:
 	// all three conformist inputs are added.
