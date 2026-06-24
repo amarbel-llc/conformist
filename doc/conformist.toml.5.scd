@@ -178,6 +178,19 @@ plus:
 	untracked outputs. Attribution is by the same git-status delta around the
 	linter's repair, so a pre-existing untracked file is never swept in.
 
+*stage-deleted-outputs*
+	Defaults to false. Effective only when *restage-repair-outputs* is also true.
+	When both are set, *--staged* stages the deletions the linter's
+	*repair-command* performs (e.g. a package-move codegen that removes a
+	relocated file), so the removal is part of the commit rather than left as an
+	unstaged deletion.
+
+	Staging a deletion removes a path from the commit's tree --- the most
+	destructive stage mutation --- so it is a distinct opt-in:
+	*restage-repair-outputs* and *stage-new-outputs* never stage deletions. Like
+	the other tiers, attribution is by the git-status delta around this linter's
+	repair.
+
 # ENVIRONMENT
 
 Every option has an environment override named by upper-casing the key and

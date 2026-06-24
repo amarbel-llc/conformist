@@ -149,6 +149,17 @@ type Linter struct {
 	// Attribution is still by git-status delta around the linter's repair, so a
 	// pre-existing untracked file is never swept in. Default false.
 	StageNewOutputs bool `mapstructure:"stage-new-outputs,omitempty" toml:"stage-new-outputs,omitempty"`
+	// StageDeletedOutputs widens the --staged restage scope further still
+	// (tier 4, conformist#57, RFC-0002 §2.4): when set alongside
+	// RestageRepairOutputs on a whole-tree codegen-repair linter, --staged stages
+	// the deletions the linter's repair-command performed (e.g. a package-move
+	// codegen that removes a relocated file), so the removal is part of the commit
+	// rather than left as an unstaged deletion. Staging a deletion removes a path
+	// from the commit's tree — the most destructive stage mutation — so it is a
+	// distinct opt-in: tiers 2 and 3 MUST NOT stage deletions, only this tier
+	// does. Has effect only when RestageRepairOutputs is also true; ignored
+	// otherwise. Attribution is by the same git-status delta. Default false.
+	StageDeletedOutputs bool `mapstructure:"stage-deleted-outputs,omitempty" toml:"stage-deleted-outputs,omitempty"`
 	// WorkingDir is an optional subdirectory (relative to the tree root) in which
 	// to run this linter's check/repair commands, e.g. a Go submodule whose
 	// codegen must run from there. Empty (the default) runs at the tree root,

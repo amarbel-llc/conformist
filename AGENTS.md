@@ -93,8 +93,13 @@ repair, so a stale generated sibling does not strand the commit (#55). Adding
 `stage-new-outputs` (tier 3, #56) additionally stages the brand-new (untracked)
 files such a linter's repair creates — the delta is then taken with
 `--untracked-files=all`; it is a distinct opt-in because staging untracked files
-is more dangerous, so `restage-repair-outputs` alone never stages them. It still
-refuses (exit 2) outside a git worktree, in stdin mode, or under fail-on-change.
+is more dangerous, so `restage-repair-outputs` alone never stages them. Adding
+`stage-deleted-outputs` (tier 4, #57) additionally stages the deletions such a
+linter's repair performs (e.g. a package-move codegen removing a relocated
+file); it is the most destructive mutation, so it too is a distinct opt-in and
+the default now excludes deletions from the restage set (tiers 2–3 never stage a
+removal). It still refuses (exit 2) outside a git worktree, in stdin mode, or
+under fail-on-change.
 
 ## Architecture
 

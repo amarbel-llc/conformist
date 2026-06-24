@@ -37,6 +37,23 @@ func codegenStub(t *test_ui.T, dir, dst string) string {
 	return script
 }
 
+// deleteStub writes an executable whole-tree repair stub that deletes a
+// tree-root-relative victim path. It stands in for a package-move codegen
+// (dewey-reposition) whose repair-command removes a relocated file
+// (conformist#57). The stub is idempotent (rm -f), so re-runs are harmless.
+func deleteStub(t *test_ui.T, dir, victim string) string {
+	t.Helper()
+
+	script := filepath.Join(dir, "delete-"+strings.ReplaceAll(victim, "/", "_")+".sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"rm -f '" + victim + "'\n" +
+		"exit 0\n"
+	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+
+	return script
+}
+
 // TestStagedRestagesRepairOutputs pins conformist#55: a whole-tree codegen-repair
 // linter that opts into restage-repair-outputs has the files its repair-command
 // regenerates restaged by --staged, even though they were never in the index —
@@ -388,4 +405,167 @@ func TestStagedNewOutputsGate(tt *testing.T) {
 
 	// the new facade is left untracked (??), not staged — the tier-3 gate.
 	as.Equal("?? pkgs/foo.generated", git("status", "--porcelain", "--", "pkgs/foo.generated"))
+}
+
+// TestStagedStagesDeletedRepairOutputs pins conformist#57 (tier 4): a whole-tree
+// codegen-repair linter that opts into BOTH restage-repair-outputs and
+// stage-deleted-outputs has the deletions its repair-command performs staged by
+// --staged, so a repair-driven removal lands in the commit.
+func TestStagedStagesDeletedRepairOutputs(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := t.TempDir()
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	aux := t.TempDir()
+	srcPath := filepath.Join("internal", "foo.src")
+	// victim is a committed tracked file the repair deletes (a relocated file).
+	victimPath := filepath.Join("pkgs", "old.generated")
+	stub := deleteStub(t, aux, "pkgs/old.generated")
+
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
+	as.NoError(os.WriteFile(srcPath, []byte("original\n"), 0o644))
+	as.NoError(os.WriteFile(victimPath, []byte("relocated away\n"), 0o644))
+
+	configPath := filepath.Join(tempDir, "conformist.toml")
+	passesFiles := false
+	cfg := &config.Config{
+		LinterConfigs: map[string]*config.Linter{
+			"reposition": {
+				Command:              "true",
+				RepairCommand:        stub,
+				Includes:             []string{"internal/*"},
+				PassesFiles:          &passesFiles,
+				RestageRepairOutputs: true,
+				StageDeletedOutputs:  true,
+			},
+		},
+	}
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	head := git("rev-parse", "HEAD")
+
+	// edit + stage ONLY the source; the repair will delete the victim.
+	as.NoError(os.WriteFile(srcPath, []byte("edited\n"), 0o644))
+	git("add", "internal/foo.src")
+
+	conformist(
+		t,
+		withArgs("--staged", "--exit-zero-on-fix", "--no-cache"),
+		withNoError(t),
+	)
+
+	// the repair removed the victim from disk ...
+	_, statErr := os.Stat(victimPath)
+	as.True(os.IsNotExist(statErr), "the victim file must be deleted on disk")
+
+	// ... and tier 4 staged the deletion alongside the source.
+	cached := strings.Fields(git("diff", "--cached", "--name-only"))
+	as.ElementsMatch([]string{"internal/foo.src", "pkgs/old.generated"}, cached)
+
+	// the deletion is staged (D ) with no leftover unstaged removal.
+	as.Equal("D  pkgs/old.generated", git("status", "--porcelain", "--", "pkgs/old.generated"))
+
+	as.Equal(head, git("rev-parse", "HEAD"))
+}
+
+// TestStagedDeletedOutputsGate pins the tier-4 gate of conformist#57: WITHOUT
+// stage-deleted-outputs (tier 2 alone), a repair-driven deletion is performed on
+// disk but left UNSTAGED — staging a deletion removes a path from the commit's
+// tree, the most destructive mutation, which tier 2 MUST NOT do (RFC-0002 §2.2).
+func TestStagedDeletedOutputsGate(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := t.TempDir()
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	aux := t.TempDir()
+	srcPath := filepath.Join("internal", "foo.src")
+	victimPath := filepath.Join("pkgs", "old.generated")
+	stub := deleteStub(t, aux, "pkgs/old.generated")
+
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
+	as.NoError(os.WriteFile(srcPath, []byte("original\n"), 0o644))
+	as.NoError(os.WriteFile(victimPath, []byte("relocated away\n"), 0o644))
+
+	configPath := filepath.Join(tempDir, "conformist.toml")
+	passesFiles := false
+	cfg := &config.Config{
+		LinterConfigs: map[string]*config.Linter{
+			"reposition": {
+				Command:              "true",
+				RepairCommand:        stub,
+				Includes:             []string{"internal/*"},
+				PassesFiles:          &passesFiles,
+				RestageRepairOutputs: true,
+				// StageDeletedOutputs defaults false: tier 2 alone.
+			},
+		},
+	}
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	as.NoError(os.WriteFile(srcPath, []byte("edited\n"), 0o644))
+	git("add", "internal/foo.src")
+
+	conformist(
+		t,
+		withArgs("--staged", "--exit-zero-on-fix", "--no-cache"),
+		withNoError(t),
+	)
+
+	// the repair removed the victim from disk ...
+	_, statErr := os.Stat(victimPath)
+	as.True(os.IsNotExist(statErr), "the repair still runs; only staging the deletion is gated")
+
+	// ... but tier 2 alone did NOT stage the deletion: only the source is staged.
+	cached := strings.Fields(git("diff", "--cached", "--name-only"))
+	as.ElementsMatch([]string{"internal/foo.src"}, cached)
+
+	// the deletion is left as an unstaged worktree removal (still tracked in the
+	// index), not staged — the tier-4 gate.
+	as.Equal("pkgs/old.generated", git("ls-files", "--deleted"))
 }

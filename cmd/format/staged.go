@@ -269,12 +269,24 @@ func stagedRepairObserver(treeRoot string) repairObserver {
 			dirtyBefore[e.Path] = true
 		}
 
+		stageDeletions := l.IsStageDeletedOutputs()
+
 		var outputs []string
 
 		for _, e := range after {
-			if !dirtyBefore[e.Path] {
-				outputs = append(outputs, e.Path)
+			if dirtyBefore[e.Path] {
+				continue
 			}
+
+			// A repair-driven deletion is staged only at tier 4
+			// (stage-deleted-outputs); tiers 2 and 3 MUST NOT stage deletions
+			// (RFC-0002 §2.2), so the removed path is left as an unstaged
+			// deletion unless this linter opts in.
+			if isDeletion(e) && !stageDeletions {
+				continue
+			}
+
+			outputs = append(outputs, e.Path)
 		}
 
 		if len(outputs) > 0 {
@@ -283,6 +295,14 @@ func stagedRepairObserver(treeRoot string) repairObserver {
 
 		return outputs, nil
 	}
+}
+
+// isDeletion reports whether a git-status entry represents a removed path —
+// either an unstaged worktree deletion (` D`) or an already-staged deletion
+// (`D `). git add of such a path stages the removal, so the tier-4 gate keys on
+// this to decide whether a repair-driven deletion enters the commit.
+func isDeletion(e git.StatusEntry) bool {
+	return e.Staged == 'D' || e.Unstaged == 'D'
 }
 
 // restagePartialBlobs formats the staged blob of each partially-staged file in

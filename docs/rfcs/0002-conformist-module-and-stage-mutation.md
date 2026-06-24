@@ -112,7 +112,7 @@ broader capability. The capabilities form four tiers:
 | 1 | Reformat staged files and restage the formatted content | none (always on) | specified by RFC 0001 + #25/#40 |
 | 2 | Restage a linter's **modified tracked** repair outputs | `restage-repair-outputs` | specified here; implemented by #55 |
 | 3 | Stage a linter's **newly created (untracked)** repair outputs | `restage-repair-outputs` + `stage-new-outputs` | specified here; implemented by #56 |
-| 4 | Stage a linter's repair **deletions** | `restage-repair-outputs` + `stage-deleted-outputs` | specified here; not yet implemented |
+| 4 | Stage a linter's repair **deletions** | `restage-repair-outputs` + `stage-deleted-outputs` | specified here; implemented by #57 |
 
 #### 2.1 Tier 1 — reformat and restage staged files (default)
 
@@ -333,9 +333,10 @@ existing command tests (`cmd/`, run under `just test-go`). Tier 2 is covered by
 |-------------|------|-------------|
 | §2.2 restage modified tracked outputs | `TestStagedRestagesRepairOutputs` | an opt-in codegen-repair linter's regenerated facade is restaged though never staged |
 | §2.2 / §2.5 per-linter attribution + opt-in gate | `TestStagedRepairOutputsOptInGate` | a non-opt-in linter's output is left unstaged; only the opt-in linter's output is restaged |
-
-Tiers 3 and 4 are not yet implemented; their conformance tests are to be added
-when they are.
+| §2.3 stage new untracked outputs | `TestStagedStagesNewRepairOutputs` | a tier-3 linter's brand-new repair output is staged |
+| §2.3 tier-3 gate | `TestStagedNewOutputsGate` | without `stage-new-outputs`, a repair-created file is left untracked |
+| §2.4 stage repair deletions | `TestStagedStagesDeletedRepairOutputs` | a tier-4 linter's repair-driven deletion is staged |
+| §2.4 tier-4 gate | `TestStagedDeletedOutputsGate` | without `stage-deleted-outputs`, a repair-driven deletion is left unstaged |
 
 When conformist's CLI surface is later specified against `bats-emo`, these tiers
 SHOULD be re-expressed as binary-injected bats conformance tests so an
@@ -353,10 +354,12 @@ restaging for a linter that explicitly opts in.
 default-false and gated behind `restage-repair-outputs`, so it is backwards
 compatible — a lane that does not opt in behaves exactly as tier 2.
 
-**Tier 4.** `stage-deleted-outputs` is specified here but not yet implemented
-(tracked as conformist#57). Until implemented, an implementation MUST ignore it
-(treating a tier-4 lane as tier-2/3). When implemented, it remains default-false
-and gated behind `restage-repair-outputs`, so adding it is backwards compatible.
+**Tier 4.** `stage-deleted-outputs` is implemented by conformist#57. It is
+default-false and gated behind `restage-repair-outputs`, so it is backwards
+compatible. Implementing it also closed a latent gap: tiers 2–3 had been
+staging a repair-driven deletion via `git add` (which stages removals), so the
+default now explicitly excludes deletions from the restage set unless tier 4 is
+enabled, per §2.2.
 
 **Module interface (§4).** The §4 module shape is exploratory and not yet
 ratified; the current Nix outputs (`build.{wrapper,preCommit,repair,check}`,

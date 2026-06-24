@@ -56,6 +56,16 @@ func (l *Linter) IsStageNewOutputs() bool {
 	return l.config.StageNewOutputs && l.IsRestageRepairOutputs()
 }
 
+// IsStageDeletedOutputs reports whether this linter opts into staging the
+// deletions its repair-command performs (tier 4, conformist#57, RFC-0002 §2.4).
+// Like tier 3 it is effective only when the linter qualifies for tier-2
+// restaging (IsRestageRepairOutputs): staging a deletion removes a path from the
+// commit's tree, the most destructive stage mutation, so it is gated behind both
+// the tier-2 opt-in and its own flag. Tiers 2 and 3 MUST NOT stage deletions.
+func (l *Linter) IsStageDeletedOutputs() bool {
+	return l.config.StageDeletedOutputs && l.IsRestageRepairOutputs()
+}
+
 func (l *Linter) hasNoPositionalArgSupport() bool {
 	return l.config.NoPositionalArgSupport != nil && *l.config.NoPositionalArgSupport
 }
