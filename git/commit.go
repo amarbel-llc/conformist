@@ -22,7 +22,22 @@ type StatusEntry struct {
 // --commit (#24) nor the --staged (#25) flow touches paths git does not
 // already track.
 func StatusEntries(ctx context.Context, treeRoot string) ([]StatusEntry, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "status", "--porcelain", "-z", "--untracked-files=no")
+	return statusEntries(ctx, treeRoot, "no")
+}
+
+// StatusEntriesWithUntracked is StatusEntries plus untracked files
+// (`--untracked-files=all`, so files inside untracked directories are listed
+// individually rather than collapsed into a single directory entry). Untracked
+// entries carry `?` in both status columns. Used by the tier-3 staged lane
+// (conformist#56) to attribute brand-new repair outputs by status delta.
+func StatusEntriesWithUntracked(ctx context.Context, treeRoot string) ([]StatusEntry, error) {
+	return statusEntries(ctx, treeRoot, "all")
+}
+
+// statusEntries runs `git status --porcelain -z` with the given
+// --untracked-files mode and parses the toplevel-relative entries.
+func statusEntries(ctx context.Context, treeRoot, untracked string) ([]StatusEntry, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "status", "--porcelain", "-z", "--untracked-files="+untracked)
 
 	out, err := cmd.Output()
 	if err != nil {

@@ -162,8 +162,21 @@ plus:
 	(not another linter's). Ignored unless the linter is whole-tree
 	(*passes-files* = false) and has a *repair-command*.
 
-	Only modified _tracked_ outputs are restaged: a brand-new (untracked) output
-	or a deletion the repair performs is not staged by this flag.
+	Only modified _tracked_ outputs are restaged by this flag: staging a
+	brand-new (untracked) output is the separate *stage-new-outputs* opt-in
+	(below), and staging a deletion the repair performs is *stage-deleted-outputs*.
+
+*stage-new-outputs*
+	Defaults to false. Effective only when *restage-repair-outputs* is also true.
+	When both are set, *--staged* additionally stages brand-new (untracked) files
+	the linter's *repair-command* creates, in addition to the modified tracked
+	outputs *restage-repair-outputs* covers.
+
+	Staging untracked files is more dangerous than restaging tracked ones --- a
+	buggy or over-broad codegen could sweep unintended new files into history ---
+	so it is a distinct opt-in: *restage-repair-outputs* alone never stages
+	untracked outputs. Attribution is by the same git-status delta around the
+	linter's repair, so a pre-existing untracked file is never swept in.
 
 # ENVIRONMENT
 

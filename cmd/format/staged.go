@@ -233,14 +233,24 @@ func restageFullyStaged(
 
 // stagedRepairObserver returns a repairObserver that wraps an opt-in
 // restage-repair-outputs linter's repair (conformist#55) in a git-status
-// snapshot, reporting the toplevel-relative tracked paths the repair newly made
-// dirty. Brand-new (untracked) outputs are NOT reported — StatusEntries uses
-// --untracked-files=no, and staging untracked files is a separate, more
-// dangerous capability tier (see the staged-restage RFC). A path already dirty
-// before the repair is excluded, so only this linter's own writes are captured.
+// snapshot, reporting the toplevel-relative paths the repair newly made dirty.
+// A path already dirty before the repair is excluded, so only this linter's own
+// writes are captured.
+//
+// By default the snapshots use --untracked-files=no, so brand-new (untracked)
+// outputs are NOT reported — staging untracked files is the more dangerous
+// tier-3 capability. A linter that also opts into stage-new-outputs
+// (conformist#56, IsStageNewOutputs) instead gets --untracked-files=all
+// snapshots, so a file its repair creates appears in the after-minus-before
+// delta and is staged.
 func stagedRepairObserver(treeRoot string) repairObserver {
 	return func(ctx context.Context, l *format.Linter, repair func(context.Context) error) ([]string, error) {
-		before, err := git.StatusEntries(ctx, treeRoot)
+		snapshot := git.StatusEntries
+		if l.IsStageNewOutputs() {
+			snapshot = git.StatusEntriesWithUntracked
+		}
+
+		before, err := snapshot(ctx, treeRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to snapshot tree before %q repair: %w", l.Name(), err)
 		}
@@ -249,7 +259,7 @@ func stagedRepairObserver(treeRoot string) repairObserver {
 			return nil, err
 		}
 
-		after, err := git.StatusEntries(ctx, treeRoot)
+		after, err := snapshot(ctx, treeRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to snapshot tree after %q repair: %w", l.Name(), err)
 		}

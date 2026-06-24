@@ -13,20 +13,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// codegenSrc is the tree-root-relative source file every codegenStub
+// regenerates from; the staged-repair tests edit and stage exactly this path.
+const codegenSrc = "internal/foo.src"
+
 // codegenStub writes an executable whole-tree repair stub that regenerates a
-// sibling file (dst) from a source file (src), both tree-root-relative. It
-// stands in for a codegen-repair lane (dagnabit export, tommy gen, …) whose
-// repair-command rewrites a generated file OTHER than the staged source
-// (conformist#55). The stub writes "// generated from <src contents>" so the
-// regenerated content is observable.
-func codegenStub(t *test_ui.T, dir, src, dst string) string {
+// sibling file (dst, tree-root-relative) from codegenSrc. It stands in for a
+// codegen-repair lane (dagnabit export, tommy gen, …) whose repair-command
+// rewrites a generated file OTHER than the staged source (conformist#55). The
+// stub writes "// generated from <src contents>" so the regenerated content is
+// observable.
+func codegenStub(t *test_ui.T, dir, dst string) string {
 	t.Helper()
 
 	script := filepath.Join(dir, "codegen-"+strings.ReplaceAll(dst, "/", "_")+".sh")
 	body := "#!/usr/bin/env bash\n" +
 		"set -euo pipefail\n" +
 		"mkdir -p \"$(dirname '" + dst + "')\"\n" +
-		"printf '// generated from %s\\n' \"$(cat '" + src + "')\" > '" + dst + "'\n" +
+		"printf '// generated from %s\\n' \"$(cat '" + codegenSrc + "')\" > '" + dst + "'\n" +
 		"exit 0\n"
 	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
 
@@ -66,7 +70,7 @@ func TestStagedRestagesRepairOutputs(tt *testing.T) {
 	aux := t.TempDir()
 	srcPath := filepath.Join("internal", "foo.src")
 	genPath := filepath.Join("pkgs", "foo.generated")
-	stub := codegenStub(t, aux, "internal/foo.src", "pkgs/foo.generated")
+	stub := codegenStub(t, aux, "pkgs/foo.generated")
 
 	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
 	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
@@ -159,8 +163,8 @@ func TestStagedRepairOutputsOptInGate(tt *testing.T) {
 	// pkgs/plain.generated. Both trigger on the same staged source edit.
 	optInGen := filepath.Join("pkgs", "opted.generated")
 	plainGen := filepath.Join("pkgs", "plain.generated")
-	optInStub := codegenStub(t, aux, "internal/foo.src", "pkgs/opted.generated")
-	plainStub := codegenStub(t, aux, "internal/foo.src", "pkgs/plain.generated")
+	optInStub := codegenStub(t, aux, "pkgs/opted.generated")
+	plainStub := codegenStub(t, aux, "pkgs/plain.generated")
 
 	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
 	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
@@ -219,4 +223,169 @@ func TestStagedRepairOutputsOptInGate(tt *testing.T) {
 	// the plain (non-opt-in) linter's output is left modified-but-unstaged —
 	// today's safe default, and proof the opt-in is per-linter.
 	as.Equal("pkgs/plain.generated", git("diff", "--name-only"))
+}
+
+// TestStagedStagesNewRepairOutputs pins conformist#56 (tier 3): a whole-tree
+// codegen-repair linter that opts into BOTH restage-repair-outputs and
+// stage-new-outputs has the brand-new (untracked) files its repair-command
+// creates staged by --staged, in addition to the tier-2 modified outputs.
+func TestStagedStagesNewRepairOutputs(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := t.TempDir()
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	aux := t.TempDir()
+	srcPath := filepath.Join("internal", "foo.src")
+	// the generated facade does NOT exist at commit time, so the repair CREATES
+	// it as a brand-new untracked file.
+	genPath := filepath.Join("pkgs", "foo.generated")
+	stub := codegenStub(t, aux, "pkgs/foo.generated")
+
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
+	as.NoError(os.WriteFile(srcPath, []byte("original\n"), 0o644))
+
+	configPath := filepath.Join(tempDir, "conformist.toml")
+	passesFiles := false
+	cfg := &config.Config{
+		LinterConfigs: map[string]*config.Linter{
+			"codegen": {
+				Command:              "true",
+				RepairCommand:        stub,
+				Includes:             []string{"internal/*"},
+				PassesFiles:          &passesFiles,
+				RestageRepairOutputs: true,
+				StageNewOutputs:      true,
+			},
+		},
+	}
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	head := git("rev-parse", "HEAD")
+
+	// edit + stage ONLY the source; the facade does not exist yet.
+	as.NoError(os.WriteFile(srcPath, []byte("edited\n"), 0o644))
+	git("add", "internal/foo.src")
+
+	conformist(
+		t,
+		withArgs("--staged", "--exit-zero-on-fix", "--no-cache"),
+		withNoError(t),
+	)
+
+	// the repair created the facade on disk ...
+	regenerated, err := os.ReadFile(genPath)
+	as.NoError(err)
+	as.Equal("// generated from edited\n", string(regenerated))
+
+	// ... and tier 3 staged the brand-new file alongside the source.
+	cached := strings.Fields(git("diff", "--cached", "--name-only"))
+	as.ElementsMatch([]string{"internal/foo.src", "pkgs/foo.generated"}, cached)
+
+	// the new file is fully staged as an addition (A ) with no unstaged delta —
+	// not left untracked (??) and not modified-but-unstaged.
+	as.Equal("A  pkgs/foo.generated", git("status", "--porcelain", "--", "pkgs/foo.generated"))
+	as.Empty(git("diff", "--name-only", "--", "pkgs/foo.generated"))
+
+	as.Equal(head, git("rev-parse", "HEAD"))
+}
+
+// TestStagedNewOutputsGate pins the tier-3 gate of conformist#56: WITHOUT
+// stage-new-outputs (tier 2 alone), a repair-created brand-new file is written
+// to disk but left UNTRACKED — staging untracked files is the more dangerous
+// capability that tier 3 gates, and tier 2 alone MUST NOT do it (RFC-0002 §2.3).
+func TestStagedNewOutputsGate(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := t.TempDir()
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	aux := t.TempDir()
+	srcPath := filepath.Join("internal", "foo.src")
+	genPath := filepath.Join("pkgs", "foo.generated")
+	stub := codegenStub(t, aux, "pkgs/foo.generated")
+
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
+	as.NoError(os.WriteFile(srcPath, []byte("original\n"), 0o644))
+
+	configPath := filepath.Join(tempDir, "conformist.toml")
+	passesFiles := false
+	cfg := &config.Config{
+		LinterConfigs: map[string]*config.Linter{
+			"codegen": {
+				Command:              "true",
+				RepairCommand:        stub,
+				Includes:             []string{"internal/*"},
+				PassesFiles:          &passesFiles,
+				RestageRepairOutputs: true,
+				// StageNewOutputs defaults false: tier 2 alone.
+			},
+		},
+	}
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	as.NoError(os.WriteFile(srcPath, []byte("edited\n"), 0o644))
+	git("add", "internal/foo.src")
+
+	conformist(
+		t,
+		withArgs("--staged", "--exit-zero-on-fix", "--no-cache"),
+		withNoError(t),
+	)
+
+	// the repair created the facade on disk ...
+	regenerated, err := os.ReadFile(genPath)
+	as.NoError(err)
+	as.Equal("// generated from edited\n", string(regenerated))
+
+	// ... but tier 2 alone did NOT stage it: only the source is in the index.
+	cached := strings.Fields(git("diff", "--cached", "--name-only"))
+	as.ElementsMatch([]string{"internal/foo.src"}, cached)
+
+	// the new facade is left untracked (??), not staged — the tier-3 gate.
+	as.Equal("?? pkgs/foo.generated", git("status", "--porcelain", "--", "pkgs/foo.generated"))
 }

@@ -89,7 +89,11 @@ tree's unstaged hunks untouched (#40). A whole-tree codegen-repair linter
 (`passes-files=false` + `repair-command`) that sets `restage-repair-outputs`
 also has the (tracked) files its repair regenerates restaged — even when they
 were never staged — detected by a git-status delta taken around that linter's
-repair, so a stale generated sibling does not strand the commit (#55). It still
+repair, so a stale generated sibling does not strand the commit (#55). Adding
+`stage-new-outputs` (tier 3, #56) additionally stages the brand-new (untracked)
+files such a linter's repair creates — the delta is then taken with
+`--untracked-files=all`; it is a distinct opt-in because staging untracked files
+is more dangerous, so `restage-repair-outputs` alone never stages them. It still
 refuses (exit 2) outside a git worktree, in stdin mode, or under fail-on-change.
 
 ## Architecture

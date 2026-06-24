@@ -138,6 +138,17 @@ type Linter struct {
 	// Has effect only on a whole-tree linter (passes-files=false) with a
 	// repair-command; ignored otherwise.
 	RestageRepairOutputs bool `mapstructure:"restage-repair-outputs,omitempty" toml:"restage-repair-outputs,omitempty"`
+	// StageNewOutputs widens the --staged restage scope further (tier 3,
+	// conformist#56, RFC-0002 §2.3): when set alongside RestageRepairOutputs on a
+	// whole-tree codegen-repair linter, --staged also stages brand-new
+	// (untracked) files the linter's repair-command created, not just the
+	// modified tracked outputs tier 2 covers. Staging untracked files is more
+	// dangerous than restaging tracked ones — a buggy codegen could sweep
+	// unintended new files into history — so it is a distinct opt-in and has
+	// effect only when RestageRepairOutputs is also true; ignored otherwise.
+	// Attribution is still by git-status delta around the linter's repair, so a
+	// pre-existing untracked file is never swept in. Default false.
+	StageNewOutputs bool `mapstructure:"stage-new-outputs,omitempty" toml:"stage-new-outputs,omitempty"`
 	// WorkingDir is an optional subdirectory (relative to the tree root) in which
 	// to run this linter's check/repair commands, e.g. a Go submodule whose
 	// codegen must run from there. Empty (the default) runs at the tree root,

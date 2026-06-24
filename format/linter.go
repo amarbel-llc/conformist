@@ -46,6 +46,16 @@ func (l *Linter) IsRestageRepairOutputs() bool {
 	return l.config.RestageRepairOutputs && !l.passesFiles && l.HasRepair()
 }
 
+// IsStageNewOutputs reports whether this linter additionally opts into staging
+// the brand-new (untracked) files its repair-command creates (tier 3,
+// conformist#56, RFC-0002 §2.3). It is effective only when the linter already
+// qualifies for tier-2 restaging (IsRestageRepairOutputs): staging untracked
+// files is a strictly more dangerous capability, so it is gated behind both the
+// tier-2 opt-in and its own flag.
+func (l *Linter) IsStageNewOutputs() bool {
+	return l.config.StageNewOutputs && l.IsRestageRepairOutputs()
+}
+
 func (l *Linter) hasNoPositionalArgSupport() bool {
 	return l.config.NoPositionalArgSupport != nil && *l.config.NoPositionalArgSupport
 }

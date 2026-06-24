@@ -111,7 +111,7 @@ broader capability. The capabilities form four tiers:
 |------|------------|--------|--------|
 | 1 | Reformat staged files and restage the formatted content | none (always on) | specified by RFC 0001 + #25/#40 |
 | 2 | Restage a linter's **modified tracked** repair outputs | `restage-repair-outputs` | specified here; implemented by #55 |
-| 3 | Stage a linter's **newly created (untracked)** repair outputs | `restage-repair-outputs` + `stage-new-outputs` | specified here; not yet implemented |
+| 3 | Stage a linter's **newly created (untracked)** repair outputs | `restage-repair-outputs` + `stage-new-outputs` | specified here; implemented by #56 |
 | 4 | Stage a linter's repair **deletions** | `restage-repair-outputs` + `stage-deleted-outputs` | specified here; not yet implemented |
 
 #### 2.1 Tier 1 — reformat and restage staged files (default)
@@ -349,11 +349,14 @@ so existing configs are unaffected: a run without it behaves exactly as before
 (tier 1 only). Tier 2 is therefore backwards compatible — it can only *add*
 restaging for a linter that explicitly opts in.
 
-**Tiers 3 and 4.** `stage-new-outputs` and `stage-deleted-outputs` are specified
-here but not yet implemented (tracked as conformist#56 and conformist#57). Until
-implemented, an implementation MUST ignore them (treating a tier-3/4 lane as
-tier-2). When implemented, they remain default-false and gated behind
-`restage-repair-outputs`, so adding them is backwards compatible.
+**Tier 3.** `stage-new-outputs` is implemented by conformist#56. It is
+default-false and gated behind `restage-repair-outputs`, so it is backwards
+compatible — a lane that does not opt in behaves exactly as tier 2.
+
+**Tier 4.** `stage-deleted-outputs` is specified here but not yet implemented
+(tracked as conformist#57). Until implemented, an implementation MUST ignore it
+(treating a tier-4 lane as tier-2/3). When implemented, it remains default-false
+and gated behind `restage-repair-outputs`, so adding it is backwards compatible.
 
 **Module interface (§4).** The §4 module shape is exploratory and not yet
 ratified; the current Nix outputs (`build.{wrapper,preCommit,repair,check}`,
