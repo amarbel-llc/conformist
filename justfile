@@ -8,8 +8,15 @@ default: validate build test verify lint
 validate: validate-devshell
 
 # The devshell must evaluate and build before anything else is worth trying.
+# Builds the host system's devShell (builtins.currentSystem) so a Darwin
+# dev/CI machine validates its own devShell natively instead of offloading the
+# linux devShell build to a remote linux builder, matching the currentSystem
+# idiom used by the rest of this justfile.
 validate-devshell:
-    nix build --no-link .#devShells.{{ arch() }}-linux.default
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build --no-link ".#devShells.${system}.default"
 
 # --- lint ---
 
