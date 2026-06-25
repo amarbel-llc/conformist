@@ -32,6 +32,14 @@ var (
 	// without --allow-dirty. Refusal happens BEFORE any formatting, so a
 	// refused run leaves the tree untouched.
 	ErrCommitRefused = errors.New("refusing to format and commit")
+
+	// ErrConflictMarkers indicates --commit refused to commit because the
+	// content it was about to commit carries leftover merge-conflict markers
+	// (exit code 2, #67). Unlike a formatting fix, a conflict is not something
+	// --exit-zero-on-fix may swallow: the guard runs before that downgrade, so
+	// a conflicted tree always halts the caller rather than burying a
+	// non-building commit (especially via --amend) in history.
+	ErrConflictMarkers = errors.New("refusing to commit content with leftover conflict markers")
 )
 
 // CommitOptions carries the --commit flow's knobs from the CLI flags.
@@ -103,6 +111,24 @@ func RunCommit(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 	}
 
 	slices.Sort(toCommit)
+
+	// Guard (#67): never let a fix commit carry leftover conflict markers. The
+	// commit takes its content from the working tree, so if any to-be-committed
+	// file holds `<<<<<<<`/`=======`/`>>>>>>>` (e.g. an autostash-pop conflict
+	// left markers in a file this run also reformatted), refuse here — before
+	// the --exit-zero-on-fix downgrade below — with a nonzero exit. A conflict
+	// is not a fixable formatting issue, and committing it (especially via
+	// --amend) buries a non-building tree in history.
+	conflicted, err := git.ConflictMarkerPaths(ctx, cfg.TreeRoot, toCommit)
+	if err != nil {
+		return fmt.Errorf("failed to check for conflict markers: %w", err)
+	}
+
+	if len(conflicted) > 0 {
+		return fmt.Errorf(
+			"%w: %s", ErrConflictMarkers, strings.Join(conflicted, ", "),
+		)
+	}
 
 	// A failed commit (e.g. the signing agent is locked) must fail loudly:
 	// both CommitPaths and AmendPaths surface git's stderr, create no commit,

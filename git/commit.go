@@ -104,6 +104,74 @@ func AddPaths(ctx context.Context, treeRoot string, paths []string) error {
 	return nil
 }
 
+// conflictMarkerMessage is the warning `git diff --check` prints for a line it
+// recognizes as a leftover merge-conflict marker (`<<<<<<<`, `|||||||`,
+// `=======`, `>>>>>>>`). git's --check also flags whitespace errors with
+// different messages; matching this exact suffix isolates conflict markers,
+// which (unlike a whitespace nit) are never a fixable formatting issue.
+const conflictMarkerMessage = ": leftover conflict marker"
+
+// ConflictMarkerPaths returns, among the given toplevel-relative paths, those
+// whose working-tree content carries leftover merge-conflict markers, as
+// detected by `git diff --check` (working tree against the index). For files
+// that were clean in the index before a run — exactly the files the --commit
+// flow commits (#67) — the diff covers their full to-be-committed change, so a
+// marker anywhere in such a file is seen. Only git's "leftover conflict marker"
+// warnings are reported; whitespace warnings are ignored. The returned paths
+// are in git's own output form (relative to treeRoot).
+func ConflictMarkerPaths(ctx context.Context, treeRoot string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	args := make([]string, 0, 5+len(paths))
+	args = append(args, "-C", treeRoot, "diff", "--check", "--")
+
+	for _, p := range paths {
+		args = append(args, ":(top)"+p)
+	}
+
+	// `git diff --check` exits non-zero precisely when it finds problems
+	// (conflict markers or whitespace errors), writing one warning line per
+	// problem to stdout. That non-zero exit is the signal we want, not a
+	// failure — so an ExitError is expected and its captured stdout is parsed;
+	// only a non-ExitError (git missing, not a repo) is a real error.
+	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("git diff --check failed in %s: %w", treeRoot, err)
+		}
+	}
+
+	var (
+		conflicted []string
+		seen       = make(map[string]bool)
+	)
+
+	for line := range strings.SplitSeq(string(out), "\n") {
+		// each warning is "<path>:<lineno>: <message>"; keep only the
+		// conflict-marker message, then strip ":<lineno>: <message>" to recover
+		// the path.
+		if !strings.HasSuffix(line, conflictMarkerMessage) {
+			continue
+		}
+
+		lineNoSep := strings.LastIndex(strings.TrimSuffix(line, conflictMarkerMessage), ":")
+		if lineNoSep < 0 {
+			continue
+		}
+
+		path := line[:lineNoSep]
+		if !seen[path] {
+			seen[path] = true
+			conflicted = append(conflicted, path)
+		}
+	}
+
+	return conflicted, nil
+}
+
 // CommitPaths creates a commit containing exactly the given toplevel-relative
 // paths, taking their content from the working tree (`git commit -- <paths>`).
 // Unrelated staged changes are left in the index untouched. Invoking the real

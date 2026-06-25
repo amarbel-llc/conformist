@@ -773,3 +773,102 @@ func TestCommitStdin(tt *testing.T) {
 		}),
 	)
 }
+
+// TestCommitConflictMarkers covers the #67 guard: before committing, --commit
+// (and --commit --amend) must refuse when the content it is about to commit
+// carries leftover merge-conflict markers, with a nonzero exit (2) that
+// --exit-zero-on-fix does NOT swallow — a conflict is not a fixable formatting
+// issue, and committing one (especially via --amend) buries a non-building tree
+// in history. Here a formatter appends a conflict-marker line to the matched
+// file, standing in for a tree that carries unresolved markers (e.g. an
+// autostash-pop conflict) in a file the run also touches.
+func TestCommitConflictMarkers(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := test.TempExamples(t)
+	configPath := filepath.Join(tempDir, "conformist.toml")
+
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	// the formatter appends a conflict-marker line, so the file conformist
+	// would commit carries an unresolved `<<<<<<<` marker.
+	cfg := &config.Config{
+		FormatterConfigs: map[string]*config.Formatter{
+			"append": {
+				Command:  "test-fmt-append",
+				Options:  []string{"<<<<<<< HEAD"},
+				Includes: []string{"ruby/*"},
+			},
+		},
+	}
+
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	head := git("rev-parse", "HEAD")
+
+	// reset the worktree between cases: a guard-aborted run leaves the appended
+	// marker in the working tree, which would otherwise refuse the next run on
+	// dirty-tree grounds before the conflict-marker guard could fire.
+	reset := func() {
+		t.Helper()
+		git("checkout", "--", ".")
+	}
+
+	// --commit: the run appends a conflict marker; the guard refuses to commit
+	// it (exit 2), leaving HEAD untouched.
+	conformist(
+		t,
+		withArgs("--commit"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrConflictMarkers)
+			as.Equal(2, cmd.ExitCode(err))
+		}),
+	)
+	as.Equal(head, git("rev-parse", "HEAD"), "a conflicted run must not create a commit")
+	reset()
+
+	// --exit-zero-on-fix must NOT swallow the conflict refusal: it downgrades a
+	// fix to exit 0, but a conflict is not a fix.
+	conformist(
+		t,
+		withArgs("--commit", "--exit-zero-on-fix", "--no-cache"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrConflictMarkers)
+			as.Equal(2, cmd.ExitCode(err))
+		}),
+	)
+	as.Equal(head, git("rev-parse", "HEAD"))
+	reset()
+
+	// --commit --amend: likewise refuse to fold markers into HEAD.
+	conformist(
+		t,
+		withArgs("--commit", "--amend", "--no-cache"),
+		withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, formatCmd.ErrConflictMarkers)
+			as.Equal(2, cmd.ExitCode(err))
+		}),
+	)
+	as.Equal(head, git("rev-parse", "HEAD"), "a conflicted amend must not move HEAD")
+}

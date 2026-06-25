@@ -68,7 +68,13 @@ not run `just`/`just lint` again right before merging.
 `conformist --commit` (repair + auto-commit, #24) exits 0 when the tree was
 already conformant, 3 when it applied fixes and committed them
 (`chore: conformist fmt+fix`, plus any `--trailer` lines — #26), 2 when
-refused (dirty tree without `--allow-dirty`, or no git worktree).
+refused (dirty tree without `--allow-dirty`, or no git worktree). Before
+committing in any `--commit` mode it also refuses (exit 2) when the
+to-be-committed content carries leftover merge-conflict markers
+(`<<<<<<<`/`=======`/`>>>>>>>`, or diff3 `|||||||`) — detected via
+`git diff --check` over the files it would commit — rather than burying a
+non-building commit (especially via `--amend`) in history (#67); a conflict is
+not a fixable issue, so `--exit-zero-on-fix` (below) never swallows it.
 `conformist --commit --amend` (#33) folds the run's fixes into HEAD via
 `git commit --amend --no-edit` (keeping HEAD's message) instead of a fresh
 commit, exiting 3 on amend; it additionally refuses (exit 2) when HEAD has no
