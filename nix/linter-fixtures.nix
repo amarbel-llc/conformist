@@ -103,6 +103,208 @@ let
       touch $out
     '';
 
+  # ---- git-remotes: a live-git linter (check reads remotes, repair mutates) ----
+  #
+  # Unlike the pure whole-tree checks above, git-remotes reads live git state
+  # (`git remote -v`) and its repair rewrites it (`git remote set-url`). The
+  # fixture therefore `git init`s a throwaway repo, `git remote add`s the given
+  # URLs, then runs the check or the repair and asserts. git init / remote ops
+  # are offline, so this still runs in the pure runCommandLocal sandbox
+  # (conformist#68).
+  gitRemotesMod = lib.evalModule pkgs {
+    enableDefaultExcludes = false;
+    linters.git-remotes.enable = true;
+  };
+  gitRemotesCheck = gitRemotesMod.config.settings.linter.git-remotes.command;
+  gitRemotesRepair = gitRemotesMod.config.settings.linter.git-remotes."repair-command";
+
+  # label        : fixture label (derivation suffix)
+  # remotes      : attrset remote-name -> URL to `git remote add`
+  # action       : "check" (run the read-only command) or "repair" (run repair)
+  # expectFail   : check action only — true => check MUST exit non-zero
+  # expectToken  : optional substring the action output MUST contain
+  # expectRemotes: repair action only — attrset remote-name -> expected fetch URL
+  #                after repair (asserted via `git remote get-url`)
+  # recheckPasses: repair action only — whether the read-only check MUST pass
+  #                after the repair (false when a non-github remote stays flagged)
+  mkGitRemotesFixture =
+    {
+      label,
+      remotes,
+      action ? "check",
+      expectFail ? false,
+      expectToken ? null,
+      expectRemotes ? { },
+      recheckPasses ? true,
+    }:
+    let
+      addRemotes = nixlib.concatStringsSep "\n" (
+        nixlib.mapAttrsToList (
+          name: url: "git remote add ${nixlib.escapeShellArg name} ${nixlib.escapeShellArg url}"
+        ) remotes
+      );
+
+      assertToken = nixlib.optionalString (expectToken != null) ''
+        if ! grep -qF ${nixlib.escapeShellArg expectToken} out.log; then
+          echo "FIXTURE FAIL: git-remotes ${label} output did not contain ${nixlib.escapeShellArg expectToken}" >&2
+          exit 1
+        fi
+      '';
+
+      checkBody = ''
+        if ${gitRemotesCheck} >out.log 2>&1; then rc=0; else rc=$?; fi
+        cat out.log
+        ${
+          if expectFail then
+            ''
+              if [ "$rc" -eq 0 ]; then
+                echo "FIXTURE FAIL: expected git-remotes to reject ${label}, but it exited 0" >&2
+                exit 1
+              fi
+            ''
+          else
+            ''
+              if [ "$rc" -ne 0 ]; then
+                echo "FIXTURE FAIL: expected git-remotes to pass ${label}, but it exited $rc" >&2
+                exit 1
+              fi
+            ''
+        }
+        ${assertToken}
+      '';
+
+      assertRemotes = nixlib.concatStringsSep "\n" (
+        nixlib.mapAttrsToList (name: url: ''
+          actual=$(git remote get-url ${nixlib.escapeShellArg name})
+          expected=${nixlib.escapeShellArg url}
+          if [ "$actual" != "$expected" ]; then
+            echo "FIXTURE FAIL: git-remotes repair ${label}: remote '${name}' is '$actual', expected '$expected'" >&2
+            exit 1
+          fi
+        '') expectRemotes
+      );
+
+      repairBody = ''
+        # Repair must succeed; a second pass proves idempotency (both exit 0
+        # under the sandbox's set -e).
+        ${gitRemotesRepair} >out.log 2>&1
+        cat out.log
+        ${gitRemotesRepair} >/dev/null 2>&1
+        ${assertToken}
+        ${assertRemotes}
+        # The read-only check must (recheckPasses) / must not pass after repair.
+        if ${gitRemotesCheck} >check.log 2>&1; then crc=0; else crc=$?; fi
+        cat check.log
+        ${
+          if recheckPasses then
+            ''
+              if [ "$crc" -ne 0 ]; then
+                echo "FIXTURE FAIL: git-remotes ${label}: check still failed after repair (exit $crc)" >&2
+                exit 1
+              fi
+            ''
+          else
+            ''
+              if [ "$crc" -eq 0 ]; then
+                echo "FIXTURE FAIL: git-remotes ${label}: check unexpectedly passed after repair (a non-github remote should stay flagged)" >&2
+                exit 1
+              fi
+            ''
+        }
+      '';
+    in
+    pkgs.runCommandLocal "linter-fixture-git-remotes-${label}"
+      {
+        nativeBuildInputs = [ pkgs.git ];
+      }
+      ''
+        export HOME="$PWD/home"
+        mkdir -p "$HOME"
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+        mkdir fixture && cd fixture
+        git init -q
+        ${addRemotes}
+
+        ${if action == "repair" then repairBody else checkBody}
+
+        touch $out
+      '';
+
+  gitRemotesFixtures = [
+    # Check: a github https remote is flagged; an SSH remote passes.
+    (mkGitRemotesFixture {
+      label = "check-https-fail";
+      remotes.origin = "https://github.com/amarbel-llc/hyphence.git";
+      expectFail = true;
+      expectToken = "non-SSH remote";
+    })
+    (mkGitRemotesFixture {
+      label = "check-ssh-pass";
+      remotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+    })
+
+    # Repair: each github network transport rewrites to the SSH form, the recheck
+    # then passes, and a missing `.git` suffix is normalized in.
+    (mkGitRemotesFixture {
+      label = "repair-https";
+      action = "repair";
+      remotes.origin = "https://github.com/amarbel-llc/hyphence.git";
+      expectToken = "rewrote remote 'origin'";
+      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+    })
+    (mkGitRemotesFixture {
+      label = "repair-https-no-dotgit";
+      action = "repair";
+      remotes.origin = "https://github.com/amarbel-llc/hyphence";
+      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+    })
+    (mkGitRemotesFixture {
+      label = "repair-http";
+      action = "repair";
+      remotes.origin = "http://github.com/amarbel-llc/hyphence.git";
+      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+    })
+    (mkGitRemotesFixture {
+      label = "repair-git-protocol";
+      action = "repair";
+      remotes.origin = "git://github.com/amarbel-llc/hyphence.git";
+      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+    })
+
+    # Repair idempotency: an already-SSH remote is a no-op.
+    (mkGitRemotesFixture {
+      label = "repair-ssh-noop";
+      action = "repair";
+      remotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      expectToken = "no github.com non-SSH remotes to rewrite";
+      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+    })
+
+    # Repair selectivity: a non-github host has no canonical SSH form, so repair
+    # leaves it alone and the read-only check keeps reporting it.
+    (mkGitRemotesFixture {
+      label = "repair-leaves-non-github";
+      action = "repair";
+      remotes.origin = "https://gitlab.com/amarbel-llc/hyphence.git";
+      expectToken = "no github.com non-SSH remotes to rewrite";
+      expectRemotes.origin = "https://gitlab.com/amarbel-llc/hyphence.git";
+      recheckPasses = false;
+    })
+    (mkGitRemotesFixture {
+      label = "repair-mixed";
+      action = "repair";
+      remotes = {
+        origin = "https://github.com/amarbel-llc/hyphence.git";
+        upstream = "https://gitlab.com/up/stream.git";
+      };
+      expectRemotes = {
+        origin = "git@github.com:amarbel-llc/hyphence.git";
+        upstream = "https://gitlab.com/up/stream.git";
+      };
+      recheckPasses = false;
+    })
+  ];
+
   # ---- Fixtures -----------------------------------------------------------
 
   fixtures = [
@@ -441,16 +643,18 @@ let
       expectToken = "first recipe must be 'default'";
     })
   ];
+
+  allFixtures = fixtures ++ gitRemotesFixtures;
 in
 builtins.listToAttrs (
   map (d: {
     inherit (d) name;
     value = d;
-  }) fixtures
+  }) allFixtures
 )
 // {
   # Aggregate: a link farm that forces every fixture to build. The cheap recipe
   # `just verify-linter-fixtures` builds this one path instead of the full
   # `nix flake check` (which would also build the ~130 registry smoke checks).
-  linter-fixtures = pkgs.linkFarmFromDrvs "linter-fixtures" fixtures;
+  linter-fixtures = pkgs.linkFarmFromDrvs "linter-fixtures" allFixtures;
 }
