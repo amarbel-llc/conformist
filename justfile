@@ -128,6 +128,19 @@ explore-template-eng:
     nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
     echo "explore-template-eng: template instantiates and passes checks.formatting"
 
+# Behavioral fixtures for the built-in clippy linter (#69): build + run the
+# clippy check/repair against a tiny offline Rust crate, asserting the check
+# fails on a lint, passes when clean, and the repair --fix removes it. Pulls a
+# Rust toolchain, so it is kept OUT of the verify/CI lane and built on demand
+# here. See nix/linter-fixtures.nix (the clippy block).
+[group("explore")]
+explore-clippy-fixture:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${sys}.clippy-fixtures" --no-link --print-build-logs
+    echo "explore-clippy-fixture: clippy check/repair fixtures pass"
+
 # --- debug ---
 
 # Build-backend microbench: godyn (native, per-package CA) vs buildGoApplication

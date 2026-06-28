@@ -237,7 +237,18 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   default-excluded go.mod/go.sum — a whole-tree check (`passes-files=false`) is
   exempt from the global excludes by design, its includes being a trigger gate
   (conformist#45, retiring the conformist#44 `ignore-global-excludes` flag);
-  native check pending amarbel-llc/gomod2nix#14).
+  native check pending amarbel-llc/gomod2nix#14). `clippy` (conformist#69 — a
+  first-class Rust lint: check is `cargo clippy … -- -D warnings`, repair is
+  `cargo clippy --fix`; whole-tree, `restage-repair-outputs`. **Impure** (it
+  compiles the crate) so it's working-tree-lane only, and **opt-in**: it is a
+  registered module — enable with `linters.clippy.enable = true` — but is NOT in
+  the eng-impure preset roster, so a non-Rust repo never pulls a Rust toolchain.
+  conformist pins NO Rust: the `packages` toolchain defaults to
+  cargo/clippy/rustc/gcc from the consumer's own nixpkgs (overridable for
+  rust-overlay/fenix). Knobs: `manifest-path`, `workspace`, `all-targets`,
+  `extra-args`, `deny`, `allow`. Behavioral fixtures live in a separate
+  `clippy-fixtures` aggregate built by `just explore-clippy-fixture`, kept out of
+  the verify/CI lane so CI stays Rust-free).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the
   seven `justfile-*`) and `eng-impure.nix` (git-state lane: `git-remotes`,

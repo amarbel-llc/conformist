@@ -305,6 +305,145 @@ let
     })
   ];
 
+  # ---- clippy: a live-toolchain Rust linter (compiles the crate) ----------
+  #
+  # clippy COMPILES the crate, so its fixture needs the Rust toolchain and is
+  # kept OUT of the `linter-fixtures` aggregate (the merge-hook lane) — it lives
+  # in its own `clippy-fixtures` aggregate built on demand by
+  # `just explore-clippy-fixture`, so the Rust toolchain never enters
+  # conformist's CI. Interpolating the check/repair store paths forces the
+  # writeShellApplications to build (so shellcheck runs on the generated shell).
+  #
+  # The crate is a LIB with `all-targets = false`, so clippy stays metadata-only
+  # (no system linker needed in the bare runCommandLocal sandbox), and has no
+  # dependencies, so cargo never reaches the registry (CARGO_NET_OFFLINE=1).
+  clippyMod = lib.evalModule pkgs {
+    enableDefaultExcludes = false;
+    linters.clippy = {
+      enable = true;
+      all-targets = false;
+    };
+  };
+  clippyCheck = clippyMod.config.settings.linter.clippy.command;
+  clippyRepair = clippyMod.config.settings.linter.clippy."repair-command";
+
+  clippyCargoToml = ''
+    [package]
+    name = "fixture-crate"
+    version = "0.0.0"
+    edition = "2021"
+
+    [lib]
+    path = "src/lib.rs"
+  '';
+  # `return 42;` trips clippy::needless_return (machine-applicable, so --fix
+  # rewrites it to `42`); the clean form has no clippy findings.
+  clippyDirtyLib = ''
+    pub fn answer() -> i32 {
+        return 42;
+    }
+  '';
+  clippyCleanLib = ''
+    pub fn answer() -> i32 {
+        42
+    }
+  '';
+
+  # label     : fixture label (derivation suffix)
+  # libRs     : contents of src/lib.rs
+  # action    : "check" (run the read-only command) or "repair" (run --fix)
+  # expectFail: check action only — true => check MUST exit non-zero
+  mkClippyFixture =
+    {
+      label,
+      libRs,
+      action ? "check",
+      expectFail ? false,
+    }:
+    let
+      runCheck = ''
+        if ${clippyCheck} >out.log 2>&1; then rc=0; else rc=$?; fi
+        cat out.log
+        ${
+          if expectFail then
+            ''
+              if [ "$rc" -eq 0 ]; then
+                echo "FIXTURE FAIL: expected clippy to reject ${label}, but it exited 0" >&2
+                exit 1
+              fi
+            ''
+          else
+            ''
+              if [ "$rc" -ne 0 ]; then
+                echo "FIXTURE FAIL: expected clippy to pass ${label}, but it exited $rc" >&2
+                exit 1
+              fi
+            ''
+        }
+      '';
+      runRepair = ''
+        # Repair must succeed and remove the machine-applicable finding.
+        ${clippyRepair} >out.log 2>&1
+        cat out.log
+        if grep -q 'return' src/lib.rs; then
+          echo "FIXTURE FAIL: clippy repair ${label} did not remove the needless return" >&2
+          cat src/lib.rs >&2
+          exit 1
+        fi
+        # The read-only check must pass after the repair.
+        if ${clippyCheck} >check.log 2>&1; then crc=0; else crc=$?; fi
+        cat check.log
+        if [ "$crc" -ne 0 ]; then
+          echo "FIXTURE FAIL: clippy ${label}: check still failed after repair (exit $crc)" >&2
+          exit 1
+        fi
+      '';
+    in
+    pkgs.runCommandLocal "clippy-fixture-${label}"
+      {
+        nativeBuildInputs = [ pkgs.git ];
+      }
+      ''
+        export HOME="$PWD/home"
+        mkdir -p "$HOME"
+        export CARGO_HOME="$PWD/cargo-home"
+        export CARGO_TARGET_DIR="$PWD/target"
+        export CARGO_NET_OFFLINE=1
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+        mkdir crate && cd crate
+        cp ${pkgs.writeText "Cargo.toml" clippyCargoToml} Cargo.toml
+        mkdir src
+        cp ${pkgs.writeText "lib.rs" libRs} src/lib.rs
+        # Store-copied files are read-only (0444); `cargo --fix` must rewrite
+        # src/lib.rs, so make the tree writable.
+        chmod -R u+w .
+        # `cargo --fix` requires a VCS (or --allow-no-vcs); init one and stage so
+        # the repair's --allow-dirty/--allow-staged apply.
+        git init -q
+        git add -A
+
+        ${if action == "repair" then runRepair else runCheck}
+
+        touch $out
+      '';
+
+  clippyFixtures = [
+    (mkClippyFixture {
+      label = "check-dirty-fail";
+      libRs = clippyDirtyLib;
+      expectFail = true;
+    })
+    (mkClippyFixture {
+      label = "check-clean-pass";
+      libRs = clippyCleanLib;
+    })
+    (mkClippyFixture {
+      label = "repair-fixes";
+      libRs = clippyDirtyLib;
+      action = "repair";
+    })
+  ];
+
   # ---- Fixtures -----------------------------------------------------------
 
   fixtures = [
@@ -656,5 +795,12 @@ builtins.listToAttrs (
   # Aggregate: a link farm that forces every fixture to build. The cheap recipe
   # `just verify-linter-fixtures` builds this one path instead of the full
   # `nix flake check` (which would also build the ~130 registry smoke checks).
+  # Deliberately EXCLUDES the clippy fixtures (below) so the merge-hook lane
+  # never pulls a Rust toolchain.
   linter-fixtures = pkgs.linkFarmFromDrvs "linter-fixtures" allFixtures;
+
+  # clippy fixtures live in their own aggregate, built on demand by
+  # `just explore-clippy-fixture` (NOT in the default verify lane), so the Rust
+  # toolchain stays out of conformist's CI. See the clippy block above.
+  clippy-fixtures = pkgs.linkFarmFromDrvs "clippy-fixtures" clippyFixtures;
 }
