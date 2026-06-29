@@ -54,6 +54,47 @@ func deleteStub(t *test_ui.T, dir, victim string) string {
 	return script
 }
 
+// unformattedCodegenStub is codegenStub's deliberately-misformatted twin: it
+// regenerates dst with three trailing spaces on the generated line, standing in
+// for a whole-tree repair-command (doppelgang --fix) whose output is NOT itself
+// formatter-normalized (conformist#70). A matching formatter must strip that
+// trailing whitespace before the --staged commit lands, or the index carries the
+// raw repair output.
+func unformattedCodegenStub(t *test_ui.T, dir, dst string) string {
+	t.Helper()
+
+	script := filepath.Join(dir, "codegen-unformatted-"+strings.ReplaceAll(dst, "/", "_")+".sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"mkdir -p \"$(dirname '" + dst + "')\"\n" +
+		"printf '// generated from %s   \\n' \"$(cat '" + codegenSrc + "')\" > '" + dst + "'\n" +
+		"exit 0\n"
+	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+
+	return script
+}
+
+// stripTrailingWSFormatterStub writes an executable formatter stub that strips
+// trailing whitespace from each file passed as a positional argument, rewriting
+// it in place. It stands in for nixfmt normalizing flake.nix after doppelgang's
+// byte-splice edit (conformist#70). A temp-file swap is used instead of `sed -i`
+// to avoid GNU/BSD in-place-edit divergence.
+func stripTrailingWSFormatterStub(t *test_ui.T, dir string) string {
+	t.Helper()
+
+	script := filepath.Join(dir, "strip-trailing-ws.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"for f in \"$@\"; do\n" +
+		"  tmp=\"$(mktemp)\"\n" +
+		"  sed 's/[[:space:]]*$//' \"$f\" > \"$tmp\"\n" +
+		"  mv \"$tmp\" \"$f\"\n" +
+		"done\n"
+	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+
+	return script
+}
+
 // TestStagedRestagesRepairOutputs pins conformist#55: a whole-tree codegen-repair
 // linter that opts into restage-repair-outputs has the files its repair-command
 // regenerates restaged by --staged, even though they were never in the index —
@@ -568,4 +609,123 @@ func TestStagedDeletedOutputsGate(tt *testing.T) {
 	// the deletion is left as an unstaged worktree removal (still tracked in the
 	// index), not staged — the tier-4 gate.
 	as.Equal("pkgs/old.generated", git("ls-files", "--deleted"))
+}
+
+// TestStagedFormatsRepairOutputsBeforeRestaging pins conformist#70: a whole-tree
+// repair-command that writes an UNFORMATTED file ALSO covered by a formatter,
+// run under --staged, lands the FORMATTED content in the index. Repairs run
+// before formatters so the formatter pass can normalise autofix output, but the
+// formatter pass is scoped to the input paths — in --staged that is the staged
+// set. The repair output (here pkgs/foo.generated) sits OUTSIDE the staged set
+// (only internal/foo.src was staged), so unless the opt-in linter's repair
+// outputs are folded into the formatter scope, the formatter never visits the
+// generated file and the raw, unformatted repair output is what gets restaged.
+// Mirrors doppelgang --fix rewriting flake.nix (byte-splice, not nixfmt'd) while
+// only some other file was staged.
+func TestStagedFormatsRepairOutputsBeforeRestaging(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	tempDir := t.TempDir()
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	// rawShow returns the staged blob verbatim (no whitespace trimming), so the
+	// trailing-whitespace difference between the formatted and unformatted output
+	// is observable — the git() helper above trims it away.
+	rawShow := func(spec string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", "show", spec).Output()
+		as.NoError(err)
+
+		return string(out)
+	}
+
+	aux := t.TempDir()
+	srcPath := filepath.Join("internal", "foo.src")
+	genPath := filepath.Join("pkgs", "foo.generated")
+	repair := unformattedCodegenStub(t, aux, "pkgs/foo.generated")
+	formatter := stripTrailingWSFormatterStub(t, aux)
+
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
+	as.NoError(os.WriteFile(srcPath, []byte("original\n"), 0o644))
+	// committed-stale facade derived from the original source (already formatted)
+	as.NoError(os.WriteFile(genPath, []byte("// generated from original\n"), 0o644))
+
+	configPath := filepath.Join(tempDir, "conformist.toml")
+	passesFiles := false
+	cfg := &config.Config{
+		FormatterConfigs: map[string]*config.Formatter{
+			"strip-ws": {
+				Command:  formatter,
+				Includes: []string{"pkgs/*.generated"},
+			},
+		},
+		LinterConfigs: map[string]*config.Linter{
+			"codegen": {
+				Command:              "true", // read-only check is a no-op for this test
+				RepairCommand:        repair,
+				Includes:             []string{"internal/*"},
+				PassesFiles:          &passesFiles,
+				RestageRepairOutputs: true,
+			},
+		},
+	}
+	test.WriteConfig(t, configPath, cfg)
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	head := git("rev-parse", "HEAD")
+
+	// edit + stage ONLY the source; the repair regenerates the facade with
+	// trailing whitespace, which the formatter must strip before it is restaged.
+	as.NoError(os.WriteFile(srcPath, []byte("edited\n"), 0o644))
+	git("add", "internal/foo.src")
+
+	conformist(
+		t,
+		withArgs("--staged", "--exit-zero-on-fix", "--no-cache"),
+		withNoError(t),
+	)
+
+	// the on-disk facade was regenerated from the edited source AND
+	// formatter-normalised: the repair's trailing whitespace is gone.
+	regenerated, err := os.ReadFile(genPath)
+	as.NoError(err)
+	as.Equal("// generated from edited\n", string(regenerated))
+
+	// the CORE of #70: the STAGED blob is the formatted content, not the raw
+	// (trailing-whitespace) repair output. Compared verbatim, since the
+	// difference is exactly the trailing whitespace a trim would hide.
+	as.Equal("// generated from edited\n", rawShow(":pkgs/foo.generated"))
+
+	// both the source and the regenerated facade are staged (#55 restage scope)
+	cached := strings.Fields(git("diff", "--cached", "--name-only"))
+	as.ElementsMatch([]string{"internal/foo.src", "pkgs/foo.generated"}, cached)
+
+	// no leftover unstaged delta on the facade — the formatted content is what is
+	// both on disk and in the index.
+	as.Empty(git("diff", "--name-only", "--", "pkgs/foo.generated"))
+
+	// no commit was created — the commit is the caller's
+	as.Equal(head, git("rev-parse", "HEAD"))
 }

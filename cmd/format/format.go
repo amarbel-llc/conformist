@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/pprof"
 	"slices"
 	"syscall"
@@ -180,8 +181,16 @@ func formatTree(
 		return nil, fmt.Errorf("failed to create composite formatter: %w", err)
 	}
 
+	// Fold the opt-in linters' repair outputs into the formatter's walk scope
+	// (conformist#70) so a whole-tree repair that rewrote a formatter-matched
+	// file OUTSIDE the input paths — e.g. doppelgang --fix editing flake.nix
+	// while only some other file was staged — has that file normalised before a
+	// scoped caller (the --staged lane) restages it. A no-op for a whole-tree
+	// walk, which already visits every repair output.
+	formatPaths := formatScope(paths, cfg.TreeRoot, repairOutputs)
+
 	// create a new walker for traversing the paths
-	walker, err := walk.NewCompositeReader(walkType, cfg.TreeRoot, paths, db, statz)
+	walker, err := walk.NewCompositeReader(walkType, cfg.TreeRoot, formatPaths, db, statz)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create walker: %w", err)
 	}
@@ -260,6 +269,52 @@ func formatTree(
 	}
 
 	return repairOutputs, nil
+}
+
+// formatScope returns the set of paths the formatter pass should walk: the
+// input paths plus any opt-in linter repair outputs (conformist#70) that fall
+// outside them, so a whole-tree repair which rewrote a formatter-matched file is
+// normalised before a scoped caller restages it.
+//
+// It only extends an already-scoped walk: an empty paths means a whole-tree walk
+// (NewCompositeReader walks the tree root), which already visits every repair
+// output — appending to it would wrongly narrow the walk to just those outputs.
+// A repair output that no longer exists (a tier-4 deletion, conformist#57) is
+// skipped so the walker does not fail to stat an absent path; a duplicate of an
+// input path is dropped.
+func formatScope(paths []string, treeRoot string, repairOutputs []string) []string {
+	if len(paths) == 0 || len(repairOutputs) == 0 {
+		return paths
+	}
+
+	seen := make(map[string]struct{}, len(paths)+len(repairOutputs))
+
+	for _, p := range paths {
+		if abs, err := filepath.Abs(p); err == nil {
+			seen[abs] = struct{}{}
+		}
+	}
+
+	scope := slices.Clone(paths)
+
+	for _, rel := range repairOutputs {
+		abs := filepath.Join(treeRoot, rel)
+
+		if _, dup := seen[abs]; dup {
+			continue
+		}
+
+		// A repair-driven deletion leaves no file to format; skip it so
+		// NewCompositeReader does not error trying to stat an absent path.
+		if _, err := os.Stat(abs); err != nil {
+			continue
+		}
+
+		seen[abs] = struct{}{}
+		scope = append(scope, abs)
+	}
+
+	return scope
 }
 
 // repairObserver wraps the repair of a single opt-in (restage-repair-outputs)

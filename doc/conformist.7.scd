@@ -76,7 +76,10 @@ conformist has two modes of operation.
 	whole-tree codegen-repair linter that sets *restage-repair-outputs*
 	(*conformist.toml*(5)) also has the files its repair regenerates restaged,
 	even when they were not staged, so a stale generated sibling does not strand
-	the commit. Exits 0
+	the commit. Such regenerated files are run through any matching formatter
+	before being restaged, so a repair that emits unformatted content --- e.g. a
+	byte-splice edit --- still lands formatted in the commit (conformist#70).
+	Exits 0
 	when the staged content was already conformant, 3 when files were
 	reformatted and restaged, and 2 when refused — outside a git worktree, in
 	stdin mode, or under fail-on-change. With *--exit-zero-on-fix*, conformist exits 0 (not 3) on a
