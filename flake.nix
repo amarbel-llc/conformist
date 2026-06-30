@@ -31,6 +31,7 @@
     # golangci-lint-dewey binary itself — an FOD leaf that pins source by commit
     # and pulls NO flake graph, so purse-first can import conformist without
     # closing a loop. See conformist#45 coordination / the upstream-flip plan.
+    utils.inputs.systems.follows = "igloo/systems";
   };
 
   outputs =
