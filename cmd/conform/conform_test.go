@@ -212,6 +212,110 @@ func TestVersionEnvKeyFromDirName(t *testing.T) {
 	require.NotContains(t, string(got), "EXAMPLE_VERSION", "the EXAMPLE placeholder must be replaced")
 }
 
+// TestRunEmitsRepairCommand verifies the default (no --repair) run prints the
+// single working-tree repair command that delegates to conformist's own linters
+// (#42(ii)), and points at `conform --repair`.
+func TestRunEmitsRepairCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	var out bytes.Buffer
+	_, err := conform.Run(dir, &out, conform.Options{})
+	require.NoError(t, err)
+
+	report := out.String()
+	require.Contains(t, report, conform.RepairCommand, "the report emits the exact repair command")
+	require.Contains(t, report, "conform --repair", "the report points at the inline repair path")
+}
+
+// TestRunRepairInvokesRunner verifies --repair runs RepairCommand via the
+// injected runner and that a tree-changing repair marks the result changed
+// (exit 3), while a no-op repair leaves it unchanged (exit 0).
+func TestRunRepairInvokesRunner(t *testing.T) {
+	t.Run("changed", func(t *testing.T) {
+		dir := t.TempDir()
+		// Pre-create every scaffold so the run writes nothing; only repair can
+		// change the tree here.
+		seedAllScaffolds(t, dir)
+
+		var gotCmd string
+		var out bytes.Buffer
+		res, err := conform.Run(dir, &out, conform.Options{
+			Repair: true,
+			RepairRunner: func(_, command string) (bool, error) {
+				gotCmd = command
+
+				return true, nil
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, conform.RepairCommand, gotCmd, "--repair runs the exact emitted command")
+		require.True(t, res.Repaired)
+		require.True(t, res.Changed(), "a tree-changing repair is a changed (exit 3) outcome")
+		require.NotContains(t, out.String(), conform.RepairCommand, "having run repair, it does not also print the command")
+	})
+
+	t.Run("noop", func(t *testing.T) {
+		dir := t.TempDir()
+		seedAllScaffolds(t, dir)
+
+		res, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{
+			Repair:       true,
+			RepairRunner: func(_, _ string) (bool, error) { return false, nil },
+		})
+		require.NoError(t, err)
+		require.False(t, res.Repaired)
+		require.False(t, res.Changed(), "an already-conformant tree is an exit-0 outcome")
+	})
+}
+
+// TestRunSilentWhenJustfileAlreadyWired verifies #42 conformance detection: an
+// existing justfile that already carries conformist's lint recipes is not
+// nagged with the paste snippet.
+func TestRunSilentWhenJustfileAlreadyWired(t *testing.T) {
+	dir := t.TempDir()
+	wiredJust := "default: lint\n\nlint: lint-fmt\n\nlint-fmt:\n    nix build \".#checks.${system}.formatting\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "justfile"), []byte(wiredJust), 0o644))
+
+	var out bytes.Buffer
+	res, err := conform.Run(dir, &out, conform.Options{})
+	require.NoError(t, err)
+
+	require.Contains(t, res.Skipped, "justfile")
+	require.NotContains(t, out.String(), "add to justfile",
+		"a justfile already carrying the conformist recipes must not be nagged")
+}
+
+// TestRunSilentWhenFlakeHandWired verifies #42 conformance detection for an
+// unrecognized-shape flake (e.g. flake-parts) that a user already wired by hand:
+// conform leaves it silent instead of printing the paste snippet.
+func TestRunSilentWhenFlakeHandWired(t *testing.T) {
+	dir := t.TempDir()
+	// Not the eachDefaultSystem shape flakeedit recognizes, but it already
+	// references conformist's module wiring.
+	handWired := "{\n  inputs.conformist.url = \"github:amarbel-llc/conformist\";\n  outputs = inputs: " +
+		"inputs.flake-parts.lib.mkFlake { inherit inputs; } {\n" +
+		"    perSystem = { pkgs, ... }: {\n      formatter = (inputs.conformist.lib.evalModule pkgs {}).config.build.wrapper;\n" +
+		"    };\n  };\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(handWired), 0o644))
+
+	var out bytes.Buffer
+	res, err := conform.Run(dir, &out, conform.Options{})
+	require.NoError(t, err)
+
+	require.Contains(t, res.Skipped, "flake.nix")
+	require.Empty(t, res.Edited, "an unrecognized shape is not edited in place")
+	require.NotContains(t, out.String(), "add to flake.nix",
+		"a hand-wired flake must not be nagged with the paste snippet")
+}
+
+// seedAllScaffolds writes every scaffold file conform would create, so a
+// subsequent Run writes nothing and only the repair step can change the result.
+func seedAllScaffolds(t *testing.T, dir string) { //testui:allow // testify helper
+	t.Helper()
+	_, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
+	require.NoError(t, err)
+}
+
 // TestScaffoldFlakeAndJustfileMatchTemplate guards against drift: the full-file
 // scaffolds conform embeds must stay byte-identical to the canonical eng
 // template files (templates/eng), so `conformist conform` and

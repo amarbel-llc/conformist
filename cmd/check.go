@@ -45,7 +45,8 @@ func ExitCode(err error) int {
 	case errors.Is(err, ErrCheckOperational),
 		errors.Is(err, formatCmd.ErrCommitRefused),
 		errors.Is(err, formatCmd.ErrConflictMarkers),
-		errors.Is(err, formatCmd.ErrStagedRefused):
+		errors.Is(err, formatCmd.ErrStagedRefused),
+		errors.Is(err, ErrConformFailed):
 		return 2
 	case errors.Is(err, formatCmd.ErrFixesCommitted),
 		errors.Is(err, formatCmd.ErrFixesRestaged),

@@ -143,9 +143,30 @@ under fail-on-change.
   to reconcile by hand (#63). `just verify-flakeedit-parse` (in the `verify`
   lane) runs `conform` over the `test/flakeedit/` fixtures and
   `nix-instantiate --parse`s each rewrite, so a splice regression that yields
-  unparseable Nix fails CI. Idempotent
-  overall, exits 3 when it wrote or edited files (`ErrScaffolded`);
-  a hidden `gen-man` (`genman.go`) renders the section-1 man pages
+  unparseable Nix fails CI. A `flake.nix`/`justfile` that ALREADY carries the
+  conformist wiring is detected (conformance sentinels: a justfile `lint-fmt`
+  recipe / `checks.${system}.formatting`; a flake referencing
+  `conformist.lib.evalModule`) and left silent instead of nagging with the paste
+  snippet (#42(i)). To finish converging a brownfield tree, `conform` prints the
+  single `RepairCommand` — `nix fmt` (pure formatter + file-linter repair) then
+  the eng-impure lane's linters (`agents-md`, `gomod2nix`, …) in repair mode over
+  the working tree — that delegates the real content edits to conformist's own
+  linters; `conform --repair` runs that SAME command inline (working-tree only,
+  NO commit, leaving changes for the operator to review — the adoption-wave
+  zero-action path), the emitted and executed forms being one string
+  (`cmd/conform/conform.go`, #42(ii)). Idempotent
+  overall, exits 3 when it wrote/edited/repaired files (`ErrScaffolded`), 0 when
+  the tree is already conformant. `conform <domain>` / `conform <domain>#<id>` is
+  a distinct mode (#43): it resolves a flake template advertised by that domain's
+  PAPI document (`cmd/conform/papi/` — fetch `https://<domain>/.well-known/papi`,
+  follow `resources.templates` within the operator's own DNS tree, read the
+  visible `templates[]` of the `{data,meta}` collection per PAPI RFC-0001 §7/§8),
+  surfaces the resolved `flakeref`, and runs `nix flake init -t <flakeref>` (a
+  bare domain with one template uses it, several prompts via `huh` on a TTY and
+  otherwise fails listing the ids, refusing to guess); it maps operational
+  failures to exit 2 (`ErrConformFailed`) and refuses a non-empty target without
+  `--overwrite`.
+  A hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via
   `cmd/init`, `--completion` emits shell completions. Config flags live on
   **persistent** flags so `check` inherits tree-root/walk/excludes/config-file.
