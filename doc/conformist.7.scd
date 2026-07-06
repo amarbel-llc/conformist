@@ -91,8 +91,10 @@ conformist has two modes of operation.
 	That command runs the *bare* _conformist_ binary, which resolves each
 	formatter's _command_ from PATH. If the formatter toolchain (gofumpt,
 	goimports, nixfmt, …) is not on the author's PATH at commit time, the staged
-	repair *silently skips* those file types. Two supported ways to get a
-	*toolchain-hermetic* hook:
+	repair *skips* those file types with a loud per-lane warning rather than
+	failing the whole run (conformist#75) — pass *--require-tools* to make a
+	missing tool a hard error instead. Two supported ways to get a
+	*toolchain-hermetic* hook that never has to skip:
 
 	- *Nix module adopters:* use the _build.preCommit_ output (its formatter
 	  commands are store paths, not bare names). The _#eng_ template wires it as

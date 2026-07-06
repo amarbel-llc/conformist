@@ -173,8 +173,16 @@ func NewCompositeFormatter(
 	for name, formatterCfg := range cfg.FormatterConfigs {
 		formatter, err := newFormatter(name, cfg.TreeRoot, env, formatterCfg)
 
-		if errors.Is(err, ErrCommandNotFound) && cfg.AllowMissingFormatter {
-			log.Debugf("formatter command not found: %v", name)
+		if errors.Is(err, ErrCommandNotFound) && !cfg.RequireTools {
+			// Repair/format mode degrades on a missing tool binary: skip this lane
+			// with a LOUD per-lane warning rather than aborting the whole run, so a
+			// repair that only needs the other lanes still proceeds (conformist#75).
+			// A gate that must run every lane passes --require-tools to restore strict
+			// failure; `conformist check` (NewCompositeChecker) stays strict regardless.
+			log.Warnf(
+				"formatter %q skipped: %v — repair lane degraded; pass --require-tools to fail instead",
+				name, err,
+			)
 
 			continue
 		} else if err != nil {

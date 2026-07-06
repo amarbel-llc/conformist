@@ -69,3 +69,42 @@ func TestCompositeLinterEmptyWithoutRepair(t *testing.T) {
 	as.NoError(err)
 	as.True(linter.Empty())
 }
+
+// TestCompositeLinterMissingRepairBinaryDegrades verifies the conformist#75
+// contract: a repair-capable linter whose binary is missing from PATH must NOT
+// abort repair-mode construction by default — the lane is skipped (with a loud
+// warning) so a repair that only needs the other lanes still runs, the motivating
+// case of a dep-bump repair dying on an unrelated missing linter binary. Setting
+// RequireTools (--require-tools) restores strict failure for gates.
+func TestCompositeLinterMissingRepairBinaryDegrades(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	statz := stats.New()
+
+	cfg := &config.Config{
+		TreeRoot:    root,
+		OnUnmatched: "info",
+		LinterConfigs: map[string]*config.Linter{
+			// the check command (`true`) resolves; only the repair binary is missing.
+			"missing": {
+				Command:       "true",
+				Includes:      []string{"*.sh"},
+				RepairCommand: "definitely-not-a-real-binary-xyzzy",
+			},
+		},
+	}
+
+	// Default: degrade. Construction succeeds and the unresolved linter is skipped,
+	// leaving no repair-capable linters.
+	linter, err := format.NewCompositeLinter(cfg, &statz)
+	as.NoError(err)
+	as.True(linter.Empty())
+
+	// --require-tools: strict. The missing binary now aborts construction.
+	cfg.RequireTools = true
+
+	_, err = format.NewCompositeLinter(cfg, &statz)
+	as.ErrorIs(err, format.ErrCommandNotFound)
+}

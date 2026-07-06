@@ -160,8 +160,10 @@ func TestQuiet(tt *testing.T) {
 
 	t.Setenv("CONFORMIST_ALLOW_MISSING_FORMATTER", "false")
 
-	// check it doesn't suppress errors
-	conformist(t, withError(func(as *require.Assertions, err error) {
+	// check it doesn't suppress errors. Repair/format mode degrades on a missing
+	// tool binary by default (conformist#75), so --require-tools restores the hard
+	// error; quiet must still not swallow it.
+	conformist(t, withArgs("--require-tools"), withError(func(as *require.Assertions, err error) {
 		as.ErrorIs(err, format.ErrCommandNotFound)
 		as.ErrorContains(err, "foo-fmt")
 	}))
@@ -208,9 +210,28 @@ func TestAllowMissingFormatter(tt *testing.T) {
 		},
 	})
 
-	t.Run(test_ui.MakeTestCaseInfo("default"), func(t *test_ui.T) {
+	// Repair/format mode degrades on a missing tool binary by default
+	// (conformist#75): the run succeeds, skipping the unresolved formatter's lane
+	// with a warning rather than aborting the whole run.
+	t.Run(test_ui.MakeTestCaseInfo("default (degrades)"), func(t *test_ui.T) {
 		conformist(
 			t,
+			withNoError(t),
+			withStats(t, map[stats.Type]int{
+				stats.Traversed: 33,
+				stats.Matched:   0,
+				stats.Formatted: 0,
+				stats.Changed:   0,
+			}),
+		)
+	})
+
+	// --require-tools restores strict failure for repair gates that must run
+	// every lane.
+	t.Run(test_ui.MakeTestCaseInfo("require-tools"), func(t *test_ui.T) {
+		conformist(
+			t,
+			withArgs("--require-tools"),
 			withError(func(as *require.Assertions, err error) {
 				as.ErrorIs(err, format.ErrCommandNotFound)
 			}),

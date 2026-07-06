@@ -140,8 +140,17 @@ func NewCompositeLinter(cfg *config.Config, statz *stats.Stats) (*CompositeLinte
 		}
 
 		linter, err := newLinter(name, cfg.TreeRoot, env, lCfg)
-		if errors.Is(err, ErrCommandNotFound) && cfg.AllowMissingFormatter {
-			log.Debugf("linter command not found: %v", name)
+		if errors.Is(err, ErrCommandNotFound) && !cfg.RequireTools {
+			// Repair mode degrades on a missing tool binary: skip this linter's repair
+			// lane with a LOUD warning rather than aborting the whole run, so a repair
+			// that only needs the formatter (or other linter) lanes still proceeds —
+			// the motivating conformist#75 case (a dep-bump repair dying on an
+			// unrelated missing linter binary). --require-tools restores strict failure
+			// for gates.
+			log.Warnf(
+				"linter %q repair skipped: %v — repair lane degraded; pass --require-tools to fail instead",
+				name, err,
+			)
 
 			continue
 		} else if err != nil {

@@ -55,8 +55,15 @@ are command-line only and are rejected in the config file.
 	_error_, or _fatal_. Defaults to _info_.
 
 *allow-missing-formatter*
-	When true, a configured tool that is not installed is skipped rather than
-	failing the run.
+	In check mode (*conformist check*), skip a configured tool whose binary is
+	not installed rather than failing the check. Repair/format mode already
+	degrades on a missing tool by default — see *require-tools*.
+
+*require-tools*
+	In repair/format mode, fail the run when a configured tool's binary is
+	missing from PATH instead of skipping that lane with a loud per-lane warning
+	(conformist#75). Use for repair gates that must run every lane. Check mode is
+	strict regardless (relax it with *allow-missing-formatter*).
 
 *fail-on-change*
 	When true, exit non-zero if any file was changed. Useful in CI.

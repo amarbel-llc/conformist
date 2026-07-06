@@ -271,6 +271,11 @@ func TestCommandShellDetection(tt *testing.T) {
 		cfg := &config.Config{
 			TreeRoot:    t.TempDir(),
 			OnUnmatched: "info",
+			// RequireTools keeps NewCompositeFormatter strict so an unresolved bare
+			// command still surfaces ErrCommandNotFound here — this test pins the
+			// bare-vs-shell resolution routing (#38), not the repair-mode degrade
+			// behavior (conformist#75), which would otherwise swallow the error.
+			RequireTools: true,
 			FormatterConfigs: map[string]*config.Formatter{
 				"t": {Command: command, Includes: []string{"*"}},
 			},

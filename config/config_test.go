@@ -177,6 +177,36 @@ func TestAllowMissingFormatter(tt *testing.T) {
 	checkValue(true)
 }
 
+func TestRequireTools(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	cfg := &config.Config{}
+	v, flags := newViper(t)
+
+	checkValue := func(expected bool) {
+		readValue(t, v, cfg, func(cfg *config.Config) {
+			as.Equal(expected, cfg.RequireTools)
+		})
+	}
+
+	// default with no flag, env or config
+	checkValue(false)
+
+	// set config value
+	cfg.RequireTools = true
+
+	checkValue(true)
+
+	// env override
+	t.Setenv("CONFORMIST_REQUIRE_TOOLS", "false")
+	checkValue(false)
+
+	// flag override
+	as.NoError(flags.Set("require-tools", "true"))
+	checkValue(true)
+}
+
 func TestCI(tt *testing.T) {
 	t := &test_ui.T{T: tt}
 	as := require.New(t)

@@ -37,24 +37,53 @@ You can change this behaviour using the [config-file](#config-file_1) options
 
 ### `allow-missing-formatter`
 
-Do not exit with error if a configured formatter is missing.
+In check mode (`conformist check`), do not exit with an error if a configured
+tool's binary is missing from PATH. Repair/format mode already degrades on a
+missing tool by default — see [`require-tools`](#require-tools).
 
 === "Flag"
 
     ```console
-    conformist --allow-missing-formatter true
+    conformist check --allow-missing-formatter true
     ```
 
 === "Env"
 
     ```console
-    CONFORMIST_ALLOW_MISSING_FORMATTER=true conformist
+    CONFORMIST_ALLOW_MISSING_FORMATTER=true conformist check
     ```
 
 === "Config"
 
     ```toml
     allow-missing-formatter = true
+    ```
+
+### `require-tools`
+
+In repair/format mode, exit with an error when a configured tool's binary is
+missing from PATH instead of skipping that lane with a loud per-lane warning.
+Repair/format mode degrades by default so a dep-bump repair is not blocked by an
+unrelated missing tool; set this for repair gates that must run every lane.
+(Check mode is strict regardless; relax it with
+[`allow-missing-formatter`](#allow-missing-formatter).)
+
+=== "Flag"
+
+    ```console
+    conformist --require-tools
+    ```
+
+=== "Env"
+
+    ```console
+    CONFORMIST_REQUIRE_TOOLS=true conformist
+    ```
+
+=== "Config"
+
+    ```toml
+    require-tools = true
     ```
 
 ### `ci`

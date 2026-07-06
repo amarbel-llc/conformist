@@ -35,6 +35,7 @@ type Config struct {
 	NoCache               bool     `mapstructure:"no-cache"                toml:"-"` // not allowed in config
 	OnUnmatched           string   `mapstructure:"on-unmatched"            toml:"on-unmatched,omitempty"`
 	Quiet                 bool     `mapstructure:"quiet"                   toml:"-"` // not allowed in config
+	RequireTools          bool     `mapstructure:"require-tools"           toml:"require-tools,omitempty"`
 	TreeRoot              string   `mapstructure:"tree-root"               toml:"tree-root,omitempty"`
 	TreeRootCmd           string   `mapstructure:"tree-root-cmd"           toml:"tree-root-cmd,omitempty"`
 	TreeRootFile          string   `mapstructure:"tree-root-file"          toml:"tree-root-file,omitempty"`
@@ -175,7 +176,10 @@ type Linter struct {
 func SetFlags(fs *pflag.FlagSet) {
 	fs.Bool(
 		"allow-missing-formatter", false,
-		"Do not exit with error if a configured formatter is missing. (env $CONFORMIST_ALLOW_MISSING_FORMATTER)",
+		"In check mode (`conformist check`), do not exit with an error if a configured "+
+			"tool's binary is missing from PATH. (Repair/format mode already degrades on "+
+			"a missing tool by default — see --require-tools.) "+
+			"(env $CONFORMIST_ALLOW_MISSING_FORMATTER)",
 	)
 	fs.Bool(
 		"ci", false,
@@ -210,6 +214,14 @@ func SetFlags(fs *pflag.FlagSet) {
 		"on-unmatched", "u", "info",
 		"Log paths that did not match any formatters at the specified log level. Possible values: "+
 			"debug, info, warn, error, fatal. (env $CONFORMIST_ON_UNMATCHED)",
+	)
+	fs.Bool(
+		"require-tools", false,
+		"In repair/format mode, exit with an error when a configured tool's binary is "+
+			"missing from PATH instead of skipping that lane with a loud warning. Use for "+
+			"repair gates that must run every lane. (`conformist check` is strict "+
+			"regardless; relax it with --allow-missing-formatter.) "+
+			"(env $CONFORMIST_REQUIRE_TOOLS)",
 	)
 	fs.Bool(
 		"stdin", false,
