@@ -17,7 +17,16 @@ const (
 	// per check name, value = the check's combined config + matched-file-set
 	// signature (conformist#16).
 	bucketWholeTree = "wholetree"
+	// bucketAttestation holds a single tree-wide config/toolchain identity
+	// attestation (conformist#76): key attestationKey -> the hex identity
+	// recorded by the last successful format/repair run over this tree, used to
+	// detect when a competing config/toolchain rewrites the same tree.
+	bucketAttestation = "attestation"
 )
+
+// attestationKey is the single fixed key under bucketAttestation (conformist#76).
+// There is one identity per tree, so a fixed key rather than a per-entry one.
+const attestationKey = "identity"
 
 // Path returns a unique local cache file path for the given root string, using its SHA-256 hash.
 func Path(root string) (string, error) {
@@ -50,7 +59,7 @@ func Open(root string) (*bolt.DB, error) {
 
 	// ensure buckets exist
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, name := range []string{bucketPaths, bucketWholeTree} {
+		for _, name := range []string{bucketPaths, bucketWholeTree, bucketAttestation} {
 			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
 				return fmt.Errorf("failed to create bucket %q: %w", name, err)
 			}
@@ -74,6 +83,62 @@ func PathsBucket(tx *bolt.Tx) *bolt.Bucket {
 // callers must nil-check.
 func WholeTreeBucket(tx *bolt.Tx) *bolt.Bucket {
 	return tx.Bucket([]byte(bucketWholeTree))
+}
+
+// AttestationBucket returns the bucket holding the tree-wide config/toolchain
+// identity attestation (conformist#76). May be nil on a cache db created before
+// this bucket existed; callers must nil-check.
+func AttestationBucket(tx *bolt.Tx) *bolt.Bucket {
+	return tx.Bucket([]byte(bucketAttestation))
+}
+
+// ReadAttestation returns the config/toolchain identity recorded by the last
+// successful format/repair run over this tree, or "" if none has been recorded
+// (conformist#76).
+func ReadAttestation(db *bolt.DB) (string, error) {
+	var identity string
+
+	err := db.View(func(tx *bolt.Tx) error {
+		b := AttestationBucket(tx)
+		if b == nil {
+			return nil
+		}
+
+		if v := b.Get([]byte(attestationKey)); v != nil {
+			identity = string(v)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to read identity attestation: %w", err)
+	}
+
+	return identity, nil
+}
+
+// WriteAttestation records identity as the tree's config/toolchain attestation
+// (conformist#76), replacing any previous value.
+func WriteAttestation(db *bolt.DB, identity string) error {
+	err := db.Update(func(tx *bolt.Tx) error {
+		// Open() creates the bucket, but create lazily too so a cache db from an
+		// older conformist (no attestation bucket) still works.
+		b, err := tx.CreateBucketIfNotExists([]byte(bucketAttestation))
+		if err != nil {
+			return fmt.Errorf("failed to create attestation bucket: %w", err)
+		}
+
+		if err := b.Put([]byte(attestationKey), []byte(identity)); err != nil {
+			return fmt.Errorf("failed to write identity attestation: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to record identity attestation: %w", err)
+	}
+
+	return nil
 }
 
 func Remove(root string) error {

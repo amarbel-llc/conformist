@@ -150,6 +150,7 @@ func NewRoot(version, commit string) (*cobra.Command, *stats.Stats) {
 	cobra.CheckErr(v.BindPFlag("prj_root", pfs.Lookup("tree-root")))
 
 	cmd.AddCommand(newCheckCmd(v, &statz))
+	cmd.AddCommand(newIdentityCmd(v))
 	cmd.AddCommand(newVersionCmd(programName, version, commit))
 	cmd.AddCommand(newGenManCmd())
 	cmd.AddCommand(newConformCmd())

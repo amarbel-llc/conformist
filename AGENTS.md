@@ -121,7 +121,9 @@ under fail-on-change.
   or `format.RunCommit` with `--commit` (#24: repair, then commit exactly the
   files the run changed — the pre/post `git status` delta — as
   `chore: conformist fmt+fix`; dirty-tree policy in `commitPreflight`);
-  subcommands `check` (`check.go`) and `version` (`version.go`) dispatch
+  subcommands `check` (`check.go`), `identity` (`identity.go` — prints the
+  resolved config/toolchain identity hash, conformist#76) and `version`
+  (`version.go`) dispatch
   separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
   eng shape — writes every absent shape file (`conformist.nix`, a `version.env`
   whose key is derived from the repo name — git origin remote, else the directory
@@ -193,8 +195,11 @@ under fail-on-change.
   (`workingdir.go`); both are conformist#38.
 - `walk/` — pluggable tree walkers: `filesystem.go`, `git.go`, `jujutsu.go`,
   `stdin.go`, selected by `type_enum.go`. `walk/cache/` is the bbolt-backed
-  (`go.etcd.io/bbolt`) cache: a `paths` bucket for per-file format signatures and
-  a `wholetree` bucket for whole-tree check signatures (conformist#16).
+  (`go.etcd.io/bbolt`) cache: a `paths` bucket for per-file format signatures,
+  a `wholetree` bucket for whole-tree check signatures (conformist#16), and an
+  `attestation` bucket holding the tree's config/toolchain identity recorded by
+  the last successful repair/format run (conformist#76 — `ReadAttestation`/
+  `WriteAttestation`, used by the format path to detect a competing config).
 - `stats/`, `git/`, `jujutsu/` — run statistics and VCS helpers.
 - `test/` — integration harness and fixtures (`test/config`, `test/examples`).
   Fixtures under `test/**` are **deliberately mis-formatted**; they are excluded

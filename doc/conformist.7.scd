@@ -140,6 +140,29 @@ the sequence of tools applied to it — and skips files whose signature is
 unchanged since the previous run. The cache is bypassed in check mode and by
 the *--no-cache* and *--clear-cache* flags.
 
+# CONFIG-IDENTITY ATTESTATION
+
+conformist's model is one tree, one config, one toolchain — but in practice the
+same tree is hit by several invocations carrying different configs and tool
+versions (a repo-owned config, a fallback wrapper's catch-all, an embedded
+format pass), and nothing detects the fight. To surface it, each successful
+repair/format run records a *config-identity attestation* in the cache: a hash
+of the resolved formatter/linter tables (including each tool's command, which
+for a Nix-module config is a _/nix/store_ path that encodes its version) plus
+the global excludes and walk type.
+
+On the next repair/format run, if this invocation's identity differs from the
+recorded one, a competing config is about to rewrite the tree. By default
+conformist warns loudly and proceeds (reconciling the record to the current
+identity); under *--refuse-identity-mismatch* it exits with an error instead —
+for gates that must not run under a foreign config. Attestation is skipped in
+stdin mode and when the cache is disabled (*--no-cache*/*--clear-cache*), and
+never happens in check mode (a read-only gate is not a writer).
+
+The *conformist identity* subcommand prints the current identity hash, so a
+wrapper or hook can assert an invocation matches the repo's canonical config.
+See conformist#76.
+
 # CONFIGURATION
 
 Configuration lives in a *conformist.toml*(5) file discovered by searching

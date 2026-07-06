@@ -25,24 +25,25 @@ import (
 
 // Config is used to represent the list of configured Formatters.
 type Config struct {
-	AllowMissingFormatter bool     `mapstructure:"allow-missing-formatter" toml:"allow-missing-formatter,omitempty"`
-	CI                    bool     `mapstructure:"ci"                      toml:"-"` // not allowed in config
-	ClearCache            bool     `mapstructure:"clear-cache"             toml:"-"` // not allowed in config
-	CPUProfile            string   `mapstructure:"cpu-profile"             toml:"cpu-profile,omitempty"`
-	Excludes              []string `mapstructure:"excludes"                toml:"excludes,omitempty"`
-	FailOnChange          bool     `mapstructure:"fail-on-change"          toml:"fail-on-change,omitempty"`
-	Formatters            []string `mapstructure:"formatters"              toml:"formatters,omitempty"`
-	NoCache               bool     `mapstructure:"no-cache"                toml:"-"` // not allowed in config
-	OnUnmatched           string   `mapstructure:"on-unmatched"            toml:"on-unmatched,omitempty"`
-	Quiet                 bool     `mapstructure:"quiet"                   toml:"-"` // not allowed in config
-	RequireTools          bool     `mapstructure:"require-tools"           toml:"require-tools,omitempty"`
-	TreeRoot              string   `mapstructure:"tree-root"               toml:"tree-root,omitempty"`
-	TreeRootCmd           string   `mapstructure:"tree-root-cmd"           toml:"tree-root-cmd,omitempty"`
-	TreeRootFile          string   `mapstructure:"tree-root-file"          toml:"tree-root-file,omitempty"`
-	Verbose               uint8    `mapstructure:"verbose"                 toml:"verbose,omitempty"`
-	Walk                  string   `mapstructure:"walk"                    toml:"walk,omitempty"`
-	WorkingDirectory      string   `mapstructure:"working-dir"             toml:"-"`
-	Stdin                 bool     `mapstructure:"stdin"                   toml:"-"` // not allowed in config
+	AllowMissingFormatter  bool     `mapstructure:"allow-missing-formatter"  toml:"allow-missing-formatter,omitempty"`
+	CI                     bool     `mapstructure:"ci"                       toml:"-"` // not allowed in config
+	ClearCache             bool     `mapstructure:"clear-cache"              toml:"-"` // not allowed in config
+	CPUProfile             string   `mapstructure:"cpu-profile"              toml:"cpu-profile,omitempty"`
+	Excludes               []string `mapstructure:"excludes"                 toml:"excludes,omitempty"`
+	FailOnChange           bool     `mapstructure:"fail-on-change"           toml:"fail-on-change,omitempty"`
+	Formatters             []string `mapstructure:"formatters"               toml:"formatters,omitempty"`
+	NoCache                bool     `mapstructure:"no-cache"                 toml:"-"` // not allowed in config
+	OnUnmatched            string   `mapstructure:"on-unmatched"             toml:"on-unmatched,omitempty"`
+	Quiet                  bool     `mapstructure:"quiet"                    toml:"-"` // not allowed in config
+	RefuseIdentityMismatch bool     `mapstructure:"refuse-identity-mismatch" toml:"refuse-identity-mismatch,omitempty"`
+	RequireTools           bool     `mapstructure:"require-tools"            toml:"require-tools,omitempty"`
+	TreeRoot               string   `mapstructure:"tree-root"                toml:"tree-root,omitempty"`
+	TreeRootCmd            string   `mapstructure:"tree-root-cmd"            toml:"tree-root-cmd,omitempty"`
+	TreeRootFile           string   `mapstructure:"tree-root-file"           toml:"tree-root-file,omitempty"`
+	Verbose                uint8    `mapstructure:"verbose"                  toml:"verbose,omitempty"`
+	Walk                   string   `mapstructure:"walk"                     toml:"walk,omitempty"`
+	WorkingDirectory       string   `mapstructure:"working-dir"              toml:"-"`
+	Stdin                  bool     `mapstructure:"stdin"                    toml:"-"` // not allowed in config
 
 	FormatterConfigs map[string]*Formatter `mapstructure:"formatter" toml:"formatter,omitempty"`
 
@@ -214,6 +215,13 @@ func SetFlags(fs *pflag.FlagSet) {
 		"on-unmatched", "u", "info",
 		"Log paths that did not match any formatters at the specified log level. Possible values: "+
 			"debug, info, warn, error, fatal. (env $CONFORMIST_ON_UNMATCHED)",
+	)
+	fs.Bool(
+		"refuse-identity-mismatch", false,
+		"In repair/format mode, exit with an error instead of only warning when this "+
+			"invocation's config/toolchain identity differs from the one that last formatted "+
+			"the tree. Use in gates that must not let a competing config rewrite the tree "+
+			"(conformist#76). (env $CONFORMIST_REFUSE_IDENTITY_MISMATCH)",
 	)
 	fs.Bool(
 		"require-tools", false,

@@ -26,6 +26,11 @@ import (
 
 var ErrFailOnChange = errors.New("unexpected changes detected, --fail-on-change is enabled")
 
+// ErrIdentityMismatch is returned under --refuse-identity-mismatch when this
+// invocation's config/toolchain identity differs from the one that last
+// formatted the tree (conformist#76).
+var ErrIdentityMismatch = errors.New("config/toolchain identity mismatch")
+
 // Run formats/repairs the tree and discards the repair-output paths
 // (conformist#55), which only the --staged lane consumes. It is the entry point
 // for the bare `conformist` command and `nix fmt`.
@@ -129,7 +134,75 @@ func runWithObserver(
 		cancel()
 	}()
 
-	return formatTree(ctx, cfg, statz, db, paths, observe)
+	// conformist#76: config-identity attestation. Before running, compare this
+	// invocation's config/toolchain identity against the one the last successful
+	// run recorded for this tree; a mismatch means a competing config is about to
+	// rewrite the tree — silent by construction today. Warn loudly by default, or
+	// refuse under --refuse-identity-mismatch (for gates). Skipped in stdin mode
+	// and when the cache is disabled (there is nothing to record against).
+	attest := db != nil && !cfg.Stdin
+
+	if attest {
+		if err := checkIdentityAttestation(db, cfg.Identity(), cfg.RefuseIdentityMismatch); err != nil {
+			return nil, err
+		}
+	}
+
+	outputs, err := formatTree(ctx, cfg, statz, db, paths, observe)
+
+	// Record the identity only after a successful run, so a failed or aborted run
+	// does not claim ownership of the tree (conformist#76). A write failure is
+	// non-fatal — it must never turn a successful format into a failure.
+	if err == nil && attest {
+		if writeErr := cache.WriteAttestation(db, cfg.Identity()); writeErr != nil {
+			log.Warnf("failed to record config identity attestation: %v", writeErr)
+		}
+	}
+
+	return outputs, err
+}
+
+// checkIdentityAttestation compares the current invocation's config/toolchain
+// identity against the one recorded by the last successful run over this tree
+// (conformist#76). On a mismatch it refuses (when refuse is set) or logs a loud
+// warning; a first run (no prior attestation) or a match is silent. A failure to
+// READ the attestation is non-fatal — detection must never block a format run.
+func checkIdentityAttestation(db *bolt.DB, identity string, refuse bool) error {
+	prev, err := cache.ReadAttestation(db)
+	if err != nil {
+		log.Warnf("failed to read config identity attestation: %v", err)
+
+		return nil
+	}
+
+	if prev == "" || prev == identity {
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"this tree was last formatted under config/toolchain identity %s, but this invocation is %s — "+
+			"a competing config or toolchain may be fighting over the tree (conformist#76)",
+		shortIdentity(prev), shortIdentity(identity),
+	)
+
+	if refuse {
+		return fmt.Errorf("%w: %s", ErrIdentityMismatch, msg)
+	}
+
+	log.Warn(msg)
+
+	return nil
+}
+
+// shortIdentity truncates a hex identity for human-readable log output; the full
+// value is available from `conformist identity`.
+func shortIdentity(identity string) string {
+	const n = 12
+	if len(identity) <= n {
+		return identity
+	}
+
+	return identity[:n]
 }
 
 // formatTree runs the linter-repair + formatter pipeline over cfg.TreeRoot,

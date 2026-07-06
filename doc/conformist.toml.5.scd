@@ -65,6 +65,13 @@ are command-line only and are rejected in the config file.
 	(conformist#75). Use for repair gates that must run every lane. Check mode is
 	strict regardless (relax it with *allow-missing-formatter*).
 
+*refuse-identity-mismatch*
+	In repair/format mode, exit with an error instead of only warning when this
+	invocation's config/toolchain identity differs from the one recorded by the
+	last successful run over the tree (conformist#76). Use in gates that must not
+	let a competing config rewrite the tree. See *conformist*(7) "CONFIG-IDENTITY
+	ATTESTATION" and the *identity* subcommand.
+
 *fail-on-change*
 	When true, exit non-zero if any file was changed. Useful in CI.
 

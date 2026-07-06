@@ -34,8 +34,9 @@ var (
 // distinguishes findings (1) from operational failures (2) per RFC 0001 §7.
 // Repair mode's --commit (#24) and --staged (#25) flags add 3 (fixes were
 // applied and committed/restaged) and map their refusals (dirty tree, partial
-// staging, not a git worktree, leftover conflict markers #67) to 2; `conform`
-// (#17) also exits 3 when it scaffolds files; all other errors exit 1.
+// staging, not a git worktree, leftover conflict markers #67, a refused
+// config-identity mismatch #76) to 2; `conform` (#17) also exits 3 when it
+// scaffolds files; all other errors exit 1.
 func ExitCode(err error) int {
 	switch {
 	case err == nil:
@@ -46,6 +47,7 @@ func ExitCode(err error) int {
 		errors.Is(err, formatCmd.ErrCommitRefused),
 		errors.Is(err, formatCmd.ErrConflictMarkers),
 		errors.Is(err, formatCmd.ErrStagedRefused),
+		errors.Is(err, formatCmd.ErrIdentityMismatch),
 		errors.Is(err, ErrConformFailed):
 		return 2
 	case errors.Is(err, formatCmd.ErrFixesCommitted),

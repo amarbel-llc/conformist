@@ -86,6 +86,32 @@ unrelated missing tool; set this for repair gates that must run every lane.
     require-tools = true
     ```
 
+### `refuse-identity-mismatch`
+
+In repair/format mode, exit with an error instead of only warning when this
+invocation's config/toolchain identity differs from the one recorded by the last
+successful run over the tree. Use in gates that must not let a competing config
+rewrite the tree. See the `conformist identity` subcommand, which prints the
+current identity hash.
+
+=== "Flag"
+
+    ```console
+    conformist --refuse-identity-mismatch
+    ```
+
+=== "Env"
+
+    ```console
+    CONFORMIST_REFUSE_IDENTITY_MISMATCH=true conformist
+    ```
+
+=== "Config"
+
+    ```toml
+    refuse-identity-mismatch = true
+    ```
+
 ### `ci`
 
 Runs conformist in a CI mode, enabling [no-cache](#no-cache), [fail-on-change](#fail-on-change) and adjusting some other settings best suited to a

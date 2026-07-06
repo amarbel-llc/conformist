@@ -143,6 +143,21 @@ explore-clippy-fixture:
 
 # --- debug ---
 
+# Auto-fix the golangci-lint findings that support --fix — notably tagalign
+# struct-tag alignment, which gofumpt does NOT do (gofmt aligns the outer tag
+# column but not the columns WITHIN a tag), so a new/renamed struct-tag key that
+# becomes the longest shifts the toml column and only golangci's fixer knows the
+# target. Same golangci-lint-dewey build and cache isolation as lint-go; run it,
+# then re-check with `just lint-go`. Diagnostic aid for lint-go failures, not in
+# any aggregate / the CI lane.
+[group("debug")]
+debug-golangci-autofix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export GOLANGCI_LINT_CACHE="$PWD/.tmp/golangci-lint"
+    bin=$(nix build --no-link --print-out-paths '.#golangci-lint-dewey')/bin/golangci-lint-dewey
+    nix develop --command "$bin" run --fix ./...
+
 # Build-backend microbench: godyn (native, per-package CA) vs buildGoApplication
 # (bga) across four edit-locality phases, emitting wall-clock build durations to
 # stats-me (stats-me-clients(1)) as |ms timers named
