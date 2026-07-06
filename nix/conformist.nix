@@ -7,8 +7,9 @@
 {
   projectRootFile = "flake.nix";
 
-  # Formatters.
-  programs.gofmt.enable = true;
+  # Formatters. Go is the canonical eng chain (goimports+gofumpt) via the eng-go
+  # preset imported below — conformist dogfoods it instead of the plain gofmt it
+  # used to be an outlier on (eng #18). nixfmt/taplo are conformist's own picks.
   programs.nixfmt.enable = true;
   programs.taplo.enable = true;
 
@@ -22,7 +23,12 @@
   # gets from `imports = [ conformist.lib.presets.eng ]`. These read only
   # committed files, so they run in the sandboxed checks.formatting gate (the
   # git-state checks live in nix/conformist-impure.nix, via the eng-impure preset).
-  imports = [ ./presets/eng.nix ];
+  # eng-go adds the canonical Go formatter chain (goimports+gofumpt) — the same
+  # chain a downstream Go repo gets from `imports = [ conformist.lib.presets.eng-go ]`.
+  imports = [
+    ./presets/eng.nix
+    ./presets/eng-go.nix
+  ];
 
   # Go-specific, so not in the language-agnostic preset (conformist#10: a
   # golangci-lint-gating repo must wire the dewey plugin via .custom-gcl.yml).

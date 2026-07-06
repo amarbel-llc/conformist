@@ -411,6 +411,7 @@ in
   # e.g. `imports = [ conformist.lib.presets.eng ];`. See nix/presets/.
   presets = {
     eng = ./presets/eng.nix;
+    eng-go = ./presets/eng-go.nix;
     eng-impure = ./presets/eng-impure.nix;
   };
 }

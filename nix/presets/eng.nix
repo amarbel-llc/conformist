@@ -8,8 +8,12 @@
 # the sandboxed checks.formatting lane.
 #
 # Deliberately NOT enabled here:
-#   - formatters (gofmt/nixfmt/...) and `shellcheck` — a repo picks its own;
-#   - `golangci-dewey` — Go-specific (a future presets.eng-go can add it);
+#   - non-Go formatters (nixfmt/...) and `shellcheck` — a repo picks its own;
+#     the canonical Go formatter chain (goimports+gofumpt) lives in the sibling
+#     `conformist.lib.presets.eng-go`, kept separate so a non-Go repo importing
+#     `eng` never pulls a Go toolchain;
+#   - `golangci-dewey` — Go *linting* (a separate adoption decision from the
+#     eng-go formatter chain; enable it explicitly);
 #   - the git-state checks (git-remotes, sweatfile, ...) — they need a live .git
 #     and live in conformist.lib.presets.eng-impure (the impure lane).
 #

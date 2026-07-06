@@ -272,13 +272,19 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   the verify/CI lane so CI stays Rust-free).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the
-  seven `justfile-*`) and `eng-impure.nix` (git-state lane: `git-remotes`,
-  `git-default-branch`, `sweatfile`, `agents-md`, `gomod2nix`). Exposed as
-  `conformist.lib.presets.{eng,eng-impure}`, so a downstream repo's roster is
-  `imports = [ conformist.lib.presets.eng ]`. conformist self-consumes them
-  (below), so the presets can't drift from what conformist itself runs.
+  seven `justfile-*`), `eng-go.nix` (the canonical Go formatter chain: `goimports`
+  priority 1 then `gofumpt` priority 2 — the sequence the fleet converged on,
+  eng #18; kept separate from `eng` so a non-Go repo never pulls a Go toolchain),
+  and `eng-impure.nix` (git-state lane: `git-remotes`, `git-default-branch`,
+  `sweatfile`, `agents-md`, `gomod2nix`). Exposed as
+  `conformist.lib.presets.{eng,eng-go,eng-impure}`, so a downstream repo's roster
+  is `imports = [ conformist.lib.presets.eng conformist.lib.presets.eng-go ]`.
+  conformist self-consumes them (below), so the presets can't drift from what
+  conformist itself runs.
 - `nix/conformist.nix` — conformist's own self-config: `imports = [
-  ./presets/eng.nix ]` + its formatters, `shellcheck`, the Go-specific
+  ./presets/eng.nix ./presets/eng-go.nix ]` (so conformist dogfoods the canonical
+  goimports+gofumpt chain rather than the plain `gofmt` it used to be an outlier
+  on) + its own `nixfmt`/`taplo` formatters, `shellcheck`, the Go-specific
   `golangci-dewey`, and excludes (sandboxed, file-based checks).
   `nix/conformist-impure.nix` — `imports = [ ./presets/eng-impure.nix ]`; the
   impure git-state checks need a live `.git` and so run via `just lint-worktree`
@@ -363,8 +369,8 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
 - `formatter` (= `nix fmt` wrapper), `checks.formatting` (sandboxed read-only
   gate) + the `formatter-*`/`linter-*` registry smoke tests.
 - `lib` = the Nix module library (`conformist.lib.evalModule pkgs { … }`), which
-  also carries `lib.presets.{eng,eng-impure}` (the one-import eng rosters, see
-  `nix/presets/`); `flakeModule` = `flake-module.nix` (flake-parts
+  also carries `lib.presets.{eng,eng-go,eng-impure}` (the one-import eng rosters,
+  see `nix/presets/`); `flakeModule` = `flake-module.nix` (flake-parts
   `perSystem.conformist`).
 - `templates.eng` (`templates/eng/`) — `nix flake init -t
   github:amarbel-llc/conformist#eng` scaffolds an adopter repo wired to the eng
