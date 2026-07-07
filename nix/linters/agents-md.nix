@@ -7,6 +7,11 @@
 # leaves a relative CLAUDE.md -> AGENTS.md back-compat symlink. Idempotent and
 # conflict-safe (never clobbers a divergent AGENTS.md).
 #
+# The check also enforces a character-count budget on AGENTS.md itself
+# (configurable via `max-chars`): an orientation doc that grows unbounded stops
+# being something an agent actually reads. There is no repair for this —
+# trimming prose is a judgment call, not a mechanical fix.
+#
 # Whole-tree check (passes-files=false): runs once at the tree root, gated on a
 # CLAUDE.md being present. Uses writeShellApplication so the scripts' shebangs are
 # patched for the sandbox (cf. conformist#19). Lives in the impure self-check lane
@@ -58,6 +63,17 @@ let
         findings=1
       done < <(find . -name CLAUDE.md -type f -not -path './.git/*')
 
+      # Size budget: an orientation doc that grows unbounded stops being
+      # something an agent actually reads. No repair — trimming prose is a
+      # judgment call, not a mechanical fix.
+      if [ -f AGENTS.md ]; then
+        chars=$(wc -c <AGENTS.md)
+        if [ "$chars" -gt ${toString cfg.max-chars} ]; then
+          echo "agents-md: AGENTS.md is $chars characters, exceeds the ${toString cfg.max-chars}-character limit" >&2
+          findings=1
+        fi
+      fi
+
       if [ "$findings" -ne 0 ]; then
         exit 1
       fi
@@ -93,17 +109,25 @@ in
 {
   options.linters.agents-md = {
     enable = lib.mkEnableOption "the CLAUDE.md -> AGENTS.md migration whole-tree check (conformist#18)";
+
+    max-chars = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 40000;
+      description = "Maximum character count for AGENTS.md before the check flags it as too large.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
     settings.linter.agents-md = {
       command = lib.getExe check;
       "repair-command" = lib.getExe repair;
-      # Gate on any CLAUDE.md (regular file or symlink, root or nested) so the
-      # check fires for the tree; the script itself ignores the file list.
+      # Gate on any CLAUDE.md (regular file or symlink, root or nested), or on
+      # AGENTS.md itself so a size-only edit re-triggers the check; the script
+      # itself ignores the file list.
       includes = [
         "CLAUDE.md"
         "**/CLAUDE.md"
+        "AGENTS.md"
       ];
       passes-files = false;
     };

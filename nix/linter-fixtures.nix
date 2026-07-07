@@ -508,6 +508,31 @@ let
       expectToken = "must declare";
     })
 
+    # agents-md: AGENTS.md must stay under the configured character budget
+    # (max-chars); no CLAUDE.md present so only the size check is exercised.
+    (mkLinterFixtureCheck {
+      name = "agents-md";
+      label = "under-budget-pass";
+      enableModule = {
+        max-chars = 20;
+      };
+      files = {
+        "AGENTS.md" = "short and sweet\n";
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "agents-md";
+      label = "over-budget-fail";
+      enableModule = {
+        max-chars = 20;
+      };
+      files = {
+        "AGENTS.md" = "this AGENTS.md is deliberately longer than the twenty character budget\n";
+      };
+      expectFail = true;
+      expectToken = "exceeds the 20-character limit";
+    })
+
     # flake-lock: flake.lock must be committed when flake.nix is present
     # (conformist-nix(7) FLAKE HYGIENE, conformist#11).
     (mkLinterFixtureCheck {
