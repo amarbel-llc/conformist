@@ -14,6 +14,20 @@
 # native check mode is requested upstream (amarbel-llc/gomod2nix#14); swap the
 # check to it once available.
 #
+# BOTH check and repair regenerate FRESH into an empty temp outdir
+# (conformist#84): `gomod2nix --dir .` in place reuses the existing toml as an
+# incremental cache and silently skips entries whose hash already matches, so an
+# in-place repair could "succeed" while the check's fresh regeneration still
+# differed. Sharing the one fresh-regen recipe guarantees repair-then-check is
+# clean.
+#
+# `offline = true` (conformist#86) runs the regeneration with GOPROXY=off, so
+# module resolution uses only the local Go module cache — for repos whose go.mod
+# carries flake-input-bridged modules (the amarbel-llc/nixpkgs RFC 0001
+# goFlakeInputs pattern) that are not fetchable from the network. The remainder
+# — resolving bridged modules from their flake-input store paths so the check
+# works with an empty module cache — is tracked on conformist#86.
+#
 # Whole-tree check (passes-files=false): runs once at the tree root. Uses
 # writeShellApplication so the scripts' shebangs are patched (cf. conformist#19).
 # Lives in the IMPURE self-check lane (nix/conformist-impure.nix): the check runs
@@ -35,6 +49,23 @@
 let
   cfg = config.linters.gomod2nix;
 
+  # The one shared regeneration recipe (conformist#84): fresh into an empty temp
+  # outdir, never in place, so no stale-toml incremental cache can mask drift.
+  # Leaves the result at "$tmp/gomod2nix.toml".
+  regenSnippet = ''
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+
+    ${lib.optionalString cfg.offline ''
+      # Network-free resolution from the local Go module cache only
+      # (conformist#86): flake-input-bridged modules are not fetchable from
+      # the network. A module absent from the cache fails loudly here — see
+      # conformist#86 for the pending store-path resolution.
+      export GOPROXY=off
+    ''}
+    gomod2nix --dir . --outdir "$tmp"
+  '';
+
   check = pkgs.writeShellApplication {
     name = "conformist-gomod2nix";
     runtimeInputs = with pkgs; [
@@ -53,13 +84,9 @@ let
         exit 1
       fi
 
-      # No native check mode (amarbel-llc/gomod2nix#14): regenerate into a temp
-      # dir and diff against the committed copy. --outdir writes <dir>/gomod2nix.toml.
-      tmp=$(mktemp -d)
-      trap 'rm -rf "$tmp"' EXIT
-
-      gomod2nix --dir . --outdir "$tmp"
-
+      # No native check mode (amarbel-llc/gomod2nix#14): regenerate fresh and
+      # diff against the committed copy.
+      ${regenSnippet}
       if ! diff -u gomod2nix.toml "$tmp/gomod2nix.toml"; then
         echo "gomod2nix: gomod2nix.toml is stale relative to go.mod/go.sum; run \`nix fmt\` / repair (or \`just build-gomod2nix\`) and commit the result" >&2
         exit 1
@@ -80,8 +107,11 @@ let
       # cwd is the tree root.
       [ -f go.mod ] || exit 0 # not a Go project — idempotent no-op
 
-      # Regenerate gomod2nix.toml in place from go.mod/go.sum.
-      gomod2nix --dir .
+      # Regenerate FRESH (the same recipe the check uses, conformist#84) and
+      # move the result into place. cp (not mv) keeps the existing file's
+      # permissions; it also creates a missing gomod2nix.toml.
+      ${regenSnippet}
+      cp "$tmp/gomod2nix.toml" gomod2nix.toml
 
       # Self-stage: `conformist --staged` only re-stages files that were ALREADY
       # staged, so a regenerated gomod2nix.toml the author didn't pre-stage would
@@ -97,6 +127,18 @@ in
 {
   options.linters.gomod2nix = {
     enable = lib.mkEnableOption "the gomod2nix.toml drift whole-tree check (regenerate + diff; repair regenerates and stages)";
+    offline = lib.mkOption {
+      description = ''
+        Regenerate with GOPROXY=off: module resolution uses only the local Go
+        module cache, never the network. Set this in repos whose go.mod carries
+        flake-input-bridged modules (goFlakeInputs) that are not fetchable from
+        the network, instead of disabling the linter wholesale. A module absent
+        from the local cache fails the check loudly; resolving bridged modules
+        from their flake-input store paths is tracked on conformist#86.
+      '';
+      type = lib.types.bool;
+      default = false;
+    };
   };
 
   config = lib.mkIf cfg.enable {
