@@ -461,7 +461,9 @@ let
   };
   deadnixSettings = deadnixMod.config.settings.linter.deadnix;
   deadnixCheckCmd = "${deadnixSettings.command} ${nixlib.escapeShellArgs deadnixSettings.options}";
-  deadnixRepairCmd = "${deadnixSettings."repair-command"} ${nixlib.escapeShellArgs deadnixSettings."repair-options"}";
+  deadnixRepairCmd = "${deadnixSettings."repair-command"} ${
+    nixlib.escapeShellArgs deadnixSettings."repair-options"
+  }";
 
   # The conformist#88 shape: goMod is unused in mkThing's own body, the pattern
   # has no `...`, and the call site still passes goMod — removing the formal
