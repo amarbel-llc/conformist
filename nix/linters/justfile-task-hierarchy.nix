@@ -9,7 +9,12 @@
 #     plus tag/release) MAY be orphans but MUST NOT belong to more than one.
 #   - Private recipes are exempt.
 # Whole-tree check (passes-files=false): reads `just --dump --dump-format json`,
-# takes no file arguments.
+# takes no file arguments. `mod`-imported child justfiles are included
+# (conformist#85): each module scope's recipes are checked with the same bounds,
+# ownership is matched on bare recipe names across scopes (the dump drops the
+# `mod::` qualifier from dependencies, so a root aggregate owning `mod::leaf`
+# is still credited; a bare name duplicated across scopes is skipped as
+# ambiguous), and the verb comes from the recipe's own unqualified name.
 #
 # See conformist-justfile(7) TASK HIERARCHY and amarbel-llc/conformist#17.
 {
@@ -38,19 +43,42 @@ let
       # body, has dependencies) that list it directly, then apply the per-verb
       # bound. The leaf's verb is its first `-`-segment; pipeline verbs require
       # exactly one owner, others at most one.
-      # $root/$aggs/$leaf/$owners/$pipeline are jq bindings, not shell vars — they
-      # MUST stay literal in the single-quoted program; SC2016 misreads that.
+      #
+      # `mod`-imported child justfiles nest under `.modules.<name>` in the dump
+      # (recipe keys unqualified) — the old filter read only the root `.recipes`
+      # and silently skipped every module recipe (conformist#85). scopes()
+      # recurses into modules, carrying the qualified prefix for reporting.
+      #
+      # Ownership is matched on BARE recipe names across all scopes: the dump
+      # serializes a module-qualified dependency (`agg: mod::leaf`) as just
+      # "leaf", dropping the qualifier, so exact-path matching is impossible.
+      # A leaf whose bare name appears in more than one scope is skipped as
+      # ambiguous (its owners cannot be attributed from the lossy dump); such
+      # duplicates are rare and the alternative is false findings either way.
+      # The verb is taken from the recipe's own unqualified name.
+      # $aggs/$leaf/$owners/$pipeline/$all/$p/$bare/$dupes are jq bindings, not
+      # shell vars — they MUST stay literal in the single-quoted program;
+      # SC2016 misreads that.
       # shellcheck disable=SC2016
-      filter='. as $root
-        | (["build","test","validate","verify","lint","codemod"]) as $pipeline
-        | ([ $root.recipes | to_entries[]
-            | select((.value.body | length) == 0 and (.value.dependencies | length) > 0) ]) as $aggs
-        | $root.recipes | to_entries[]
+      filter='def scopes(p):
+          {p: p, s: .},
+          ((.modules // {}) | to_entries[] | .key as $k | .value | scopes(p + $k + "::"));
+        (["build","test","validate","verify","lint","codemod"]) as $pipeline
+        | [scopes("")] as $all
+        | ([ $all[] | .p as $p | .s.recipes | to_entries[]
+            | select((.value.body | length) == 0 and (.value.dependencies | length) > 0)
+            | { agg: ($p + .key), deps: [ .value.dependencies[].recipe | split("::") | last ] } ]) as $aggs
+        | ([ $all[] | .s.recipes | to_entries[]
+            | select((.value.body | length) > 0) | select(.value.private | not) | .key ]
+           | group_by(.) | map(select(length > 1) | .[0])) as $dupes
+        | $all[] | .p as $p | .s.recipes | to_entries[]
         | select((.value.body | length) > 0)
         | select(.value.private | not)
-        | .key as $leaf
-        | ($leaf | split("-")[0]) as $verb
-        | ([ $aggs[] | select(any(.value.dependencies[]; .recipe == $leaf)) | .key ]) as $owners
+        | .key as $bare
+        | select(($dupes | index($bare)) == null)
+        | ($p + $bare) as $leaf
+        | ($bare | split("-")[0]) as $verb
+        | ([ $aggs[] | select(.deps | index($bare)) | .agg ]) as $owners
         | ($owners | length) as $n
         | (($pipeline | index($verb)) != null) as $isPipeline
         | if $isPipeline and $n == 0 then

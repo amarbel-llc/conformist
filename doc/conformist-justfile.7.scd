@@ -64,6 +64,18 @@ on the leaf's verb:
 
 Enforced by *justfile-task-hierarchy*.
 
+# MODULES
+
+A _mod_-imported child justfile's recipes are addressed module-qualified
+(_explore::debug-widget_, nested _a::b::c_). The naming rules apply to the
+recipe's *own* name: linters strip every leading module qualifier before verb
+extraction (conformist#85). *justfile-recipe-names* checks
+every module recipe; *justfile-task-hierarchy* checks each module scope with
+the same per-verb bounds, crediting a root aggregate that lists _mod::leaf_ —
+ownership is matched on bare recipe names, because _just --dump_ drops the
+module qualifier from dependency entries, and a bare name duplicated across
+scopes is skipped as ambiguous.
+
 # RECIPE DESCRIPTIONS
 
 Every *leaf* recipe MUST carry a doc comment: the single line immediately above

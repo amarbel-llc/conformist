@@ -790,6 +790,113 @@ let
       expectToken = "exactly one aggregate";
     })
 
+    # justfile-recipe-names: recipes in a `mod`-imported child justfile are
+    # listed module-qualified (explore::debug-widget); the qualifier is
+    # stripped before verb extraction, and the rule still applies to the
+    # recipe's own name (conformist#85).
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-names";
+      label = "module-qualified-pass";
+      files = {
+        "justfile" = ''
+          run-thing:
+              echo hi
+
+          mod explore 'zz-explore/justfile'
+        '';
+        "zz-explore/justfile" = ''
+          # pokes the widget for the dev loop
+          debug-widget:
+              echo widget
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-names";
+      label = "module-bad-verb-fail";
+      files = {
+        "justfile" = ''
+          run-thing:
+              echo hi
+
+          mod explore 'zz-explore/justfile'
+        '';
+        "zz-explore/justfile" = ''
+          # not a known verb even after the qualifier is stripped
+          frobnicate-widget:
+              echo nope
+        '';
+      };
+      expectFail = true;
+      expectToken = "does not start with a known verb";
+    })
+
+    # justfile-task-hierarchy over `mod`-imported child justfiles
+    # (conformist#85): module recipes were previously invisible (the dump
+    # nests them under .modules); they are now checked, a root aggregate
+    # owning a module leaf is credited (the dump drops the mod:: qualifier
+    # from dependencies, so ownership matches on bare names), and a module
+    # pipeline-verb orphan is flagged.
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "module-debug-orphan-pass";
+      files = {
+        "justfile" = ''
+          build: build-go
+
+          build-go:
+              echo go
+
+          mod explore 'zz-explore/justfile'
+        '';
+        "zz-explore/justfile" = ''
+          # a debug leaf may be an orphan
+          debug-widget:
+              echo widget
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "module-cross-owned-pass";
+      files = {
+        "justfile" = ''
+          build: build-go explore::build-thing
+
+          build-go:
+              echo go
+
+          mod explore 'zz-explore/justfile'
+        '';
+        "zz-explore/justfile" = ''
+          # owned by the root build aggregate via explore::build-thing
+          build-thing:
+              echo thing
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "module-pipeline-orphan-fail";
+      files = {
+        "justfile" = ''
+          build: build-go
+
+          build-go:
+              echo go
+
+          mod explore 'zz-explore/justfile'
+        '';
+        "zz-explore/justfile" = ''
+          # a pipeline-verb leaf hiding in a module must still be flagged
+          test-orphan:
+              echo orphan
+        '';
+      };
+      expectFail = true;
+      expectToken = "exactly one aggregate";
+    })
+
     # justfile-leaf-noun: a leaf must be verb-noun, not a bare verb
     # (conformist-justfile(7) AGGREGATES AND LEAVES, conformist#17).
     (mkLinterFixtureCheck {

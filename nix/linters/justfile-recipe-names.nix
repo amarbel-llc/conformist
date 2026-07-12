@@ -34,10 +34,15 @@ let
 
       while read -r name; do
         [ -n "$name" ] || continue
+        # A `mod`-imported child justfile's recipes are listed fully qualified
+        # (explore::debug-foo, nested a::b::c). Strip every module qualifier
+        # before verb extraction — the naming rule applies to the recipe's own
+        # name, not its module path (conformist#85).
+        bare=''${name##*::}
         case "$exceptions" in
-        *" $name "*) continue ;;
+        *" $bare "*) continue ;;
         esac
-        first=''${name%%-*}
+        first=''${bare%%-*}
         case "$verbs" in
         *" $first "*) continue ;;
         esac
