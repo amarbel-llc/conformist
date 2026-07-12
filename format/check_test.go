@@ -70,6 +70,76 @@ func TestCompositeCheckerLinterFindings(tt *testing.T) {
 	as.Equal("stub", findings[0].Tool)
 }
 
+// TestLinterNoPositionalArgSupportChunks verifies that a per-file linter with
+// no-positional-arg-support (e.g. statix) is invoked once per file when it
+// matches multiple files, in both the check and repair lanes, instead of
+// failing with ErrNoPositionalArgSupport as the check lane did (conformist#87 —
+// the formatter paths already chunked, so `nix fmt` worked while
+// `conformist check` failed on any multi-file match).
+func TestLinterNoPositionalArgSupportChunks(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	// stub linter: records each invocation's arg count, exits 1 (a finding) if
+	// the single passed file contains BAD.
+	lint := writeFile(t, root, "one.sh",
+		"#!/usr/bin/env bash\necho \"args=$#\" >> runs.log\ngrep -q BAD \"$1\" && exit 1\nexit 0\n", 0o755)
+	// stub repair: appends FIXED to each passed file.
+	repair := writeFile(t, root, "fix.sh",
+		"#!/usr/bin/env bash\nfor f in \"$@\"; do printf FIXED >> \"$f\"; done\n", 0o755)
+
+	writeFile(t, root, "good.txt", "ok\n", 0o644)
+	writeFile(t, root, "bad.txt", "BAD\n", 0o644)
+
+	npas := true
+	newCfg := func() *config.Config {
+		return &config.Config{
+			TreeRoot:    root,
+			OnUnmatched: "info",
+			LinterConfigs: map[string]*config.Linter{
+				"one-at-a-time": {
+					Command:                lint,
+					RepairCommand:          repair,
+					Includes:               []string{"*.txt"},
+					NoPositionalArgSupport: &npas,
+				},
+			},
+		}
+	}
+
+	statz := stats.New()
+	checker, err := format.NewCompositeChecker(newCfg(), &statz)
+	as.NoError(err)
+
+	files := []*walk.File{
+		walkFile(t, root, "good.txt"),
+		walkFile(t, root, "bad.txt"),
+	}
+
+	findings, err := checker.Check(context.Background(), files)
+	as.NoError(err, "a multi-file match must be chunked, not rejected")
+	as.Len(findings, 1)
+	as.Equal(format.FindingLint, findings[0].Kind)
+
+	// the check ran once per file, one file argument each
+	runs, err := os.ReadFile(filepath.Join(root, "runs.log"))
+	as.NoError(err)
+	as.Equal("args=1\nargs=1\n", string(runs))
+
+	// the repair lane chunks identically: both files are repaired
+	repairStatz := stats.New()
+	linter, err := format.NewCompositeLinter(newCfg(), &repairStatz)
+	as.NoError(err)
+	as.NoError(linter.Repair(context.Background(), files))
+
+	for _, rel := range []string{"good.txt", "bad.txt"} {
+		content, err := os.ReadFile(filepath.Join(root, rel))
+		as.NoError(err)
+		as.Contains(string(content), "FIXED", "%s must be repaired despite the multi-file match", rel)
+	}
+}
+
 // TestCompositeCheckerWholeTreeLinter verifies that a linter with
 // passes-files=false runs exactly once with no file arguments (a whole-tree
 // check), gated on at least one of its included files being present.

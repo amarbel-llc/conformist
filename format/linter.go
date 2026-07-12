@@ -3,6 +3,8 @@ package format
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/amarbel-llc/conformist/config"
@@ -109,39 +111,59 @@ func (l *Linter) run(
 		return false, "", nil
 	}
 
-	args := append([]string{}, options...)
-
-	// A whole-tree check (passes-files=false) runs once with no file arguments;
-	// the matched files only gate whether it runs. Otherwise pass each matched
-	// file's path as a positional argument.
-	if l.passesFiles {
-		if len(files) > 1 && l.hasNoPositionalArgSupport() {
-			return false, "", ErrNoPositionalArgSupport
-		}
-
-		for _, file := range files {
-			args = append(args, relocateFileArg(l.treeRoot, l.workingDir, file.RelPath, ""))
-		}
-	}
-
 	start := time.Now()
 
-	l.log.Debugf("executing: %s %v", inv.raw, args)
+	// A whole-tree check (passes-files=false) runs once with no file arguments;
+	// the matched files only gate whether it runs.
+	if !l.passesFiles {
+		args := append([]string{}, options...)
 
-	// inv.run maps a non-zero exit to nonzero=true (findings) and reserves err
-	// for an operational failure (RFC 0001 §4).
-	nonzero, output, err = inv.run(ctx, l.workingDir, args)
-	if err != nil {
-		return false, output, err
-	}
+		l.log.Debugf("executing: %s %v", inv.raw, args)
 
-	if l.passesFiles {
-		l.log.Infof("%v file(s) checked in %v", len(files), time.Since(start))
-	} else {
+		// inv.run maps a non-zero exit to nonzero=true (findings) and reserves
+		// err for an operational failure (RFC 0001 §4).
+		nonzero, output, err = inv.run(ctx, l.workingDir, args)
+		if err != nil {
+			return false, output, err
+		}
+
 		l.log.Infof("whole-tree check completed in %v", time.Since(start))
+
+		return nonzero, output, nil
 	}
 
-	return nonzero, output, nil
+	// A no-positional-arg-support tool (e.g. statix) takes exactly one file per
+	// invocation, so chunk to size 1 — the same batching the formatter paths
+	// apply in scheduler.go and sandbox.go — rather than failing a multi-file
+	// match (conformist#87). This covers the check and repair lanes alike.
+	maxBatch := len(files)
+	if l.hasNoPositionalArgSupport() {
+		maxBatch = 1
+	}
+
+	var combined strings.Builder
+
+	for chunk := range slices.Chunk(files, maxBatch) {
+		args := append([]string{}, options...)
+		for _, file := range chunk {
+			args = append(args, relocateFileArg(l.treeRoot, l.workingDir, file.RelPath, ""))
+		}
+
+		l.log.Debugf("executing: %s %v", inv.raw, args)
+
+		chunkNonzero, out, runErr := inv.run(ctx, l.workingDir, args)
+		combined.WriteString(out)
+
+		if runErr != nil {
+			return false, combined.String(), runErr
+		}
+
+		nonzero = nonzero || chunkNonzero
+	}
+
+	l.log.Infof("%v file(s) checked in %v", len(files), time.Since(start))
+
+	return nonzero, combined.String(), nil
 }
 
 // newLinter creates a Linter, resolving its check (and optional repair)
