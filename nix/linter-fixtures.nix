@@ -444,6 +444,111 @@ let
     })
   ];
 
+  # ---- deadnix: scope-flag semantics (conformist#88) -----------------------
+  #
+  # deadnix carries its behavior in settings.linter.deadnix.options /
+  # "repair-options" (--fail and the scope flags), unlike the
+  # writeShellApplication linters whose command is self-contained, so these
+  # fixtures interpolate command + options explicitly instead of going through
+  # mkLinterFixtureCheck. They pin the conformist#88 contract: with the default
+  # no-lambda-pattern-names=true, an in-body-unused strict-pattern formal
+  # (`{ goMod, src }: src` with a caller passing goMod) is neither flagged by
+  # the check nor stripped by the repair, while provably-local dead code (a
+  # dead let binding) is still flagged and repaired.
+  deadnixMod = lib.evalModule pkgs {
+    enableDefaultExcludes = false;
+    linters.deadnix.enable = true;
+  };
+  deadnixSettings = deadnixMod.config.settings.linter.deadnix;
+  deadnixCheckCmd = "${deadnixSettings.command} ${nixlib.escapeShellArgs deadnixSettings.options}";
+  deadnixRepairCmd = "${deadnixSettings."repair-command"} ${nixlib.escapeShellArgs deadnixSettings."repair-options"}";
+
+  # The conformist#88 shape: goMod is unused in mkThing's own body, the pattern
+  # has no `...`, and the call site still passes goMod — removing the formal
+  # would make the call fail with "called with unexpected argument".
+  deadnixStrictPattern = ''
+    let
+      mkThing =
+        { goMod, src }:
+        src;
+    in
+    mkThing {
+      goMod = "unused-by-the-body";
+      src = "the-src";
+    }
+  '';
+  deadnixDeadLet = ''
+    let
+      unusedBinding = 1;
+    in
+    "kept"
+  '';
+
+  deadnixFixtures = [
+    # Check: the strict-pattern formal is NOT a finding under the default
+    # scope flags (deadnix cannot prove it dead — conformist#88)…
+    (pkgs.runCommandLocal "linter-fixture-deadnix-pattern-preserved-pass" { } ''
+      mkdir fixture && cd fixture
+      cp ${pkgs.writeText "strict-pattern.nix" deadnixStrictPattern} strict-pattern.nix
+      if ${deadnixCheckCmd} strict-pattern.nix >out.log 2>&1; then rc=0; else rc=$?; fi
+      cat out.log
+      if [ "$rc" -ne 0 ]; then
+        echo "FIXTURE FAIL: deadnix flagged a strict-pattern formal it cannot prove dead (conformist#88)" >&2
+        exit 1
+      fi
+      touch $out
+    '')
+
+    # …while provably-local dead code still fails the check (this also pins
+    # --fail being wired in: without it deadnix exits 0 on findings).
+    (pkgs.runCommandLocal "linter-fixture-deadnix-dead-let-fail" { } ''
+      mkdir fixture && cd fixture
+      cp ${pkgs.writeText "dead-let.nix" deadnixDeadLet} dead-let.nix
+      if ${deadnixCheckCmd} dead-let.nix >out.log 2>&1; then rc=0; else rc=$?; fi
+      cat out.log
+      if [ "$rc" -eq 0 ]; then
+        echo "FIXTURE FAIL: expected deadnix to reject a dead let binding, but it exited 0" >&2
+        exit 1
+      fi
+      if ! grep -qF "Unused let binding" out.log; then
+        echo "FIXTURE FAIL: deadnix output did not contain 'Unused let binding'" >&2
+        exit 1
+      fi
+      touch $out
+    '')
+
+    # Repair: --edit removes the dead let binding but leaves the strict-pattern
+    # formal in place, and the check passes afterwards (repair-then-check clean).
+    (pkgs.runCommandLocal "linter-fixture-deadnix-repair-preserves-pattern" { } ''
+      mkdir fixture && cd fixture
+      cp ${pkgs.writeText "strict-pattern.nix" deadnixStrictPattern} strict-pattern.nix
+      cp ${pkgs.writeText "dead-let.nix" deadnixDeadLet} dead-let.nix
+      chmod u+w strict-pattern.nix dead-let.nix
+
+      ${deadnixRepairCmd} strict-pattern.nix dead-let.nix >out.log 2>&1 || true
+      cat out.log
+
+      if ! grep -qF "goMod" strict-pattern.nix; then
+        echo "FIXTURE FAIL: deadnix repair stripped the strict-pattern formal goMod (conformist#88)" >&2
+        cat strict-pattern.nix >&2
+        exit 1
+      fi
+      if grep -qF "unusedBinding" dead-let.nix; then
+        echo "FIXTURE FAIL: deadnix repair did not remove the dead let binding" >&2
+        cat dead-let.nix >&2
+        exit 1
+      fi
+
+      if ${deadnixCheckCmd} strict-pattern.nix dead-let.nix >check.log 2>&1; then crc=0; else crc=$?; fi
+      cat check.log
+      if [ "$crc" -ne 0 ]; then
+        echo "FIXTURE FAIL: deadnix check still failed after repair (exit $crc)" >&2
+        exit 1
+      fi
+      touch $out
+    '')
+  ];
+
   # ---- Fixtures -----------------------------------------------------------
 
   fixtures = [
@@ -808,7 +913,7 @@ let
     })
   ];
 
-  allFixtures = fixtures ++ gitRemotesFixtures;
+  allFixtures = fixtures ++ gitRemotesFixtures ++ deadnixFixtures;
 in
 builtins.listToAttrs (
   map (d: {
