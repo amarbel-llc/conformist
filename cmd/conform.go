@@ -7,6 +7,7 @@ import (
 
 	"github.com/amarbel-llc/conformist/cmd/conform"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"golang.org/x/term"
 )
 
@@ -21,7 +22,7 @@ var ErrScaffolded = errors.New("scaffolded conformist files")
 // operational error" convention.
 var ErrConformFailed = errors.New("conform failed")
 
-func newConformCmd() *cobra.Command {
+func newConformCmd(v *viper.Viper) *cobra.Command {
 	var (
 		noEdit         bool
 		forceFormatter bool
@@ -50,9 +51,9 @@ func newConformCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			dir, err := os.Getwd()
+			dir, err := changeWorkingDir(v)
 			if err != nil {
-				return fmt.Errorf("failed to resolve working directory: %w", err)
+				return err
 			}
 
 			// Domain bootstrap mode (#43): `conform <domain>` / `<domain>#<id>`.

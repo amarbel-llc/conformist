@@ -153,7 +153,7 @@ func NewRoot(version, commit string) (*cobra.Command, *stats.Stats) {
 	cmd.AddCommand(newIdentityCmd(v))
 	cmd.AddCommand(newVersionCmd(programName, version, commit))
 	cmd.AddCommand(newGenManCmd())
-	cmd.AddCommand(newConformCmd())
+	cmd.AddCommand(newConformCmd(v))
 
 	return cmd, &statz
 }
