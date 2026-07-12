@@ -378,7 +378,8 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   see `nix/presets/`); `flakeModule` = `flake-module.nix` (flake-parts
   `perSystem.conformist`).
 - `templates.eng` (`templates/eng/`) — `nix flake init -t
-  github:amarbel-llc/conformist#eng` scaffolds an adopter repo wired to the eng
+  'git+https://code.linenisgreat.com/conformist.git#eng'` scaffolds an adopter
+  repo wired to the eng
   preset (flake.nix + conformist.nix + a conformist-justfile(7)-conformant
   justfile + version.env + .envrc + a sweatfile wiring the config-specific
   `conformist-pre-commit` hook plus the opt-in `conformist-repair` merge-time

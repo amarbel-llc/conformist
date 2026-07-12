@@ -77,7 +77,7 @@ type Options struct {
 // the three inputs conform wires in, by top-level input name. text is the
 // block-form binding (no leading `inputs.`); flat form prepends it.
 var conformistInputs = []struct{ name, text string }{
-	{"conformist", `conformist.url = "github:amarbel-llc/conformist";`},
+	{"conformist", `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`},
 	{"nixpkgs", `nixpkgs.follows = "conformist/nixpkgs-master";`},
 	{"utils", `utils.follows = "conformist/utils";`},
 }

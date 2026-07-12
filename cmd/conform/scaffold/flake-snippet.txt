@@ -2,7 +2,7 @@ Add conformist to flake.nix and wire it into your per-system outputs
 (utils.lib.eachDefaultSystem or a flake-parts perSystem):
 
   inputs = {
-    conformist.url = "github:amarbel-llc/conformist";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
     # follow conformist's pins so the closure is shared:
     nixpkgs.follows = "conformist/nixpkgs-master";
     utils.follows = "conformist/utils";

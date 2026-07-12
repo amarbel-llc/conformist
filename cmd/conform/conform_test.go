@@ -163,7 +163,7 @@ func TestRunEditsRecognizedFlake(t *testing.T) {
 
 	got, err := os.ReadFile(flakePath)
 	require.NoError(t, err)
-	require.Contains(t, string(got), `conformist.url = "github:amarbel-llc/conformist";`)
+	require.Contains(t, string(got), `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 	require.Contains(t, string(got), "eval = conformist.lib.evalModule pkgs {")
 	require.Contains(t, string(got), "packages.default = pkgs.hello;", "the repo's own output is preserved")
 

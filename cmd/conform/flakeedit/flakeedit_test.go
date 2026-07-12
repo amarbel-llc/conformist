@@ -47,7 +47,7 @@ const brownfieldEdited = `{
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
-    conformist.url = "github:amarbel-llc/conformist";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
   };
 
   outputs =
@@ -113,7 +113,7 @@ func TestApplyBrownfield(t *testing.T) {
 	got := string(out)
 
 	// conformist input added; the repo's own nixpkgs/utils left as urls.
-	require.Contains(t, got, `conformist.url = "github:amarbel-llc/conformist";`)
+	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 	require.NotContains(t, got, "nixpkgs.follows", "must not add follows for a pre-existing nixpkgs input")
 	require.NotContains(t, got, "utils.follows", "must not add follows for a pre-existing utils input")
 
@@ -395,7 +395,7 @@ func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
 	out, _, err := flakeedit.Apply([]byte(fresh), flakeedit.Options{})
 	require.NoError(t, err)
 	got := string(out)
-	require.Contains(t, got, `conformist.url = "github:amarbel-llc/conformist";`)
+	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 	require.Contains(t, got, `nixpkgs.follows = "conformist/nixpkgs-master";`)
 	require.Contains(t, got, `utils.follows = "conformist/utils";`)
 	// idempotent inner: the new inputs land inside the existing block.

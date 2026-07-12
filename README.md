@@ -35,7 +35,7 @@ The linter additions ([RFC 0001](docs/rfcs/0001-linter-support-and-check-repair-
 With Nix (the supported path):
 
 ```
-nix build github:amarbel-llc/conformist
+nix build 'git+https://code.linenisgreat.com/conformist.git'
 ./result/bin/conformist --help
 ```
 
@@ -121,7 +121,7 @@ with tool binaries resolved from your pinned nixpkgs.
 
 ```nix
 # flake.nix
-inputs.conformist.url = "github:amarbel-llc/conformist";
+inputs.conformist.url = "git+https://code.linenisgreat.com/conformist.git";
 
 # ... in eachDefaultSystem:
 conformistEval = conformist.lib.evalModule pkgs {

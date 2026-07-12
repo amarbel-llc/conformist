@@ -586,7 +586,8 @@
       # flake-parts module: `perSystem.conformist`. See flake-module.nix.
       flakeModule = ./flake-module.nix;
 
-      # `nix flake init -t github:amarbel-llc/conformist#eng` scaffolds a repo
+      # `nix flake init -t 'git+https://code.linenisgreat.com/conformist.git#eng'`
+      # scaffolds a repo
       # already wired to conformist with the eng-convention preset: flake.nix
       # (conformist input + follows + evalModule), conformist.nix (imports
       # presets.eng + formatters), a conformist-justfile(7)-conformant justfile,

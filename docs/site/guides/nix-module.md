@@ -22,7 +22,7 @@ paths.
 ## Add the input
 
 ```nix
-inputs.conformist.url = "github:amarbel-llc/conformist";
+inputs.conformist.url = "git+https://code.linenisgreat.com/conformist.git";
 ```
 
 The flake exposes two consumption paths: `conformist.lib.evalModule` (plain

@@ -5,7 +5,7 @@
     # conformist provides the linter/formatter multiplexer, its Nix module
     # library (conformist.lib), and the eng-convention presets. Following its
     # nixpkgs-master/utils pins keeps this flake's closure shared with conformist's.
-    conformist.url = "github:amarbel-llc/conformist";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
     nixpkgs.follows = "conformist/nixpkgs-master";
     utils.follows = "conformist/utils";
   };

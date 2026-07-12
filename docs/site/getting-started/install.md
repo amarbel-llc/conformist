@@ -8,13 +8,13 @@ Go build also works for development.
 Run directly from the flake:
 
 ```
-nix run github:amarbel-llc/conformist -- --help
+nix run 'git+https://code.linenisgreat.com/conformist.git' -- --help
 ```
 
 Or build the package into `./result`:
 
 ```
-nix build github:amarbel-llc/conformist
+nix build 'git+https://code.linenisgreat.com/conformist.git'
 ./result/bin/conformist --help
 ```
 
@@ -23,7 +23,7 @@ nix build github:amarbel-llc/conformist
 conformist requires Go 1.26 or newer.
 
 ```
-git clone https://github.com/amarbel-llc/conformist
+git clone https://code.linenisgreat.com/conformist.git
 cd conformist
 go build -o conformist .
 ./conformist --help
