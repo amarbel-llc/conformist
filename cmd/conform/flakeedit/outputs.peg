@@ -19,10 +19,14 @@
 // this grammar is self-contained.
 
 // ── Entry: the outputs value ─────────────────────────────────
-// `{ args }: <head> ( system: let <bindings> in { <attrs> } )`
+// `{ args }: [let <bindings> in] <head> ( system: let <bindings> in { <attrs> } )`
+// OuterLet is an optional outer `let … in` block before eachDefaultSystem
+// (e.g. hoisting version/commit constants). It is tolerated but not spliced
+// into: all wiring lands in the inner per-system let block and return attrset.
 
 File         <- Trivia Outputs Trivia EOF
-Outputs      <- ArgSet Trivia Colon Trivia AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia
+Outputs      <- ArgSet Trivia Colon Trivia OuterLet? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia
+OuterLet     <- LetKw LetBlock InKw Trivia
 
 // The function-argument attrset `{ self, conformist, ... }`. Parsed as a
 // balanced brace group; the caller text-scans its inner content for the

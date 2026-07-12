@@ -52,15 +52,41 @@ Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
 // run (Inner), used inside groups and `${…}`, consumes `;` because a
 // semicolon nested in an attrset/list/paren/interpolation is content,
 // not the binding terminator.
+//
+// `let … in` expressions require special handling: their inner `;`
+// characters are let-binding separators, not the outer binding
+// terminator. LetGroup treats `let … in` as a balanced construct so
+// those semicolons are not confused with the terminating one
+// (conformist#81). LetGroup is tried before Group and OuterText in
+// Value so a `let` at the top level of an outputs value is recognized.
 
-Value      <- (Group / String / Comment / OuterText)*
+Value      <- (LetGroup / Group / String / Comment / OuterText)*
 Inner      <- (Group / String / Comment / InnerText)*
 Group      <- BraceOpen Inner BraceClose
             / BracketOpen Inner BracketClose
             / ParenOpen Inner ParenClose
+// LetGroup: a `let … in` block. Nested let-in constructs are handled
+// recursively. LetSemiText stops at `let`/`in` keywords and structural
+// delimiters; `;` is allowed inside (it is let-binding content).
+LetGroup      <- LetKw LetInner InKw
+LetInner      <- (LetGroup / Group / String / Comment / LetSemiText)*
+LetKw         <- 'let' ![a-zA-Z0-9_'\-]
+InKw          <- 'in' ![a-zA-Z0-9_'\-]
+// LetSemiText: a run of one or more characters that are not let/in keywords,
+// structural delimiters, string openers, or comment openers. Split into
+// LetSemiChar so that the named-rule lookaheads (LetKw, InKw) stay outside
+// #(…) — langlang v0.0.12 does not support named rule refs inside #(…).
+LetSemiText   <- LetSemiChar+
+LetSemiChar   <- !(LetKw) !(InKw) !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
 // OuterText: a run of chars that are not structural delimiters, string
-// or comment openers, or the terminating `;`.
-OuterText  <- #((!(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
+// or comment openers, the terminating `;`, or a `let` keyword. The LetKw
+// exclusion matters even though LetGroup is tried first in Value's
+// alternation: without it, OuterText's greedy `+` swallows straight
+// through a `let` that appears after other Value content (e.g. `{ self
+// }: let … in …`), never handing control back to LetGroup
+// (conformist#81).
+OuterText  <- (!(LetKw) OuterChar)+
+OuterChar  <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
 // InnerText: like OuterText but `;` is allowed (it is group content).
 InnerText  <- #((!('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
 

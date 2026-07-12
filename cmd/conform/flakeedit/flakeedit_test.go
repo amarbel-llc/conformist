@@ -371,6 +371,155 @@ func TestApplyNestedParentConflict(t *testing.T) {
 	require.Contains(t, got, "packages = {", "the repo's nested packages attrset is untouched")
 }
 
+// outerLet is a minimal flake whose outputs function has an outer `let … in`
+// block before eachDefaultSystem (the pattern that previously caused
+// ErrUnrecognized — conformist#81). It is not yet wired to conformist.
+const outerLet = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    {
+      self,
+      nixpkgs,
+      utils,
+    }:
+    let
+      version = "1.0.0";
+    in
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        packages.default = pkgs.hello;
+      }
+    );
+}
+`
+
+// outerLetEdited is the expected output of Apply(outerLet): all four splice
+// targets are populated and the outer let block is preserved verbatim.
+// Verified parseable with `nix-instantiate --parse`.
+const outerLetEdited = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+  };
+
+  outputs =
+    {
+      conformist,
+      self,
+      nixpkgs,
+      utils,
+    }:
+    let
+      version = "1.0.0";
+    in
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+
+        conformistPkg = conformist.packages.${system}.default;
+
+        eval = conformist.lib.evalModule pkgs {
+          imports = [
+            conformist.lib.presets.eng
+            ./conformist.nix
+          ];
+          package = conformistPkg;
+        };
+
+        impureEval = conformist.lib.evalModule pkgs {
+          imports = [ conformist.lib.presets.eng-impure ];
+          package = conformistPkg;
+          projectRootFile = "flake.nix";
+        };
+      in
+      {
+        packages.default = pkgs.hello;
+
+        formatter = eval.config.build.wrapper;
+        checks.formatting = eval.config.build.check self;
+        packages.conformist-impure-config = impureEval.config.build.configFile;
+        packages.conformist-pre-commit = eval.config.build.preCommit;
+        packages.conformist-repair = eval.config.build.repair;
+        devShells.default = pkgs.mkShell {
+          packages = [
+            conformistPkg
+            eval.config.build.preCommit
+            eval.config.build.repair
+            pkgs.just
+          ];
+        };
+      }
+    );
+}
+`
+
+// TestApplyOuterLetGolden pins the exact byte output for the outer-let shape
+// (#81): the outer let block is preserved and all four splice targets land.
+func TestApplyOuterLetGolden(t *testing.T) {
+	out, _, err := flakeedit.Apply([]byte(outerLet), flakeedit.Options{})
+	require.NoError(t, err)
+	require.Equal(t, outerLetEdited, string(out))
+}
+
+// TestApplyOuterLet pins the behavioral contract for the outer-let shape
+// (conformist#81): the shape is recognized, all four splice targets are
+// populated, the outer let block is untouched, and no input follows are
+// added for pre-existing nixpkgs/utils.
+func TestApplyOuterLet(t *testing.T) {
+	out, report, err := flakeedit.Apply([]byte(outerLet), flakeedit.Options{})
+	require.NoError(t, err)
+	require.True(t, report.Changed())
+	require.Empty(t, report.Conflicts)
+
+	got := string(out)
+
+	// outer let block is preserved verbatim.
+	require.Contains(t, got, `let
+      version = "1.0.0";
+    in`)
+
+	// input wired; pre-existing nixpkgs/utils get no follows.
+	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
+	require.NotContains(t, got, "nixpkgs.follows")
+	require.NotContains(t, got, "utils.follows")
+
+	// outputs arg, let bindings, and return attrs spliced into the inner scope.
+	require.Contains(t, got, "conformist,")
+	require.Contains(t, got, "conformistPkg = conformist.packages.${system}.default;")
+	require.Contains(t, got, "eval = conformist.lib.evalModule pkgs {")
+	require.Contains(t, got, "impureEval = conformist.lib.evalModule pkgs {")
+	require.Contains(t, got, "formatter = eval.config.build.wrapper;")
+	require.Contains(t, got, "checks.formatting = eval.config.build.check self;")
+	require.Contains(t, got, "packages.conformist-pre-commit = eval.config.build.preCommit;")
+	require.Contains(t, got, "devShells.default = pkgs.mkShell {")
+
+	// the repo's own output is preserved.
+	require.Contains(t, got, "packages.default = pkgs.hello;")
+}
+
+// TestApplyOuterLetIdempotent verifies a second Apply over the wired
+// outer-let flake is a no-op.
+func TestApplyOuterLetIdempotent(t *testing.T) {
+	once, _, err := flakeedit.Apply([]byte(outerLet), flakeedit.Options{})
+	require.NoError(t, err)
+
+	twice, report, err := flakeedit.Apply(once, flakeedit.Options{})
+	require.NoError(t, err)
+	require.False(t, report.Changed(), "second apply must add nothing")
+	require.Empty(t, report.Conflicts)
+	require.Equal(t, string(once), string(twice), "second apply must be byte-identical")
+}
+
 func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
 	// A flake whose inputs block has none of conformist/nixpkgs/utils:
 	// all three conformist inputs are added.
