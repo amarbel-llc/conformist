@@ -74,13 +74,12 @@ type Options struct {
 	ForceFormatter bool
 }
 
-// the three inputs conform wires in, by top-level input name. text is the
-// block-form binding (no leading `inputs.`); flat form prepends it.
-var conformistInputs = []struct{ name, text string }{
-	{"conformist", `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`},
-	{"nixpkgs", `nixpkgs.follows = "conformist/nixpkgs-master";`},
-	{"utils", `utils.follows = "conformist/utils";`},
-}
+// conformistDeps are conformist's own flake inputs, in the order their
+// follows lines are rendered. A consumer input with the same name is deduped
+// by a follows wired INSIDE the conformist input
+// (`conformist.inputs.<dep>.follows = "<dep>"`), never by a new top-level
+// input (#83).
+var conformistDeps = []string{"igloo", "nixpkgs-master", "utils"}
 
 // the let bindings conform wires in, keyed by name for idempotency.
 var conformistLetNames = []string{"conformistPkg", "eval", "impureEval"}
@@ -235,20 +234,50 @@ func (s splice) applyTo(src []byte) []byte {
 }
 
 // inputsSplice builds the insertion for the conformist input bindings not
-// already present, honoring block vs flat form. ok is false when all
-// three inputs already exist.
+// already present, honoring block vs flat form. ok is false when nothing
+// needs adding.
+//
+// conformist#83: conform must never introduce a top-level input the
+// consumer's outputs pattern does not already name — a strict (no-`...`)
+// destructuring then fails eval with "called with unexpected argument".
+// The old splice added a top-level `nixpkgs.follows =
+// "conformist/nixpkgs-master"` whenever no `nixpkgs` input existed, which
+// broke every igloo/nixpkgs-master-shaped eng repo. Instead, each of
+// conformist's own inputs that the consumer also has is deduped from
+// INSIDE the conformist input (`conformist.inputs.<dep>.follows =
+// "<dep>"`), and no top-level nixpkgs is ever added. The top-level
+// `utils.follows` splice for a consumer WITHOUT utils stays: the
+// recognized shape (`utils.lib.eachDefaultSystem`) guarantees the outputs
+// pattern names `utils`.
 func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 	present := ins.topLevelNames()
 
-	var (
-		b      strings.Builder
-		labels []string
-	)
-	for _, in := range conformistInputs {
-		if present[in.name] {
-			continue
+	var lines, labels []string
+
+	if !present["conformist"] {
+		lines = append(lines, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
+
+		for _, dep := range conformistDeps {
+			if present[dep] {
+				lines = append(lines, fmt.Sprintf("conformist.inputs.%s.follows = %q;", dep, dep))
+			}
 		}
-		text := in.text
+
+		labels = append(labels, "input conformist")
+	}
+
+	if !present["utils"] {
+		lines = append(lines, `utils.follows = "conformist/utils";`)
+		labels = append(labels, "input utils")
+	}
+
+	if len(labels) == 0 {
+		return splice{}, nil, false
+	}
+
+	var b strings.Builder
+
+	for _, text := range lines {
 		if !ins.blockMode {
 			text = "inputs." + text
 		}
@@ -261,10 +290,6 @@ func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 			b.WriteString(text)
 			b.WriteString("\n")
 		}
-		labels = append(labels, "input "+in.name)
-	}
-	if len(labels) == 0 {
-		return splice{}, nil, false
 	}
 	if ins.leadNewline && ins.trailNewlineIndent != "" {
 		b.WriteString("\n")

@@ -48,6 +48,7 @@ const brownfieldEdited = `{
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
     conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+    conformist.inputs.utils.follows = "utils";
   };
 
   outputs =
@@ -112,10 +113,13 @@ func TestApplyBrownfield(t *testing.T) {
 
 	got := string(out)
 
-	// conformist input added; the repo's own nixpkgs/utils left as urls.
+	// conformist input added; the repo's own nixpkgs/utils left as urls. The
+	// shared utils input is deduped from INSIDE the conformist input; no
+	// top-level input is ever added for a pre-existing name (#83).
 	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
+	require.Contains(t, got, `conformist.inputs.utils.follows = "utils";`)
 	require.NotContains(t, got, "nixpkgs.follows", "must not add follows for a pre-existing nixpkgs input")
-	require.NotContains(t, got, "utils.follows", "must not add follows for a pre-existing utils input")
+	require.NotContains(t, got, `"conformist/utils"`, "must not add a top-level follows for a pre-existing utils input")
 
 	// outputs argument, let bindings, and the non-conflicting outputs.
 	require.Contains(t, got, "conformist,")
@@ -409,6 +413,7 @@ const outerLetEdited = `{
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
     conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+    conformist.inputs.utils.follows = "utils";
   };
 
   outputs =
@@ -488,10 +493,12 @@ func TestApplyOuterLet(t *testing.T) {
       version = "1.0.0";
     in`)
 
-	// input wired; pre-existing nixpkgs/utils get no follows.
+	// input wired; the pre-existing nixpkgs gets no follows, the shared utils
+	// is deduped from inside the conformist input (#83).
 	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
+	require.Contains(t, got, `conformist.inputs.utils.follows = "utils";`)
 	require.NotContains(t, got, "nixpkgs.follows")
-	require.NotContains(t, got, "utils.follows")
+	require.NotContains(t, got, `"conformist/utils"`)
 
 	// outputs arg, let bindings, and return attrs spliced into the inner scope.
 	require.Contains(t, got, "conformist,")
@@ -521,8 +528,11 @@ func TestApplyOuterLetIdempotent(t *testing.T) {
 }
 
 func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
-	// A flake whose inputs block has none of conformist/nixpkgs/utils:
-	// all three conformist inputs are added.
+	// A flake whose inputs block has none of conformist's own input names:
+	// the conformist input is added bare (no follows to wire), plus the
+	// top-level utils follows — the ONLY top-level input conform may add,
+	// because the recognized shape guarantees the outputs pattern names
+	// `utils` (#83). In particular no top-level nixpkgs is added.
 	const fresh = `{
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
@@ -545,8 +555,79 @@ func TestApplyNoFollowsWhenInputsFresh(t *testing.T) {
 	require.NoError(t, err)
 	got := string(out)
 	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
-	require.Contains(t, got, `nixpkgs.follows = "conformist/nixpkgs-master";`)
 	require.Contains(t, got, `utils.follows = "conformist/utils";`)
+	require.NotContains(t, got, "nixpkgs.follows",
+		"must never add a top-level nixpkgs input the outputs pattern does not name (#83)")
+	require.NotContains(t, got, "conformist.inputs.",
+		"no same-named consumer inputs exist, so no follows are wired inside the conformist input")
 	// idempotent inner: the new inputs land inside the existing block.
 	require.Equal(t, 1, strings.Count(got, "conformist.url"))
+}
+
+// engInputs reproduces the conformist#83 breakage shape: an eng repo with
+// igloo + nixpkgs-master + utils inputs, NO nixpkgs, and a STRICT (no-`...`)
+// outputs destructuring. The old splice added a top-level
+// `nixpkgs.follows = "conformist/nixpkgs-master"`, and the flake call then
+// failed eval with "called with unexpected argument 'nixpkgs'" right after a
+// "successful" conform (hit on tommy).
+const engInputs = `{
+  inputs = {
+    igloo.url = "github:amarbel-llc/nixpkgs/nixos-unstable";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/master";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    {
+      self,
+      igloo,
+      nixpkgs-master,
+      utils,
+    }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = igloo.legacyPackages.${system};
+      in
+      {
+        packages.default = pkgs.hello;
+      }
+    );
+}
+`
+
+// TestApplyEngInputsFollowsInsideConformist pins the #83 fix: with
+// igloo/nixpkgs-master-shaped inputs and no nixpkgs, the shared inputs are
+// deduped via follows INSIDE the conformist input block, and no new
+// top-level input is introduced.
+func TestApplyEngInputsFollowsInsideConformist(t *testing.T) {
+	out, report, err := flakeedit.Apply([]byte(engInputs), flakeedit.Options{})
+	require.NoError(t, err)
+	require.True(t, report.Changed())
+
+	got := string(out)
+
+	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
+	require.Contains(t, got, `conformist.inputs.igloo.follows = "igloo";`)
+	require.Contains(t, got, `conformist.inputs.nixpkgs-master.follows = "nixpkgs-master";`)
+	require.Contains(t, got, `conformist.inputs.utils.follows = "utils";`)
+
+	// the poison pill: no top-level nixpkgs input in any form.
+	require.NotContains(t, got, "nixpkgs.url")
+	require.NotContains(t, got, "\n    nixpkgs.follows")
+	require.NotContains(t, got, "inputs.nixpkgs.follows")
+	// and no top-level utils.follows either — the consumer already has utils.
+	require.NotContains(t, got, `"conformist/utils"`)
+}
+
+// TestApplyEngInputsIdempotent verifies a second Apply over the wired eng
+// flake adds nothing.
+func TestApplyEngInputsIdempotent(t *testing.T) {
+	once, _, err := flakeedit.Apply([]byte(engInputs), flakeedit.Options{})
+	require.NoError(t, err)
+
+	twice, report, err := flakeedit.Apply(once, flakeedit.Options{})
+	require.NoError(t, err)
+	require.False(t, report.Changed(), "second apply must add nothing")
+	require.Equal(t, string(once), string(twice))
 }

@@ -38,7 +38,7 @@ type inputsAttrSet struct {
 // topLevelNames returns the set of top-level input names already bound
 // (the segment immediately after `inputs`), e.g. {"nixpkgs","utils"}.
 // Used to skip adding an input whose name already exists in any form
-// (`nixpkgs.url` precludes adding `nixpkgs.follows`).
+// (`utils.url` precludes adding `utils.follows`).
 func (i inputsAttrSet) topLevelNames() map[string]bool {
 	names := map[string]bool{}
 	for path := range i.existing {

@@ -3,9 +3,12 @@ Add conformist to flake.nix and wire it into your per-system outputs
 
   inputs = {
     conformist.url = "git+https://code.linenisgreat.com/conformist.git";
-    # follow conformist's pins so the closure is shared:
-    nixpkgs.follows = "conformist/nixpkgs-master";
-    utils.follows = "conformist/utils";
+    # Dedupe conformist's inputs against your same-named ones from INSIDE the
+    # conformist input — never add a top-level input your outputs pattern does
+    # not name, or a strict destructuring fails eval (conformist#83):
+    conformist.inputs.igloo.follows = "igloo";
+    conformist.inputs.nixpkgs-master.follows = "nixpkgs-master";
+    conformist.inputs.utils.follows = "utils";
   };
 
   # per system, with `pkgs` and the `conformist` input in scope:
