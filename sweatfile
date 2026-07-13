@@ -13,13 +13,30 @@
 [hooks]
 pre-merge = "just"
 
-# Per-commit repair (conformist#39/#40): format the index-staged content at
-# authoring time so every commit is conformant in history. `--exit-zero-on-fix`
-# maps the restage's exit-3 signal to 0, so a successful repair lets the commit
-# proceed (a pre-commit hook treats nonzero as "block"); partial-stage files are
-# formatted in isolation rather than refused. Uses the PATH `conformist` (the
-# home-manager-installed binary), which MUST be >= the build carrying #39.
-pre-commit = "conformist --staged --exit-zero-on-fix"
+# Per-commit repair (conformist#39/#40/#47/#51): format the index-staged
+# content at authoring time so every commit is conformant in history. This
+# names `conformist-pre-commit` — the CONFIG-SPECIFIC, TOOLCHAIN-HERMETIC
+# wrapper flake.nix exposes from its own module eval's build.preCommit, on the
+# devShell PATH (direnv) under that name — the same self-consumption
+# templates/eng prescribes to adopters.
+#
+# Do NOT use a bare `pre-commit = "conformist --staged --exit-zero-on-fix"`:
+# that resolves config and formatters from the ambient PATH. conformist has no
+# repo-owned conformist.toml (the config is nix-generated), so in a spinclass
+# worktree the bare hook's config discovery refuses eng's config and exits 2 —
+# the staged repair silently never runs, which is exactly how a mis-formatted
+# file once reached the merge gate. The wrapper bakes in the generated config
+# and store-pinned formatters (cf. conformist#51's PATH silent-skip trap).
+pre-commit = "conformist-pre-commit"
+
+# Merge-time repair (conformist#54), OPT-IN — uncomment to enable. Runs
+# `conformist --commit --amend --exit-zero-on-fix` via the flake's
+# `conformist-repair` wrapper (build.repair, same devShell PATH exposure) as a
+# spinclass pre-merge repair hook. Left commented, matching the templates/eng
+# opt-in stance: with `pre-commit` above active the tree is already conformant
+# at merge time, and `--amend` re-signs HEAD. Track conformist#59 for the
+# default flipping.
+# repair = "conformist-repair"
 
 # Per-worktree golangci-lint cache. golangci-lint's default user-global cache
 # replays per-package diagnostics whose embedded absolute paths point at

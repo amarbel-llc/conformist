@@ -561,6 +561,12 @@
             pkgs-master.golangci-lint
             pkgs-master.gopls
             pkgs.just
+            # conformist's own config-specific, toolchain-hermetic hook wrappers
+            # (build.preCommit / build.repair), on PATH as `conformist-pre-commit`
+            # / `conformist-repair` so the sweatfile can name them — the same
+            # self-consumption templates/eng prescribes to adopters (#47/#54/#59).
+            conformistEval.config.build.preCommit
+            conformistEval.config.build.repair
             # A real linter for dogfooding `conformist check` and for the
             # check/linter test paths (RFC 0001).
             pkgs.shellcheck
