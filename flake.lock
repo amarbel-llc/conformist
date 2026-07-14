@@ -67,15 +67,15 @@
       "locked": {
         "lastModified": 1783896868,
         "narHash": "sha256-pN9WzpM9sBz6DmQIlALLhAKIC9yrbY9rLa+qrYr8Ph8=",
-        "owner": "amarbel-llc",
-        "repo": "igloo",
+        "ref": "refs/heads/master",
         "rev": "e04bba9f87552e4161ebec00c528361316d36d3c",
-        "type": "github"
+        "revCount": 73,
+        "type": "git",
+        "url": "https://code.linenisgreat.com/igloo.git"
       },
       "original": {
-        "owner": "amarbel-llc",
-        "repo": "igloo",
-        "type": "github"
+        "type": "git",
+        "url": "https://code.linenisgreat.com/igloo.git"
       }
     },
     "nixpkgs-master": {
