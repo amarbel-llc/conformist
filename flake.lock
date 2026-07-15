@@ -71,11 +71,11 @@
         "rev": "e04bba9f87552e4161ebec00c528361316d36d3c",
         "revCount": 73,
         "type": "git",
-        "url": "https://code.linenisgreat.com/igloo.git"
+        "url": "https://github.com/amarbel-llc/igloo.git"
       },
       "original": {
         "type": "git",
-        "url": "https://code.linenisgreat.com/igloo.git"
+        "url": "https://github.com/amarbel-llc/igloo.git"
       }
     },
     "nixpkgs-master": {
