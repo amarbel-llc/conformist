@@ -67,15 +67,12 @@
       "locked": {
         "lastModified": 1783896868,
         "narHash": "sha256-pN9WzpM9sBz6DmQIlALLhAKIC9yrbY9rLa+qrYr8Ph8=",
-        "ref": "refs/heads/master",
-        "rev": "e04bba9f87552e4161ebec00c528361316d36d3c",
-        "revCount": 73,
-        "type": "git",
-        "url": "https://github.com/amarbel-llc/igloo.git"
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/igloo/archive/e04bba9f87552e4161ebec00c528361316d36d3c.tar.gz"
       },
       "original": {
-        "type": "git",
-        "url": "https://github.com/amarbel-llc/igloo.git"
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/igloo/archive/master.tar.gz"
       }
     },
     "nixpkgs-master": {

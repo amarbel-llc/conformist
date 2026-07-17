@@ -7,7 +7,7 @@
     # version.env in the module dir) and `-X main.commit` (from src.rev),
     # so no per-repo ldflags wiring is needed. See eng-versioning(7) and
     # amarbel-llc/nixpkgs#31.
-    igloo.url = "git+https://github.com/amarbel-llc/igloo.git";
+    igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
     # Apply igloo's overlay to OUR pinned nixpkgs-master (the hydra-vetted
     # sha eng pins) instead of igloo's own committed copy of the same pin.
     # Only igloo's flake-path outputs honor this — `pkgs` below therefore
