@@ -624,7 +624,7 @@ tag message:
     echo "Pushed $tag"
     git tag -v "$tag"
 
-# Cut a release from master: changelog, bump-version commit, signed tag, gh release.
+# Cut a release from master: changelog, bump-version commit, signed tag, fj release.
 [group("maintenance")]
 release new_version:
     #!/usr/bin/env bash
@@ -654,8 +654,8 @@ release new_version:
 
     just tag "$msg"
 
-    # gh release create is MUST; artifact upload is MAY.
-    gh release create "v{{ new_version }}" --title "$header" --notes "$msg"
+    # fj release create is MUST; artifact upload is MAY.
+    fj release create "$header" --tag "v{{ new_version }}" --body "$msg"
 
 # --- clean ---
 
