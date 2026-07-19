@@ -677,6 +677,20 @@ let
       expectFail = true;
       expectToken = "must declare";
     })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning";
+      label = "missing-version-env-fail";
+      files = {
+        # A flake-bearing Go repo with no version.env at all. This error path
+        # was unreachable while the linter gated on version.env itself
+        # (includes suppressed the run exactly when the file was missing);
+        # the gate now includes flake.nix, making absence detectable.
+        "flake.nix" = "{ }\n";
+        "go.mod" = "module example.com/foo\n";
+      };
+      expectFail = true;
+      expectToken = "version.env missing";
+    })
 
     # agents-md: AGENTS.md must stay under the configured character budget
     # (max-chars); no CLAUDE.md present so only the size check is exercised.

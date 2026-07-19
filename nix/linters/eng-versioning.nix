@@ -93,7 +93,18 @@ in
   config = lib.mkIf cfg.enable {
     settings.linter.eng-versioning = {
       command = lib.getExe check;
-      includes = [ "version.env" ];
+      # Gate on flake.nix (like every sibling), NOT on version.env alone: a
+      # gate of only version.env suppresses the run exactly when version.env
+      # is missing, making the "version.env missing" error unreachable
+      # (conformist#92, found 2026-07-19). version.env/go.mod/Cargo.toml stay
+      # listed so edits to any file this check reads invalidate the
+      # whole-tree cache (conformist#16), not just trigger the first run.
+      includes = [
+        "flake.nix"
+        "version.env"
+        "go.mod"
+        "Cargo.toml"
+      ];
       passes-files = false;
     };
   };
