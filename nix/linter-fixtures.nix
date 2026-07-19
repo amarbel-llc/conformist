@@ -111,33 +111,44 @@ let
   # URLs, then runs the check or the repair and asserts. git init / remote ops
   # are offline, so this still runs in the pure runCommandLocal sandbox
   # (conformist#68).
-  gitRemotesMod = lib.evalModule pkgs {
-    enableDefaultExcludes = false;
-    linters.git-remotes.enable = true;
-  };
-  gitRemotesCheck = gitRemotesMod.config.settings.linter.git-remotes.command;
-  gitRemotesRepair = gitRemotesMod.config.settings.linter.git-remotes."repair-command";
-
+  #
   # label        : fixture label (derivation suffix)
   # remotes      : attrset remote-name -> URL to `git remote add`
   # action       : "check" (run the read-only command) or "repair" (run repair)
+  # enableModule : extra options merged into `linters.git-remotes` (e.g.
+  #                { allowed-hosts = [ "github.com" ]; }) — each fixture evals
+  #                its own module instance so different fixtures can exercise
+  #                different canonical-host/allowed-hosts configs
   # expectFail   : check action only — true => check MUST exit non-zero
   # expectToken  : optional substring the action output MUST contain
   # expectRemotes: repair action only — attrset remote-name -> expected fetch URL
   #                after repair (asserted via `git remote get-url`)
   # recheckPasses: repair action only — whether the read-only check MUST pass
-  #                after the repair (false when a non-github remote stays flagged)
+  #                after the repair (false when a remote's transport AND/OR
+  #                origin's host stays outside what repair can fix / what this
+  #                fixture's module config accepts)
   mkGitRemotesFixture =
     {
       label,
       remotes,
       action ? "check",
+      enableModule ? { },
       expectFail ? false,
       expectToken ? null,
       expectRemotes ? { },
       recheckPasses ? true,
     }:
     let
+      mod = lib.evalModule pkgs {
+        enableDefaultExcludes = false;
+        linters.git-remotes = {
+          enable = true;
+        }
+        // enableModule;
+      };
+      gitRemotesCheck = mod.config.settings.linter.git-remotes.command;
+      gitRemotesRepair = mod.config.settings.linter.git-remotes."repair-command";
+
       addRemotes = nixlib.concatStringsSep "\n" (
         nixlib.mapAttrsToList (
           name: url: "git remote add ${nixlib.escapeShellArg name} ${nixlib.escapeShellArg url}"
@@ -206,7 +217,7 @@ let
           else
             ''
               if [ "$crc" -eq 0 ]; then
-                echo "FIXTURE FAIL: git-remotes ${label}: check unexpectedly passed after repair (a non-github remote should stay flagged)" >&2
+                echo "FIXTURE FAIL: git-remotes ${label}: check unexpectedly passed after repair (a non-canonical-host or unfixable-transport remote should stay flagged)" >&2
                 exit 1
               fi
             ''
@@ -231,62 +242,108 @@ let
       '';
 
   gitRemotesFixtures = [
-    # Check: a github https remote is flagged; an SSH remote passes.
+    # Check, transport rule: a non-SSH remote is flagged regardless of host —
+    # use the canonical forge host here so this is unambiguously a transport
+    # failure, not a host failure (the host fixtures below cover that rule).
     (mkGitRemotesFixture {
       label = "check-https-fail";
-      remotes.origin = "https://github.com/amarbel-llc/hyphence.git";
+      remotes.origin = "https://code.linenisgreat.com/hyphence.git";
       expectFail = true;
       expectToken = "non-SSH remote";
     })
+
+    # Check, default canonical host: origin on the forge via SSH passes with
+    # no extra config (code.linenisgreat.com is canonical-host's default).
     (mkGitRemotesFixture {
-      label = "check-ssh-pass";
-      remotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      label = "check-forge-ssh-pass";
+      remotes.origin = "git@code.linenisgreat.com:hyphence.git";
     })
 
-    # Repair: each github network transport rewrites to the SSH form, the recheck
-    # then passes, and a missing `.git` suffix is normalized in.
+    # Check, host rule: origin on github.com via SSH — transport is fine, but
+    # without an allowlist entry the host itself is rejected (this is the new
+    # enforcement — previously any SSH host passed unconditionally).
     (mkGitRemotesFixture {
-      label = "repair-https";
+      label = "check-github-ssh-fails-without-allowlist";
+      remotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      expectFail = true;
+      expectToken = "canonical host is 'code.linenisgreat.com'";
+    })
+
+    # Check, allowlist: the same github.com SSH origin passes once this repo
+    # declares allowed-hosts (the circus-shaped case — deliberately still on
+    # GitHub, but still checked/checkable against that fact).
+    (mkGitRemotesFixture {
+      label = "check-github-ssh-pass-with-allowlist";
+      remotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      enableModule = {
+        allowed-hosts = [ "github.com" ];
+      };
+    })
+
+    # Repair, forge host: each code.linenisgreat.com network transport
+    # rewrites to the flat/owner-less SSH form, the recheck then passes under
+    # the default (forge-canonical) config, and a missing `.git` suffix is
+    # normalized in.
+    (mkGitRemotesFixture {
+      label = "repair-forge-https";
       action = "repair";
-      remotes.origin = "https://github.com/amarbel-llc/hyphence.git";
+      remotes.origin = "https://code.linenisgreat.com/hyphence.git";
       expectToken = "rewrote remote 'origin'";
-      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      expectRemotes.origin = "git@code.linenisgreat.com:hyphence.git";
     })
     (mkGitRemotesFixture {
-      label = "repair-https-no-dotgit";
+      label = "repair-forge-https-no-dotgit";
       action = "repair";
-      remotes.origin = "https://github.com/amarbel-llc/hyphence";
-      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      remotes.origin = "https://code.linenisgreat.com/hyphence";
+      expectRemotes.origin = "git@code.linenisgreat.com:hyphence.git";
     })
+
+    # Repair, github host WITH allowlist: transport normalizes to SSH exactly
+    # as it always has, and because this fixture's module declares
+    # allowed-hosts = [ "github.com" ], the recheck passes too — repair's
+    # transport fix and the host check compose cleanly for an allowlisted repo.
     (mkGitRemotesFixture {
-      label = "repair-http";
+      label = "repair-github-http-with-allowlist";
       action = "repair";
       remotes.origin = "http://github.com/amarbel-llc/hyphence.git";
+      enableModule = {
+        allowed-hosts = [ "github.com" ];
+      };
       expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
     })
+
+    # Repair, github host WITHOUT allowlist: repair still normalizes the
+    # transport (repair runs the same github.com rewrite regardless of
+    # canonical-host/allowed-hosts — an allowlisted repo isn't a prerequisite
+    # for transport hygiene), but the recheck now fails on the host rule since
+    # this fixture's module uses the default (empty) allowed-hosts. Repair
+    # alone cannot launder a wrong host, same as it already couldn't launder a
+    # non-github/non-forge host below.
     (mkGitRemotesFixture {
-      label = "repair-git-protocol";
+      label = "repair-github-git-protocol-without-allowlist";
       action = "repair";
       remotes.origin = "git://github.com/amarbel-llc/hyphence.git";
       expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      recheckPasses = false;
     })
 
-    # Repair idempotency: an already-SSH remote is a no-op.
+    # Repair idempotency: an already-SSH forge remote is a no-op.
     (mkGitRemotesFixture {
-      label = "repair-ssh-noop";
+      label = "repair-forge-ssh-noop";
       action = "repair";
-      remotes.origin = "git@github.com:amarbel-llc/hyphence.git";
-      expectToken = "no github.com non-SSH remotes to rewrite";
-      expectRemotes.origin = "git@github.com:amarbel-llc/hyphence.git";
+      remotes.origin = "git@code.linenisgreat.com:hyphence.git";
+      expectToken = "no github.com/code.linenisgreat.com non-SSH remotes to rewrite";
+      expectRemotes.origin = "git@code.linenisgreat.com:hyphence.git";
     })
 
-    # Repair selectivity: a non-github host has no canonical SSH form, so repair
-    # leaves it alone and the read-only check keeps reporting it.
+    # Repair selectivity: a host that's neither github.com nor
+    # code.linenisgreat.com has no canonical SSH form, so repair leaves it
+    # alone and the read-only check keeps reporting it (transport AND host).
     (mkGitRemotesFixture {
-      label = "repair-leaves-non-github";
+      label = "repair-leaves-non-github-non-forge";
       action = "repair";
       remotes.origin = "https://gitlab.com/amarbel-llc/hyphence.git";
-      expectToken = "no github.com non-SSH remotes to rewrite";
+      expectToken = "no github.com/code.linenisgreat.com non-SSH remotes to rewrite";
       expectRemotes.origin = "https://gitlab.com/amarbel-llc/hyphence.git";
       recheckPasses = false;
     })
@@ -297,10 +354,16 @@ let
         origin = "https://github.com/amarbel-llc/hyphence.git";
         upstream = "https://gitlab.com/up/stream.git";
       };
+      enableModule = {
+        allowed-hosts = [ "github.com" ];
+      };
       expectRemotes = {
         origin = "git@github.com:amarbel-llc/hyphence.git";
         upstream = "https://gitlab.com/up/stream.git";
       };
+      # origin is on the allowlisted github.com host, but upstream's gitlab.com
+      # non-SSH transport still fails the transport rule (which applies to
+      # every remote, not just origin) — so the recheck must still fail.
       recheckPasses = false;
     })
   ];

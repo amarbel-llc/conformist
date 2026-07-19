@@ -253,8 +253,13 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
-  `.custom-gcl.yml`), `git-remotes` (SSH-only remotes; check reports any non-SSH
-  remote, repair rewrites github.com https/http/git remotes to SSH — #68),
+  `.custom-gcl.yml`), `git-remotes` (SSH-only remotes AND a canonical `origin`
+  host — check reports any non-SSH remote plus an `origin` whose host isn't
+  `canonical-host` (default `code.linenisgreat.com`, the forge) or one of a
+  per-repo `allowed-hosts` allowlist (e.g. `[ "github.com" ]` for a repo
+  deliberately still on GitHub); repair rewrites github.com/
+  code.linenisgreat.com https/http/git remotes to SSH regardless of that
+  allowlist — #68),
   `git-default-branch`, `sweatfile`,
   `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair), `gomod2nix`
   (conformist-nix(7) GO MODULE LOCK — gomod2nix.toml in sync with go.mod/go.sum;

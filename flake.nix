@@ -493,11 +493,16 @@
                 touch $out
               '';
 
-            # True-positive regression for the git-remotes SSH-only rule
-            # (conformist#8): spin up a throwaway repo and assert the linter passes
-            # all-SSH remotes (scp-like + ssh://) but FLAGS http:// and git://.
-            # lint-worktree only proves conformist's own SSH remotes pass; this
-            # proves the non-SSH schemes actually fire.
+            # True-positive regression for the git-remotes SSH-only + canonical-host
+            # rule (conformist#8): spin up a throwaway repo and assert the linter
+            # passes all-SSH remotes on approved hosts (scp-like + ssh://) but FLAGS
+            # http:// and git://. lint-worktree only proves conformist's own SSH
+            # remotes pass; this proves the non-SSH schemes actually fire.
+            # `origin` is on code.linenisgreat.com (the default canonical-host) —
+            # NOT github.com — since the host-canonicality rule added alongside the
+            # forge migration checks `origin`'s host specifically; a github.com
+            # origin would (correctly) now fail that separate rule and defeat this
+            # test's transport-only intent.
             git-remotes =
               let
                 cmd = conformistImpureEval.config.settings.linter.git-remotes.command;
@@ -508,7 +513,7 @@
                 git init -q repo
                 cd repo
                 # all-SSH remotes (scp-like and ssh://) pass.
-                git remote add origin git@github.com:o/r.git
+                git remote add origin git@code.linenisgreat.com:o/r.git
                 git remote add up ssh://git@example.com/o/r.git
                 ${cmd} || { echo "FAIL: all-SSH remotes were flagged" >&2; exit 1; }
                 # an http:// remote is flagged.
