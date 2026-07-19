@@ -47,6 +47,11 @@ let
   # files       : attrset of relpath -> content written into the fixture tree
   # expectFail  : true => the linter MUST exit non-zero; false => MUST exit zero
   # expectToken : optional substring the linter output MUST contain
+  # evalPkgs    : pkgs the linter MODULE is evaluated against (default: pkgs).
+  #               Lets a fixture exercise a module's degraded wiring when an
+  #               overlay-provided tool is absent, e.g.
+  #               `builtins.removeAttrs pkgs [ "gomod2nix" ]` (conformist#93).
+  #               The fixture derivation itself always builds with the real pkgs.
   mkLinterFixtureCheck =
     {
       name,
@@ -55,9 +60,10 @@ let
       files,
       expectFail ? false,
       expectToken ? null,
+      evalPkgs ? pkgs,
     }:
     let
-      mod = lib.evalModule pkgs {
+      mod = lib.evalModule evalPkgs {
         enableDefaultExcludes = false;
         linters.${name} = {
           enable = true;
@@ -690,6 +696,31 @@ let
       };
       expectFail = true;
       expectToken = "version.env missing";
+    })
+
+    # gomod2nix missing-tool fallback (conformist#93): the module is evaluated
+    # against a pkgs WITHOUT the (igloo-overlay-provided) gomod2nix attribute,
+    # proving both that enabling the linter no longer crashes eval and that the
+    # degraded wiring behaves — silent no-op without a go.mod, loud actionable
+    # failure with one. (The REAL check still has no fixture: it shells out to
+    # gomod2nix, which the pure sandbox cannot run — see nix/linters/gomod2nix.nix.)
+    (mkLinterFixtureCheck {
+      name = "gomod2nix";
+      label = "missing-tool-non-go-pass";
+      evalPkgs = builtins.removeAttrs pkgs [ "gomod2nix" ];
+      files = {
+        "flake.nix" = "{ }\n";
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "gomod2nix";
+      label = "missing-tool-go-fail";
+      evalPkgs = builtins.removeAttrs pkgs [ "gomod2nix" ];
+      files = {
+        "go.mod" = "module example.com/foo\n";
+      };
+      expectFail = true;
+      expectToken = "pkgs.gomod2nix is unavailable";
     })
 
     # agents-md: AGENTS.md must stay under the configured character budget

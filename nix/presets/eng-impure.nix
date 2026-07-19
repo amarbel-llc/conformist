@@ -11,7 +11,10 @@
 #
 # conformist self-consumes this preset (nix/conformist-impure.nix). Each linter
 # self-gates on file presence (gomod2nix no-ops without a go.mod), so the roster
-# is safe for repos that don't use every convention.
+# is safe for repos that don't use every convention. The gate holds at nix-eval
+# time too: a pkgs without igloo's overlay (no `pkgs.gomod2nix`) still
+# evaluates — the gomod2nix linter degrades to a fallback that only fails, with
+# the actionable remedy, when a go.mod is actually present (conformist#93).
 # See eng-ssh(7)/eng(7) (git remotes), eng-rcm(7) (sweatfile), conformist#18 (agents-md).
 { ... }:
 {

@@ -35,11 +35,13 @@
 # module cache, not a read-only /nix/store copy), and the repair runs `git add` —
 # both require the live working tree, like agents-md.
 #
-# No nix/linter-fixtures.nix entry: that harness runs each check in a pure
-# `runCommandLocal` sandbox (no network, no module cache), but this check shells
-# out to gomod2nix, which resolves the module graph and so cannot run there. The
-# clean-tree pass is exercised by `just lint-worktree` on conformist's own tree;
-# drift true-positives are verified manually (see the linter's PR / commit).
+# The REAL check has no nix/linter-fixtures.nix entry: that harness runs each
+# check in a pure `runCommandLocal` sandbox (no network, no module cache), but
+# this check shells out to gomod2nix, which resolves the module graph and so
+# cannot run there. The clean-tree pass is exercised by `just lint-worktree` on
+# conformist's own tree; drift true-positives are verified manually (see the
+# linter's PR / commit). The missing-tool FALLBACK below (conformist#93) shells
+# out to nothing, so it DOES have fixtures (gomod2nix/missing-tool-*).
 {
   config,
   lib,
@@ -48,6 +50,30 @@
 }:
 let
   cfg = config.linters.gomod2nix;
+
+  # `pkgs.gomod2nix` exists only via igloo's overlay — plain nixpkgs has no
+  # such attribute. Referencing it unconditionally made ENABLING this linter
+  # (e.g. via presets.eng-impure) an eval crash in any repo whose pkgs lacks
+  # the overlay, even repos with no Go at all (conformist#93). Mirror the
+  # script's runtime self-gate at eval time instead: without the tool, wire a
+  # fallback that stays a clean no-op for a non-Go tree and fails loudly —
+  # with the actionable fix — only when a go.mod is actually present. A Go
+  # repo missing the overlay gets a finding, never silence.
+  hasGomod2nix = pkgs ? gomod2nix;
+
+  missingTool = pkgs.writeShellApplication {
+    name = "conformist-gomod2nix-missing-tool";
+    runtimeInputs = with pkgs; [ coreutils ];
+    text = ''
+      # cwd is the tree root; this whole-tree check takes no file arguments.
+      [ -f go.mod ] || {
+        echo "gomod2nix: no go.mod at tree root — nothing to check"
+        exit 0
+      }
+      echo "gomod2nix: go.mod present but pkgs.gomod2nix is unavailable in this nixpkgs — the gomod2nix linter needs igloo's overlay (source pkgs from igloo, the eng nix backbone) or an explicit gomod2nix package; alternatively disable linters.gomod2nix" >&2
+      exit 1
+    '';
+  };
 
   # The one shared regeneration recipe (conformist#84): fresh into an empty temp
   # outdir, never in place, so no stale-toml incremental cache can mask drift.
@@ -143,8 +169,8 @@ in
 
   config = lib.mkIf cfg.enable {
     settings.linter.gomod2nix = {
-      command = lib.getExe check;
-      "repair-command" = lib.getExe repair;
+      command = lib.getExe (if hasGomod2nix then check else missingTool);
+      "repair-command" = lib.getExe (if hasGomod2nix then repair else missingTool);
       # Watch the real Go module files. go.mod/go.sum are in conformist's GLOBAL
       # excludes (module-options.nix default-excludes them so formatters never
       # rewrite them). A whole-tree check (passes-files=false) is exempt from the
