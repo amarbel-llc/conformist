@@ -1,4 +1,4 @@
-module github.com/amarbel-llc/conformist
+module code.linenisgreat.com/conformist
 
 go 1.26.1
 
@@ -6,7 +6,9 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/adrg/xdg v0.5.3
 	github.com/amarbel-llc/purse-first/libs/dewey v0.3.1
+	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/log v0.4.2
+	github.com/clarete/langlang/go v0.0.12
 	github.com/gobwas/glob v0.2.3
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/otiai10/copy v1.14.1
@@ -17,6 +19,7 @@ require (
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.46.0
+	golang.org/x/term v0.44.0
 	mvdan.cc/sh/v3 v3.13.1
 )
 
@@ -27,13 +30,11 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
-	github.com/charmbracelet/huh v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
-	github.com/clarete/langlang/go v0.0.12 // indirect
 	github.com/clipperhouse/displaywidth v0.9.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
@@ -67,7 +68,6 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

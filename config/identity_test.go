@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/amarbel-llc/conformist/config"
+	"code.linenisgreat.com/conformist/config"
 	"github.com/stretchr/testify/require"
 )
 

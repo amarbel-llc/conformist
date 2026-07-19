@@ -7,7 +7,7 @@ import (
 	"io"
 	"runtime"
 
-	"github.com/amarbel-llc/conformist/walk/cache"
+	"code.linenisgreat.com/conformist/walk/cache"
 	"github.com/charmbracelet/log"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sync/errgroup"

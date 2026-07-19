@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/conformist/cmd/conform/flakeedit"
+	"code.linenisgreat.com/conformist/cmd/conform/flakeedit"
 	"github.com/stretchr/testify/require"
 )
 

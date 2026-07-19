@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/amarbel-llc/conformist/cmd/conform/papi"
+	"code.linenisgreat.com/conformist/cmd/conform/papi"
 )
 
 // ErrTargetNotEmpty means Bootstrap was asked to scaffold into a directory that

@@ -34,8 +34,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/amarbel-llc/conformist/cmd/conform/flakeedit"
-	"github.com/amarbel-llc/conformist/git"
+	"code.linenisgreat.com/conformist/cmd/conform/flakeedit"
+	"code.linenisgreat.com/conformist/git"
 )
 
 //go:embed scaffold/conformist.nix

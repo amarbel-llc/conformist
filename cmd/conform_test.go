@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/amarbel-llc/conformist/cmd"
-	"github.com/amarbel-llc/conformist/test"
+	"code.linenisgreat.com/conformist/cmd"
+	"code.linenisgreat.com/conformist/test"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/stretchr/testify/require"
 )

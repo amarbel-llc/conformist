@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/amarbel-llc/conformist/git"
-	"github.com/amarbel-llc/conformist/stats"
+	"code.linenisgreat.com/conformist/git"
+	"code.linenisgreat.com/conformist/stats"
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
 )

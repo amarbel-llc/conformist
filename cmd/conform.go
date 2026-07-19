@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/amarbel-llc/conformist/cmd/conform"
+	"code.linenisgreat.com/conformist/cmd/conform"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"

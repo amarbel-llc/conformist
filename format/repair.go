@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/amarbel-llc/conformist/config"
-	"github.com/amarbel-llc/conformist/stats"
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/config"
+	"code.linenisgreat.com/conformist/stats"
+	"code.linenisgreat.com/conformist/walk"
 	"github.com/charmbracelet/log"
 	"github.com/gobwas/glob"
 	"mvdan.cc/sh/v3/expand"

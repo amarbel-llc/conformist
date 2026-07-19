@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/amarbel-llc/conformist/config"
-	"github.com/amarbel-llc/conformist/format"
-	"github.com/amarbel-llc/conformist/stats"
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/config"
+	"code.linenisgreat.com/conformist/format"
+	"code.linenisgreat.com/conformist/stats"
+	"code.linenisgreat.com/conformist/walk"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/stretchr/testify/require"
 )

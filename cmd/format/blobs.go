@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/amarbel-llc/conformist/config"
-	"github.com/amarbel-llc/conformist/stats"
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/config"
+	"code.linenisgreat.com/conformist/stats"
+	"code.linenisgreat.com/conformist/walk"
 )
 
 // formatStagedBlobs formats the given blobs (toplevel-relative path -> staged

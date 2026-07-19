@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/amarbel-llc/conformist/config"
+	"code.linenisgreat.com/conformist/config"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"

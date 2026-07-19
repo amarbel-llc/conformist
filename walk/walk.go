@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/amarbel-llc/conformist/stats"
+	"code.linenisgreat.com/conformist/stats"
 	"github.com/charmbracelet/log"
 	bolt "go.etcd.io/bbolt"
 )

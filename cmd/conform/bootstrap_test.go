@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/conformist/cmd/conform"
-	"github.com/amarbel-llc/conformist/cmd/conform/papi"
+	"code.linenisgreat.com/conformist/cmd/conform"
+	"code.linenisgreat.com/conformist/cmd/conform/papi"
 	"github.com/stretchr/testify/require"
 )
 

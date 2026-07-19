@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/amarbel-llc/conformist/config"
+	"code.linenisgreat.com/conformist/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

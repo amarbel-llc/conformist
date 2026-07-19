@@ -3,7 +3,7 @@ package cache_test
 import (
 	"testing"
 
-	"github.com/amarbel-llc/conformist/walk/cache"
+	"code.linenisgreat.com/conformist/walk/cache"
 	"github.com/stretchr/testify/require"
 )
 

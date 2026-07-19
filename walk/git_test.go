@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/conformist/stats"
-	"github.com/amarbel-llc/conformist/test"
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/stats"
+	"code.linenisgreat.com/conformist/test"
+	"code.linenisgreat.com/conformist/walk"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/stretchr/testify/require"
 )

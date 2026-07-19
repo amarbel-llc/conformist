@@ -3,7 +3,7 @@ package conform
 import (
 	"fmt"
 
-	"github.com/amarbel-llc/conformist/cmd/conform/papi"
+	"code.linenisgreat.com/conformist/cmd/conform/papi"
 	"github.com/charmbracelet/huh"
 )
 

@@ -106,7 +106,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist",
+    "importPath": "code.linenisgreat.com/conformist",
     "dir": ".",
     "name": "main",
     "isMain": true,
@@ -121,11 +121,11 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/conformist/cmd"
+      "code.linenisgreat.com/conformist/cmd"
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/cmd",
+    "importPath": "code.linenisgreat.com/conformist/cmd",
     "dir": "cmd",
     "name": "cmd",
     "isMain": false,
@@ -145,14 +145,14 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/conformist/cmd/conform",
-      "github.com/amarbel-llc/conformist/cmd/format",
-      "github.com/amarbel-llc/conformist/cmd/init",
-      "github.com/amarbel-llc/conformist/config",
-      "github.com/amarbel-llc/conformist/format",
-      "github.com/amarbel-llc/conformist/stats",
-      "github.com/amarbel-llc/conformist/walk",
-      "github.com/amarbel-llc/conformist/walk/cache",
+      "code.linenisgreat.com/conformist/cmd/conform",
+      "code.linenisgreat.com/conformist/cmd/format",
+      "code.linenisgreat.com/conformist/cmd/init",
+      "code.linenisgreat.com/conformist/config",
+      "code.linenisgreat.com/conformist/format",
+      "code.linenisgreat.com/conformist/stats",
+      "code.linenisgreat.com/conformist/walk",
+      "code.linenisgreat.com/conformist/walk/cache",
       "github.com/charmbracelet/log",
       "github.com/spf13/cobra",
       "github.com/spf13/cobra/doc",
@@ -161,7 +161,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/cmd/conform",
+    "importPath": "code.linenisgreat.com/conformist/cmd/conform",
     "dir": "cmd/conform",
     "name": "conform",
     "isMain": false,
@@ -192,7 +192,7 @@
     "imports": null
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/cmd/format",
+    "importPath": "code.linenisgreat.com/conformist/cmd/format",
     "dir": "cmd/format",
     "name": "format",
     "isMain": false,
@@ -210,12 +210,12 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/conformist/config",
-      "github.com/amarbel-llc/conformist/format",
-      "github.com/amarbel-llc/conformist/git",
-      "github.com/amarbel-llc/conformist/stats",
-      "github.com/amarbel-llc/conformist/walk",
-      "github.com/amarbel-llc/conformist/walk/cache",
+      "code.linenisgreat.com/conformist/config",
+      "code.linenisgreat.com/conformist/format",
+      "code.linenisgreat.com/conformist/git",
+      "code.linenisgreat.com/conformist/stats",
+      "code.linenisgreat.com/conformist/walk",
+      "code.linenisgreat.com/conformist/walk/cache",
       "github.com/charmbracelet/log",
       "github.com/spf13/cobra",
       "github.com/spf13/viper",
@@ -223,7 +223,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/cmd/init",
+    "importPath": "code.linenisgreat.com/conformist/cmd/init",
     "dir": "cmd/init",
     "name": "init",
     "isMain": false,
@@ -244,7 +244,7 @@
     "imports": null
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/config",
+    "importPath": "code.linenisgreat.com/conformist/config",
     "dir": "config",
     "name": "config",
     "isMain": false,
@@ -259,9 +259,9 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/conformist/git",
-      "github.com/amarbel-llc/conformist/jujutsu",
-      "github.com/amarbel-llc/conformist/walk",
+      "code.linenisgreat.com/conformist/git",
+      "code.linenisgreat.com/conformist/jujutsu",
+      "code.linenisgreat.com/conformist/walk",
       "github.com/charmbracelet/log",
       "github.com/google/shlex",
       "github.com/spf13/pflag",
@@ -269,7 +269,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/format",
+    "importPath": "code.linenisgreat.com/conformist/format",
     "dir": "format",
     "name": "format",
     "isMain": false,
@@ -293,10 +293,10 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/conformist/config",
-      "github.com/amarbel-llc/conformist/stats",
-      "github.com/amarbel-llc/conformist/walk",
-      "github.com/amarbel-llc/conformist/walk/cache",
+      "code.linenisgreat.com/conformist/config",
+      "code.linenisgreat.com/conformist/stats",
+      "code.linenisgreat.com/conformist/walk",
+      "code.linenisgreat.com/conformist/walk/cache",
       "github.com/charmbracelet/log",
       "github.com/gobwas/glob",
       "go.etcd.io/bbolt",
@@ -307,7 +307,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/git",
+    "importPath": "code.linenisgreat.com/conformist/git",
     "dir": "git",
     "name": "git",
     "isMain": false,
@@ -326,7 +326,7 @@
     "imports": null
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/jujutsu",
+    "importPath": "code.linenisgreat.com/conformist/jujutsu",
     "dir": "jujutsu",
     "name": "jujutsu",
     "isMain": false,
@@ -343,7 +343,7 @@
     "imports": null
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/stats",
+    "importPath": "code.linenisgreat.com/conformist/stats",
     "dir": "stats",
     "name": "stats",
     "isMain": false,
@@ -361,7 +361,7 @@
     "imports": null
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/test",
+    "importPath": "code.linenisgreat.com/conformist/test",
     "dir": "test",
     "name": "test",
     "isMain": false,
@@ -377,7 +377,7 @@
     "embedPatterns": null,
     "imports": [
       "github.com/BurntSushi/toml",
-      "github.com/amarbel-llc/conformist/config",
+      "code.linenisgreat.com/conformist/config",
       "github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui",
       "github.com/otiai10/copy",
       "github.com/stretchr/testify/require",
@@ -385,7 +385,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/walk",
+    "importPath": "code.linenisgreat.com/conformist/walk",
     "dir": "walk",
     "name": "walk",
     "isMain": false,
@@ -406,17 +406,17 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/conformist/git",
-      "github.com/amarbel-llc/conformist/jujutsu",
-      "github.com/amarbel-llc/conformist/stats",
-      "github.com/amarbel-llc/conformist/walk/cache",
+      "code.linenisgreat.com/conformist/git",
+      "code.linenisgreat.com/conformist/jujutsu",
+      "code.linenisgreat.com/conformist/stats",
+      "code.linenisgreat.com/conformist/walk/cache",
       "github.com/charmbracelet/log",
       "go.etcd.io/bbolt",
       "golang.org/x/sync/errgroup"
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/conformist/walk/cache",
+    "importPath": "code.linenisgreat.com/conformist/walk/cache",
     "dir": "walk/cache",
     "name": "cache",
     "isMain": false,

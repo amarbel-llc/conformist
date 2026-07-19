@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/amarbel-llc/conformist/cmd"
+	"code.linenisgreat.com/conformist/cmd"
 )
 
 // version and commit are injected at build time. The amarbel-llc/nixpkgs fork's

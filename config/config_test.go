@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"code.linenisgreat.com/conformist/config"
 	"github.com/BurntSushi/toml"
-	"github.com/amarbel-llc/conformist/config"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"

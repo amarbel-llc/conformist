@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/conformist/cmd"
+	"code.linenisgreat.com/conformist/cmd"
 )
 
 // TestRootAcceptsPositionalPathArgs guards against a regression where adding

@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/amarbel-llc/conformist/stats"
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/stats"
+	"code.linenisgreat.com/conformist/walk"
 	"github.com/charmbracelet/log"
 	"golang.org/x/sync/errgroup"
 )

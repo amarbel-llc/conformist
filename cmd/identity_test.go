@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	formatCmd "github.com/amarbel-llc/conformist/cmd/format"
-	"github.com/amarbel-llc/conformist/config"
-	"github.com/amarbel-llc/conformist/test"
+	formatCmd "code.linenisgreat.com/conformist/cmd/format"
+	"code.linenisgreat.com/conformist/config"
+	"code.linenisgreat.com/conformist/test"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/stretchr/testify/require"
 )

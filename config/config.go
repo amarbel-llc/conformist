@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/conformist/git"
-	"github.com/amarbel-llc/conformist/jujutsu"
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/git"
+	"code.linenisgreat.com/conformist/jujutsu"
+	"code.linenisgreat.com/conformist/walk"
 	"github.com/charmbracelet/log"
 	"github.com/google/shlex"
 	"github.com/spf13/pflag"

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/amarbel-llc/conformist/cmd/conform"
+	"code.linenisgreat.com/conformist/cmd/conform"
 	"github.com/stretchr/testify/require"
 )
 

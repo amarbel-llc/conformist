@@ -9,7 +9,7 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/amarbel-llc/conformist/stats"
+	"code.linenisgreat.com/conformist/stats"
 )
 
 type StdinReader struct {

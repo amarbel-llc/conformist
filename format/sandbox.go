@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/amarbel-llc/conformist/walk"
+	"code.linenisgreat.com/conformist/walk"
 )
 
 // check evaluates a formatter in read-only mode and returns findings for the
