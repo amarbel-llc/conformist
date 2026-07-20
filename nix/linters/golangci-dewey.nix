@@ -37,12 +37,12 @@ let
       fi
 
       if [ ! -f .custom-gcl.yml ]; then
-        echo "golangci-dewey(#10): repo gates on golangci-lint but has no .custom-gcl.yml wiring the dewey plugin (github.com/amarbel-llc/purse-first/libs/dewey) — add one so a custom golangci-lint can be built" >&2
+        echo "golangci-dewey(#10): repo gates on golangci-lint but has no .custom-gcl.yml wiring the dewey plugin (code.linenisgreat.com/purse-first/libs/dewey) — add one so a custom golangci-lint can be built" >&2
         exit 1
       fi
 
-      if ! grep -qF 'github.com/amarbel-llc/purse-first/libs/dewey' .custom-gcl.yml; then
-        echo "golangci-dewey(#10): .custom-gcl.yml does not reference the dewey plugin module (github.com/amarbel-llc/purse-first/libs/dewey)" >&2
+      if ! grep -qF 'code.linenisgreat.com/purse-first/libs/dewey' .custom-gcl.yml; then
+        echo "golangci-dewey(#10): .custom-gcl.yml does not reference the dewey plugin module (code.linenisgreat.com/purse-first/libs/dewey)" >&2
         exit 1
       fi
 

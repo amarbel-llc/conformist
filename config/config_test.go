@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/conformist/config"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/BurntSushi/toml"
-	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"

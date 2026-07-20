@@ -378,7 +378,7 @@
     "imports": [
       "github.com/BurntSushi/toml",
       "code.linenisgreat.com/conformist/config",
-      "github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui",
+      "code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui",
       "github.com/otiai10/copy",
       "github.com/stretchr/testify/require",
       "golang.org/x/sys/unix"
@@ -436,7 +436,7 @@
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/purse-first/libs/dewey/internal/0/stack_frame",
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame",
     "dir": "internal/0/stack_frame",
     "name": "stack_frame",
     "isMain": false,
@@ -457,7 +457,7 @@
     "imports": null
   },
   {
-    "importPath": "github.com/amarbel-llc/purse-first/libs/dewey/internal/alfa/test_ui",
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/test_ui",
     "dir": "internal/alfa/test_ui",
     "name": "test_ui",
     "isMain": false,
@@ -472,11 +472,11 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/purse-first/libs/dewey/internal/0/stack_frame"
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame"
     ]
   },
   {
-    "importPath": "github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui",
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui",
     "dir": "pkgs/test_ui",
     "name": "test_ui",
     "isMain": false,
@@ -491,7 +491,7 @@
     "embedFiles": null,
     "embedPatterns": null,
     "imports": [
-      "github.com/amarbel-llc/purse-first/libs/dewey/internal/alfa/test_ui"
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/test_ui"
     ]
   },
   {

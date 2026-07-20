@@ -86,8 +86,8 @@
         golangciLintDeweySrc = pkgs.fetchFromGitHub {
           owner = "amarbel-llc";
           repo = "purse-first";
-          rev = "00c193ed49b477fdf6c23450c35256c2251e3b72";
-          hash = "sha256-5XL6TDTVUmVGj177DTtTUCDZoaLp/xGdv4b5oA/iM5c=";
+          rev = "20f89c28ebf95f9ed6bab2f13101d7af8d27cb03";
+          hash = "sha256-rCmYppRS2JEBbAXFnHg54I9ecY9AO94ruFgdUvdYd7U=";
         };
 
         # Build golangci-lint-dewey from the fetched source with the SAME recipe
@@ -539,7 +539,7 @@
                 # gates on golangci-lint + wires the dewey plugin -> passes.
                 mkdir -p ok
                 printf 'version: "2"\n' > ok/.golangci.yaml
-                printf 'plugins:\n  - module: github.com/amarbel-llc/purse-first/libs/dewey\n' > ok/.custom-gcl.yml
+                printf 'plugins:\n  - module: code.linenisgreat.com/purse-first/libs/dewey\n' > ok/.custom-gcl.yml
                 ( cd ok && ${cmd} ) || { echo "FAIL: wired repo was flagged" >&2; exit 1; }
                 # gates on golangci-lint, no .custom-gcl.yml -> flagged.
                 mkdir -p missing

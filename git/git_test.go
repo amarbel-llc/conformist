@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/conformist/git"
-	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/stretchr/testify/require"
 )
 

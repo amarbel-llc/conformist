@@ -11,7 +11,7 @@ import (
 	formatCmd "code.linenisgreat.com/conformist/cmd/format"
 	"code.linenisgreat.com/conformist/config"
 	"code.linenisgreat.com/conformist/test"
-	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/stretchr/testify/require"
 )
 

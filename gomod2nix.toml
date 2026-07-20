@@ -1,6 +1,11 @@
 schema = 3
 
 [mod]
+  [mod.'code.linenisgreat.com/purse-first/libs/dewey']
+    version = 'v0.5.0'
+    hash = 'sha256-WaAb5xVdkek2jtlcD8y+99VuZyAoCVzezyIrs5X9Mbg='
+    goVersion = '1.26'
+
   [mod.'github.com/BurntSushi/toml']
     version = 'v1.6.0'
     hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
@@ -10,11 +15,6 @@ schema = 3
     version = 'v0.5.3'
     hash = 'sha256-bo6tBgHS+3sl6f4oWpmdFrZjfV6eA/3xAlysSW0bIEs='
     goVersion = '1.19'
-
-  [mod.'github.com/amarbel-llc/purse-first/libs/dewey']
-    version = 'v0.3.1'
-    hash = 'sha256-JenpYLuvp7oAgmrgEJbW6YEEljCJeApCQrJZou2tEo4='
-    goVersion = '1.26'
 
   [mod.'github.com/atotto/clipboard']
     version = 'v0.1.4'

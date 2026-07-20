@@ -21,7 +21,7 @@ import (
 	"code.linenisgreat.com/conformist/stats"
 	"code.linenisgreat.com/conformist/test"
 	"code.linenisgreat.com/conformist/walk"
-	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/charmbracelet/log"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"

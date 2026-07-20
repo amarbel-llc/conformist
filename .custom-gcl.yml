@@ -9,6 +9,6 @@
 # Keep the version in sync with the purse-first build (currently v2.12.2).
 version: v2.12.2
 plugins:
-  - module: github.com/amarbel-llc/purse-first/libs/dewey
-    import: github.com/amarbel-llc/purse-first/libs/dewey/gclplugin
+  - module: code.linenisgreat.com/purse-first/libs/dewey
+    import: code.linenisgreat.com/purse-first/libs/dewey/gclplugin
     version: latest

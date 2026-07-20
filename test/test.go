@@ -8,7 +8,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"code.linenisgreat.com/conformist/config"
-	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/test_ui"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"

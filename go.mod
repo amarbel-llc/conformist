@@ -3,9 +3,9 @@ module code.linenisgreat.com/conformist
 go 1.26.1
 
 require (
+	code.linenisgreat.com/purse-first/libs/dewey v0.5.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/adrg/xdg v0.5.3
-	github.com/amarbel-llc/purse-first/libs/dewey v0.3.1
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/clarete/langlang/go v0.0.12
