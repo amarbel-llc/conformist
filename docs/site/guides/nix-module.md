@@ -96,7 +96,7 @@ conformist's defining adoption win is a **toolchain-hermetic** git hook: one tha
 formats staged files with the *same* pinned formatters as `nix fmt`, never
 silently skipping a file type because its formatter happens to be absent from the
 author's `PATH` (the silent-skip trap of
-[conformist#51](https://github.com/amarbel-llc/conformist/issues/51)). How you
+[conformist#51](https://code.linenisgreat.com/conformist/issues/51)). How you
 obtain it depends on which of two **consumer shapes** you are. Both yield the
 same two named hook commands — `conformist-pre-commit`
 (`--staged --exit-zero-on-fix`) and `conformist-repair`
@@ -262,7 +262,7 @@ conformistEval = conformist.lib.evalModule pkgs {
     read-only `conformist check` sandbox** (the `checks.<name>` gate), where
     `/usr/bin/env` does not exist — and the failure is **masked outside the
     sandbox**, where a dev shell does have `/usr/bin/env`
-    ([conformist#19](https://github.com/amarbel-llc/conformist/issues/19)).
+    ([conformist#19](https://code.linenisgreat.com/conformist/issues/19)).
     `writeCheckScript` resolves the shebang for you; if you must hand-roll, run
     `patchShebangs $out/bin` **before** `wrapProgram`.
 
@@ -297,7 +297,7 @@ pre-commit = "conformist-fmt --staged --exit-zero-on-fix"
     the **bare** conformist, which resolves each formatter's `command` from
     `PATH`. If gofumpt/nixfmt/… aren't on the author's PATH at commit time, the
     staged repair **silently skips** those file types
-    ([conformist#51](https://github.com/amarbel-llc/conformist/issues/51)).
+    ([conformist#51](https://code.linenisgreat.com/conformist/issues/51)).
     Module adopters avoid this with `build.preCommit` (store-pinned commands);
     a hand-written-config repo uses `mkToolchainHooks` (or `wrapWithToolchain`)
     as above. See `eng-design_patterns-conformist(7)` "THE CWD-AWARE WRAPPER".
