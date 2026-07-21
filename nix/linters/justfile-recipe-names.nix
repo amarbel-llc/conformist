@@ -1,9 +1,9 @@
 # conformist-justfile(7) VERB LIST: every recipe follows a verb-noun pattern
 # where the verb is one of the canonical verbs. Whole-tree check
 # (passes-files=false): reads recipe names via `just --summary`, takes no file
-# arguments. conformist-justfile(7) VERB LIST is the source of truth for the verb
-# set below; it mirrors eng-design_patterns-justfile(7) VERB CATEGORIES (the prose
-# origin) — keep the two in sync.
+# arguments. conformist-justfile(7) VERB LIST is the single source of truth for
+# the verb set below (it absorbed eng-design_patterns-justfile(7)'s prose,
+# eng#189) — keep this hardcoded mirror in sync with that page alone.
 #
 # Exceptions: `default` (the special first recipe) and the eng-versioning(7)
 # release recipes `tag` / `release` (which are not verb-noun by convention).
@@ -46,7 +46,7 @@ let
         case "$verbs" in
         *" $first "*) continue ;;
         esac
-        echo "justfile-recipe-names: '$name' does not start with a known verb (eng-design_patterns-justfile(7))" >&2
+        echo "justfile-recipe-names: '$name' does not start with a known verb (conformist-justfile(7) VERB LIST)" >&2
         fail=1
       done < <(just --summary | tr ' ' '\n')
 
@@ -59,7 +59,7 @@ let
 in
 {
   options.linters.justfile-recipe-names = {
-    enable = lib.mkEnableOption "the verb-noun recipe-naming whole-tree check (eng-design_patterns-justfile(7))";
+    enable = lib.mkEnableOption "the verb-noun recipe-naming whole-tree check (conformist-justfile(7))";
   };
 
   config = lib.mkIf cfg.enable {
