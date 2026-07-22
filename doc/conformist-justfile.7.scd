@@ -35,7 +35,8 @@ The verb is the first _-_-delimited segment and MUST be one of the canonical
 verbs:
 
 	build test validate verify lint run list codemod
-	install deploy load bump update clean debug explore
+	install deploy load migrate provision restart bump update clean debug
+	explore
 
 The version-release recipes *tag* and *release* and the entrypoint *default*
 are exempt from verb-noun. Enforced by *justfile-recipe-names*. This list is
@@ -139,6 +140,26 @@ ALSO for the underlying references.
 	is already installed. Inverse of stop (no formal verb yet).
 	Examples: _load-agents_, _load-tent-image_.
 
+*migrate*
+	One-way transformation of data or infrastructure from one
+	system / shape to another. Distinct from *update* in that migration
+	changes _where_ or _what_ the thing is, while update refreshes it in
+	place.
+	Examples: _migrate-repos_ (eng's GitHub-to-forge fleet migration),
+	_migrate-session_.
+
+*provision*
+	Stand up or configure infrastructure, services, or credentials on a
+	host or remote. Distinct from *install* in that provision targets
+	infrastructure / remotes rather than the local machine, and is
+	typically idempotent-reconciling rather than a one-shot deploy.
+	Examples: _provision-headscale_, _provision-forge-split-horizon_.
+
+*restart*
+	Stop and start an already-running service or agent; the recovery
+	complement of *load*.
+	Examples: _restart-piggy-agent_.
+
 *bump*
 	Update a pinned version reference to a specific new value.
 	Distinct from *update* in that bump pins to an explicit target,
@@ -203,9 +224,10 @@ no aggregate. The enforceable form splits on the leaf's verb:
   or _codemod_ — MUST belong to *exactly one* aggregate. These are the recipes
   the build-and-verify pipeline composes: an un-aggregated one is unreachable
   from _default_, and one in two aggregates is duplicated work.
-- *Other leaves* — verb _run_, _list_, _install_, _deploy_, _load_, _bump_,
-  _update_, _clean_, _debug_, _explore_, plus _tag_ and _release_ — MAY be
-  orphans (standalone), but MUST NOT belong to more than one aggregate.
+- *Other leaves* — verb _run_, _list_, _install_, _deploy_, _load_, _migrate_,
+  _provision_, _restart_, _bump_, _update_, _clean_, _debug_, _explore_, plus
+  _tag_ and _release_ — MAY be orphans (standalone), but MUST NOT belong to
+  more than one aggregate.
 - *Private* recipes (underscore-prefixed or _[private]_) are exempt entirely.
 
 Enforced by *justfile-task-hierarchy*.

@@ -5,8 +5,9 @@
 #   - PIPELINE-VERB leaves (verb build/test/validate/verify/lint/codemod) MUST
 #     belong to EXACTLY ONE aggregate — un-aggregated => unreachable from default;
 #     in two => duplicated work.
-#   - OTHER leaves (run/list/install/deploy/load/bump/update/clean/debug/explore,
-#     plus tag/release) MAY be orphans but MUST NOT belong to more than one.
+#   - OTHER leaves (run/list/install/deploy/load/migrate/provision/restart/
+#     bump/update/clean/debug/explore, plus tag/release) MAY be orphans but
+#     MUST NOT belong to more than one.
 #   - Private recipes are exempt.
 # Whole-tree check (passes-files=false): reads `just --dump --dump-format json`,
 # takes no file arguments. `mod`-imported child justfiles are included

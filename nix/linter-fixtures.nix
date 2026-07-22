@@ -1077,6 +1077,37 @@ let
         '';
       };
     })
+    # justfile-recipe-names: the operational verbs migrate/provision/restart
+    # (conformist-justfile(7) VERB LIST, eng#270) are canonical and pass...
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-names";
+      label = "operational-verbs-pass";
+      files = {
+        "justfile" = ''
+          migrate-foo:
+              echo migrate
+
+          provision-bar:
+              echo provision
+
+          restart-baz:
+              echo restart
+        '';
+      };
+    })
+    # ...while a verb that still isn't in the canonical list is rejected.
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-names";
+      label = "still-unknown-verb-fail";
+      files = {
+        "justfile" = ''
+          frobnicate-widget:
+              echo nope
+        '';
+      };
+      expectFail = true;
+      expectToken = "does not start with a known verb";
+    })
     (mkLinterFixtureCheck {
       name = "justfile-recipe-names";
       label = "module-bad-verb-fail";

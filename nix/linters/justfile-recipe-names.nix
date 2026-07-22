@@ -28,7 +28,7 @@ let
         exit 1
       }
 
-      verbs=" build test validate verify lint run list codemod install deploy load bump update clean debug explore "
+      verbs=" build test validate verify lint run list codemod install deploy load migrate provision restart bump update clean debug explore "
       exceptions=" default tag release "
       fail=0
 
