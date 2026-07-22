@@ -29,11 +29,16 @@ let
         exit 1
       }
 
-      # Names of recipes in the debug/explore groups whose doc comment is empty.
-      # `just` derives `doc` from the comment immediately above the recipe; a
-      # group attribute serializes as {"group":"<name>"}.
+      # Names of LEAF recipes (have a body) in the debug/explore groups whose
+      # doc comment is empty. `just` derives `doc` from the comment immediately
+      # above the recipe; a group attribute serializes as {"group":"<name>"}.
+      # Bodyless (aggregate) recipes are exempt — conformist-justfile(7)
+      # AGGREGATES AND LEAVES + the justfile-aggregate-comments linter forbid an
+      # aggregate from carrying a doc comment at all, exactly as
+      # justfile-recipe-descriptions already scopes itself to leaves (conformist#96).
       filter='.recipes | to_entries[]
         | select([.value.attributes[]? | .group?] | any(. == "debug" or . == "explore"))
+        | select((.value.body | length) > 0)
         | select((.value.doc // "") == "")
         | .key'
 

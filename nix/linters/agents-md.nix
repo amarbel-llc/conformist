@@ -17,6 +17,13 @@
 # patched for the sandbox (cf. conformist#19). Lives in the impure self-check lane
 # (nix/conformist-impure.nix): repair needs a live .git, and the check must see
 # the real CLAUDE.md symlink in the working tree, not a /nix/store source copy.
+#
+# The nested-CLAUDE.md walk is scoped to git-TRACKED files (`git ls-files`)
+# when a live worktree is present, falling back to a plain `find` outside one
+# — so a gitignored child checkout (e.g. a monorepo's vendored `repos/**`)
+# never surfaces a finding. `exclude-paths` additionally opts a
+# legitimately-named payload (a deployed dotfile whose filename IS the
+# product) out of the walk entirely (conformist#95).
 {
   config,
   lib,
@@ -31,10 +38,26 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       findutils
+      git
     ];
     text = ''
       # cwd is the tree root; this whole-tree check takes no file arguments.
       findings=0
+
+      excludePaths=(${lib.escapeShellArgs cfg.exclude-paths})
+
+      # $1 matches an exclude-paths entry (glob, repo-relative) — deliberately
+      # unquoted in the case pattern so each entry can glob (conformist#95).
+      is_excluded() {
+        local f="$1" pat
+        for pat in "''${excludePaths[@]}"; do
+          # shellcheck disable=SC2254
+          case "$f" in
+            $pat) return 0 ;;
+          esac
+        done
+        return 1
+      }
 
       if [ -L CLAUDE.md ]; then
         target=$(readlink CLAUDE.md)
@@ -55,13 +78,30 @@ let
       fi
 
       # Nested CLAUDE.md regular files are reported, not auto-migrated (#18 v1).
+      # Scoped to git-TRACKED files when inside a live worktree — this lane is
+      # impure and already requires one (conformist-impure.nix) — so a
+      # gitignored child checkout (e.g. eng's vendored `repos/**`) never
+      # surfaces here; a plain-find fallback covers the rare non-git tree.
+      # `exclude-paths` lets a legitimately-named payload (a deployed dotfile
+      # whose filename IS the product, e.g. rcm/claude/CLAUDE.md) opt out
+      # entirely (conformist#95).
+      if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        nested=$(git ls-files | grep -E '(^|/)CLAUDE\.md$' || true)
+      else
+        nested=$(find . -name CLAUDE.md -type f -not -path './.git/*' | sed 's|^\./||')
+      fi
+
       while IFS= read -r f; do
-        if [ "$f" = "./CLAUDE.md" ]; then
+        [ -n "$f" ] || continue
+        if [ "$f" = "CLAUDE.md" ]; then
           continue # root regular file already handled above
+        fi
+        if is_excluded "$f"; then
+          continue
         fi
         echo "agents-md: nested $f should be migrated to AGENTS.md by hand" >&2
         findings=1
-      done < <(find . -name CLAUDE.md -type f -not -path './.git/*')
+      done <<< "$nested"
 
       # Size budget: an orientation doc that grows unbounded stops being
       # something an agent actually reads. No repair — trimming prose is a
@@ -114,6 +154,18 @@ in
       type = lib.types.ints.positive;
       default = 40000;
       description = "Maximum character count for AGENTS.md before the check flags it as too large.";
+    };
+
+    exclude-paths = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "rcm/claude/CLAUDE.md" ];
+      description = ''
+        Repo-relative paths (glob patterns, matched against git-tracked paths)
+        to exclude from the nested-CLAUDE.md walk — for a legitimately-named
+        payload whose filename IS the product (e.g. a deployed dotfile),
+        rather than a convention violation (conformist#95).
+      '';
     };
   };
 

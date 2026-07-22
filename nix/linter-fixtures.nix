@@ -109,6 +109,125 @@ let
       touch $out
     '';
 
+  # ---- agents-md: nested-CLAUDE.md walk scoping (conformist#95) -----------
+  #
+  # The nested-CLAUDE.md walk is scoped to git-TRACKED files when a live
+  # worktree is present, so a gitignored child checkout never surfaces a
+  # finding, and `exclude-paths` opts a legitimately-named payload out
+  # explicitly. This needs real git state (tracked vs. merely-on-disk), which
+  # mkLinterFixtureCheck's bare file-copy sandbox can't express — so, like
+  # git-remotes below, this `git init`s a throwaway repo instead.
+  #
+  # label       : fixture label (derivation suffix)
+  # enableModule: extra options merged into `linters.agents-md` (e.g.
+  #               { exclude-paths = [ ... ]; })
+  # setup       : shell snippet run after `git init -q` to create/stage files
+  # expectFail  : true => the check MUST exit non-zero
+  # expectToken : optional substring the check output MUST contain
+  mkAgentsMdWalkFixture =
+    {
+      label,
+      enableModule ? { },
+      setup,
+      expectFail ? false,
+      expectToken ? null,
+    }:
+    let
+      mod = lib.evalModule pkgs {
+        enableDefaultExcludes = false;
+        linters.agents-md = {
+          enable = true;
+        }
+        // enableModule;
+      };
+      cmd = mod.config.settings.linter.agents-md.command;
+
+      assertExit =
+        if expectFail then
+          ''
+            if [ "$rc" -eq 0 ]; then
+              echo "FIXTURE FAIL: expected agents-md to reject ${label}, but it exited 0" >&2
+              exit 1
+            fi
+          ''
+        else
+          ''
+            if [ "$rc" -ne 0 ]; then
+              echo "FIXTURE FAIL: expected agents-md to pass ${label}, but it exited $rc" >&2
+              exit 1
+            fi
+          '';
+
+      assertToken = nixlib.optionalString (expectToken != null) ''
+        if ! grep -qF ${nixlib.escapeShellArg expectToken} out.log; then
+          echo "FIXTURE FAIL: agents-md ${label} output did not contain ${nixlib.escapeShellArg expectToken}" >&2
+          exit 1
+        fi
+      '';
+    in
+    pkgs.runCommandLocal "linter-fixture-agents-md-walk-${label}"
+      {
+        nativeBuildInputs = [ pkgs.git ];
+      }
+      ''
+        export HOME="$PWD/home"
+        mkdir -p "$HOME"
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+        mkdir fixture && cd fixture
+        git init -q
+
+        ${setup}
+
+        if ${cmd} >out.log 2>&1; then rc=0; else rc=$?; fi
+        cat out.log
+
+        ${assertExit}
+        ${assertToken}
+
+        touch $out
+      '';
+
+  agentsMdWalkFixtures = [
+    # A nested CLAUDE.md that sits in a gitignored subtree (never `git add`ed —
+    # eng's vendored `repos/**` child checkouts are the motivating case) must
+    # not surface a finding: the walk only sees git-tracked paths.
+    (mkAgentsMdWalkFixture {
+      label = "gitignored-nested-pass";
+      setup = ''
+        mkdir -p vendor/child
+        printf 'vendor/\n' > .gitignore
+        printf 'nested\n' > vendor/child/CLAUDE.md
+        git add .gitignore
+      '';
+    })
+
+    # A nested CLAUDE.md that IS git-tracked must still be flagged.
+    (mkAgentsMdWalkFixture {
+      label = "tracked-nested-fail";
+      setup = ''
+        mkdir -p sub
+        printf 'nested\n' > sub/CLAUDE.md
+        git add sub/CLAUDE.md
+      '';
+      expectFail = true;
+      expectToken = "nested sub/CLAUDE.md should be migrated";
+    })
+
+    # A tracked nested CLAUDE.md whose path is explicitly excluded (a deployed
+    # dotfile payload where the filename IS the product) must pass.
+    (mkAgentsMdWalkFixture {
+      label = "tracked-excluded-pass";
+      enableModule = {
+        exclude-paths = [ "rcm/claude/CLAUDE.md" ];
+      };
+      setup = ''
+        mkdir -p rcm/claude
+        printf 'payload\n' > rcm/claude/CLAUDE.md
+        git add rcm/claude/CLAUDE.md
+      '';
+    })
+  ];
+
   # ---- git-remotes: a live-git linter (check reads remotes, repair mutates) ----
   #
   # Unlike the pure whole-tree checks above, git-remotes reads live git state
@@ -795,6 +914,43 @@ let
       expectFail = true;
       expectToken = "no doc comment";
     })
+    # conformist#96: a bodyless (aggregate) debug recipe is exempt — it must
+    # PASS even with no doc comment, since justfile-aggregate-comments forbids
+    # an aggregate from carrying one at all (the two linters would otherwise be
+    # unsatisfiable together).
+    (mkLinterFixtureCheck {
+      name = "justfile-debug-recipes";
+      label = "aggregate-uncommented-pass";
+      files = {
+        "justfile" = ''
+          # probe the widget cache for the cache-eviction dev-loop (see #1)
+          [group('debug')]
+          debug-widget-cache:
+              echo hi
+
+          [group('debug')]
+          debug-widget: debug-widget-cache
+        '';
+      };
+    })
+    # A debug LEAF without a comment must still FAIL even when a sibling debug
+    # aggregate is present (guards against the aggregate exemption over-matching).
+    (mkLinterFixtureCheck {
+      name = "justfile-debug-recipes";
+      label = "leaf-still-fails-beside-aggregate";
+      files = {
+        "justfile" = ''
+          [group('debug')]
+          debug-widget-cache:
+              echo hi
+
+          [group('debug')]
+          debug-widget: debug-widget-cache
+        '';
+      };
+      expectFail = true;
+      expectToken = "no doc comment";
+    })
 
     # justfile-recipe-descriptions: every leaf recipe carries a doc comment
     # (eng-design_patterns-justfile(7) RECIPE DESCRIPTIONS, conformist#17).
@@ -1130,7 +1286,7 @@ let
     })
   ];
 
-  allFixtures = fixtures ++ gitRemotesFixtures ++ deadnixFixtures;
+  allFixtures = fixtures ++ agentsMdWalkFixtures ++ gitRemotesFixtures ++ deadnixFixtures;
 in
 builtins.listToAttrs (
   map (d: {
