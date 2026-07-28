@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	flakeparse "code.linenisgreat.com/conformist/cmd/conform/flakeparse"
 )
 
 // minimalFlake is the smallest eachDefaultSystem flake that ParseFlake
@@ -193,7 +195,7 @@ func TestTokenIndex(t *testing.T) {
 		{"justPkg\n", "pkgs.just", -1},
 	}
 	for _, c := range cases {
-		got := tokenIndex(c.s, c.needle)
-		assert.Equal(t, c.want, got, "tokenIndex(%q, %q)", c.s, c.needle)
+		got := flakeparse.TokenIndex(c.s, c.needle)
+		assert.Equal(t, c.want, got, "TokenIndex(%q, %q)", c.s, c.needle)
 	}
 }

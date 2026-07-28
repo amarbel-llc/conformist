@@ -29,8 +29,6 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
-
-	flakeparse "code.linenisgreat.com/conformist/cmd/conform/flakeparse"
 )
 
 func main() {
@@ -84,7 +82,7 @@ func run(olds, news []string, apply bool, files []string) error {
 		out, report, clobberErr := Clobber(src, migrations)
 		if clobberErr != nil {
 			switch {
-			case errors.Is(clobberErr, flakeparse.ErrUnrecognized):
+			case errors.Is(clobberErr, ErrUnrecognized):
 				fmt.Fprintf(os.Stderr,
 					"error: %s: not the recognized eachDefaultSystem shape\n", path)
 			case errors.Is(clobberErr, ErrNoDevShell):

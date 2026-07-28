@@ -19,7 +19,7 @@ var ErrUnrecognized = errors.New("flakeparse: flake.nix is not the recognized ea
 // region and located outputs splice points. Returns ErrUnrecognized when
 // the file does not match the recognized eachDefaultSystem shape.
 func ParseFlake(src []byte) (InputsAttrSet, ParsedOutputs, error) {
-	matcher, err := newMatcher(nixEntry, nixGrammar)
+	matcher, err := nixMatcherOnce()
 	if err != nil {
 		return InputsAttrSet{}, ParsedOutputs{}, fmt.Errorf("flakeparse: compile grammar: %w", err)
 	}

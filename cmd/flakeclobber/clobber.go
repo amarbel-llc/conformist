@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"slices"
+	"sort"
 	"strings"
 
 	flakeparse "code.linenisgreat.com/conformist/cmd/conform/flakeparse"
@@ -48,13 +48,13 @@ type elementStatus int
 const (
 	elementPending   elementStatus = iota // Old present, New absent → needs migration
 	elementSatisfied                      // Old absent, New present (or deleted) → done
-	elementUnknown                        // neither Old nor New found → unexpected state
+	elementUnknown                        // neither Old nor New found → N/A
 	elementConflict                       // both Old and New found → ambiguous
 )
 
 // checkElement determines the status of one migration entry within inner.
 func checkElement(inner string, m ListElementMigration) elementStatus {
-	hasOld := tokenIndex(inner, m.Old) >= 0
+	hasOld := flakeparse.TokenIndex(inner, m.Old) >= 0
 	if m.New == "" {
 		// Deletion: satisfied when Old is absent.
 		if hasOld {
@@ -63,7 +63,7 @@ func checkElement(inner string, m ListElementMigration) elementStatus {
 
 		return elementSatisfied
 	}
-	hasNew := tokenIndex(inner, m.New) >= 0
+	hasNew := flakeparse.TokenIndex(inner, m.New) >= 0
 	switch {
 	case hasOld && hasNew:
 		return elementConflict
@@ -106,13 +106,26 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 		entries[i] = entry{m: m, status: checkElement(ls.Inner, m)}
 	}
 
-	var pending, satisfied int
+	var (
+		report    ClobberReport
+		pending   int
+		satisfied int
+	)
+
 	for _, e := range entries {
 		switch e.status {
 		case elementPending:
 			pending++
 		case elementSatisfied:
 			satisfied++
+			if e.m.New != "" {
+				report.Satisfied = append(
+					report.Satisfied,
+					fmt.Sprintf("%q already replaced with %q", e.m.Old, e.m.New),
+				)
+			} else {
+				report.Satisfied = append(report.Satisfied, fmt.Sprintf("%q already removed", e.m.Old))
+			}
 		case elementUnknown:
 			// N/A: neither Old nor New found; migration doesn't apply to this
 			// file. Do not count toward partial-state detection.
@@ -126,21 +139,7 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 
 	// All satisfied/N/A → idempotent no-op.
 	if pending == 0 {
-		report := ClobberReport{}
-		for _, e := range entries {
-			if e.status != elementSatisfied {
-				continue // skip N/A entries
-			}
-			if e.m.New != "" {
-				report.Satisfied = append(
-					report.Satisfied,
-					fmt.Sprintf("%q already replaced with %q", e.m.Old, e.m.New),
-				)
-			} else {
-				report.Satisfied = append(report.Satisfied, fmt.Sprintf("%q already removed", e.m.Old))
-			}
-		}
-
+		report.Applied = nil // already set in loop above
 		return src, report, nil
 	}
 
@@ -149,11 +148,9 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 		return src, ClobberReport{}, ErrPartialState
 	}
 
-	// All pending → build splices.
-	var (
-		report  ClobberReport
-		splices []flakeparse.Splice
-	)
+	// All pending → build splices and apply highest-offset first so earlier
+	// offsets stay valid (same invariant as flakeedit.Apply).
+	var splices []flakeparse.Splice
 
 	for _, e := range entries {
 		if e.status != elementPending {
@@ -174,8 +171,9 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 		}
 	}
 
+	sort.Slice(splices, func(i, j int) bool { return splices[i].Offset > splices[j].Offset })
 	out := src
-	for _, s := range slices.Backward(splices) {
+	for _, s := range splices {
 		out = s.ApplyTo(out)
 	}
 
@@ -186,17 +184,12 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 // returns a Splice that replaces it with m.New (or removes its line when New
 // is ""). ok is false when Old is not found as a token.
 func listElementSplice(src []byte, ls flakeparse.ListSplice, m ListElementMigration) (flakeparse.Splice, bool) {
-	inner := ls.Inner
-
-	idx := tokenIndex(inner, m.Old)
+	idx := flakeparse.TokenIndex(ls.Inner, m.Old)
 	if idx < 0 {
 		return flakeparse.Splice{}, false
 	}
 
-	// inner[0] is the '[' at absolute offset (ls.CloseOff - len(inner) + 1).
-	innerStart := ls.CloseOff - len(inner) + 1
-
-	oldStart := innerStart + idx
+	oldStart := ls.InnerStart() + idx
 	oldEnd := oldStart + len(m.Old)
 
 	if m.New == "" {
@@ -218,33 +211,4 @@ func listElementSplice(src []byte, ls flakeparse.ListSplice, m ListElementMigrat
 	}
 
 	return flakeparse.Splice{Offset: oldStart, End: oldEnd, Text: m.New}, true
-}
-
-// tokenIndex returns the byte offset of needle within s when needle appears
-// as a complete identifier token. Returns -1 when not found.
-func tokenIndex(s, needle string) int {
-	for i := 0; i <= len(s)-len(needle); i++ {
-		if s[i:i+len(needle)] != needle {
-			continue
-		}
-		if i > 0 && isIdentChar(rune(s[i-1])) {
-			continue
-		}
-		end := i + len(needle)
-		if end < len(s) && isIdentChar(rune(s[end])) {
-			continue
-		}
-
-		return i
-	}
-
-	return -1
-}
-
-// isIdentChar reports whether r can appear inside a Nix identifier or dotted
-// attr-path.
-func isIdentChar(r rune) bool {
-	return r == '_' || r == '-' || r == '\'' || r == '.' ||
-		(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		(r >= '0' && r <= '9')
 }

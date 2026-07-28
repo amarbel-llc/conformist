@@ -52,6 +52,9 @@ type ListSplice struct {
 	Inner    string
 }
 
+// InnerStart returns the absolute source offset of Inner[0] (the '[').
+func (ls ListSplice) InnerStart() int { return ls.CloseOff - len(ls.Inner) + 1 }
+
 // ValueRange is the absolute [Start, End) byte range of a binding's value.
 type ValueRange struct {
 	Start int
@@ -99,7 +102,7 @@ func outputsValueSpan(tree langlang.Tree) (start, end int, ok bool) {
 // byte of the substring and would lose its real indentation.
 func parseOutputs(src []byte, base, end int) (ParsedOutputs, bool) {
 	sub := src[base:end]
-	matcher, err := newMatcher(outputsEntry, outputsGrammar)
+	matcher, err := outputsMatcherOnce()
 	if err != nil {
 		return ParsedOutputs{}, false
 	}

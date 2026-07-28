@@ -3,6 +3,7 @@ package flakeparse
 import (
 	_ "embed"
 	"fmt"
+	"sync"
 
 	langlang "github.com/clarete/langlang/go"
 )
@@ -18,14 +19,24 @@ const (
 	outputsEntry = "outputs.peg"
 )
 
-// newMatcher compiles a CST-mode PEG grammar into a langlang Matcher via
+// Grammars are embedded constants; compile each once per process lifetime.
+var (
+	nixMatcherOnce = sync.OnceValues(func() (langlang.Matcher, error) {
+		return compileMatcher(nixEntry, nixGrammar)
+	})
+	outputsMatcherOnce = sync.OnceValues(func() (langlang.Matcher, error) {
+		return compileMatcher(outputsEntry, outputsGrammar)
+	})
+)
+
+// compileMatcher compiles a CST-mode PEG grammar into a langlang Matcher via
 // the in-memory loader. The grammars manage whitespace explicitly via
 // Trivia rules, so langlang's automatic Spacing injection is disabled.
 //
 // Ported from amarbel-llc/doppelgang internal/0/nixedit/walk.go.
 //
 //nolint:ireturn // langlang.Matcher is the library's own interface type
-func newMatcher(entry string, grammar []byte) (langlang.Matcher, error) {
+func compileMatcher(entry string, grammar []byte) (langlang.Matcher, error) {
 	cfg := langlang.NewConfig()
 	cfg.SetBool("grammar.handle_spaces", false)
 	loader := langlang.NewInMemoryImportLoader()

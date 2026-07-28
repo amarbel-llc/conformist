@@ -437,7 +437,7 @@ func devShellMergeSplice(src []byte, ls flakeparse.ListSplice) (flakeparse.Splic
 	var body strings.Builder
 
 	for _, pkg := range devShellPackages {
-		if strings.Contains(ls.Inner, pkg) {
+		if flakeparse.TokenIndex(ls.Inner, pkg) >= 0 {
 			continue
 		}
 
