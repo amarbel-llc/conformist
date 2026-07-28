@@ -15,7 +15,7 @@ one-shot operational sweep tool, not a composable subcommand. It shares the
 shallow-Nix PEG infrastructure from `flakeedit` via a new `flakeparse`
 sub-package, generalizes the existing `splice` model to cover first-class
 replacements and deletions, and enforces a narrower invariant than flakeedit:
-it operates only on spans identified by an explicit migration table.
+it operates only on spans identified by operator-supplied migration entries.
 
 ## Background
 
@@ -163,13 +163,9 @@ plus a stable secondary comparator on `End` or entry index.
 
 flakeedit's invariant: **never clobbers an attr it did not write.**
 
-flakeclobber's invariant: **operates only on text spans matched by entries in
-an explicit migration table; refuses when the file shape is unrecognized or a
-matched span is not found in an expected state.**
-
-The invariant is enforced by restricting the scope of each migration entry (§4):
-entries target named, well-typed structures (list elements, not arbitrary
-spans), and the tool refuses rather than guesses when the target is absent.
+flakeclobber's invariant: **operates only on text spans matched by
+operator-supplied migration entries; refuses when the file shape is unrecognized
+or a matched span is not found in an expected state.**
 
 **Dry-run by default.** Without `--apply`, flakeclobber prints a plan of what
 it would change and exits 0 without modifying the file. This is the primary
@@ -186,122 +182,123 @@ requiring hand-migration.
 
 **Already-migrated refusal is a no-op.** When all migration entries are already
 satisfied (the file is fully migrated), flakeclobber exits 0. Dry-run output
-reads "nothing to do." This is the idempotent case, not an error.
+reads the list of satisfied entries. This is the idempotent case, not an error.
 
-**Partial state is an error.** If some entries are satisfied and others are not
-(e.g., `justPkg` is in the let block but `pkgs.just` is still in the packages
-list), flakeclobber refuses and exits non-zero. Partial application is not
+**N/A is a no-op.** When neither the old element nor the new element is present
+in the list, the migration simply does not apply to this file (e.g., a repo that
+never used `pkgs.just`). This is not an error. N/A entries are not counted
+toward satisfied entries and do not affect the partial-state check.
+
+**Partial state is an error.** If some entries are satisfied and others are
+pending (e.g., `justPkg` is already in the list but `pkgs.just` is also still
+present), flakeclobber refuses and exits non-zero. Partial application is not
 attempted; the operator must inspect and resolve manually.
 
-### 4. The Migration Table
+**Parse verification.** After building the candidate output bytes (when
+`--apply` is set), flakeclobber pipes them through `nix-instantiate --parse`
+before writing to disk. A migration that produces syntactically invalid Nix is
+rejected (file unchanged, exit 1). This closes the same class of bug that
+`just verify-flakeedit-parse` guards against.
 
-A migration is a named set of entries, each targeting a specific element type.
-The scope is intentionally limited to **list-element replacement**: find a bare
-identifier on its own indented line within a known Nix list, and replace it.
+### 4. The Migration Interface
 
-```
-type ListElementMigration struct {
-    // ID is a stable, unique identifier used in dry-run and error output.
-    ID string
-    // Description is the human-readable dry-run line.
-    Description string
-    // FindList locates the target list within the parsed outputs.
-    FindList func(out ParsedOutputs) (*ListSplice, bool)
-    // OldElement is the exact text of the list element to remove.
-    OldElement string
-    // NewElement replaces OldElement. Empty means pure deletion.
-    NewElement string
-}
-```
-
-Why list-element scope? `pkgs.just` is a bare identifier on its own line in a
-Nix list. Its span within the list's source text is unambiguous: scan for the
-line matching `\s+pkgs\.just\s*`. An attrset binding or arbitrary expression
-would require parsing the value to find its end — too much parser complexity
-for a one-shot migration tool. List elements are visually and syntactically
-simple, and the favourable property that `pkgs.just` is a bare identifier (not
-a function application or let-in expression) is what makes this scope safe.
-
-**The initial migration — `just-us-v1`:**
-
-List-element migration:
+Migrations are supplied at call time via `--old` and `--new` flags rather than
+a compiled-in table. Each `--old`/`--new` pair is one substitution. `--new` may
+be omitted or empty to delete the matched element.
 
 ```
-ListElementMigration{
-    ID:          "devshell-pkgs-just-to-justPkg",
-    Description: "replace pkgs.just with justPkg in devShells.default packages list",
-    FindList:    func(out ParsedOutputs) (*ListSplice, bool) {
-                     return out.DevShellPackages, out.DevShellPackages != nil
-                 },
-    OldElement:  "pkgs.just",
-    NewElement:  "justPkg",
-}
+flakeclobber --old pkgs.just --new justPkg [--apply] <file>...
 ```
 
-Additive operations (these use the same insertion model as flakeedit):
+**Why flags instead of an in-code table?** The initial RFC draft considered a
+`ListElementMigration` struct with `ID`, `Description`, and `FindList func`
+fields compiled into the binary. The flags approach was chosen instead:
 
-- **Input**: `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`
-  with `just-us.inputs.nixpkgs.follows = "nixpkgs"` only when `nixpkgs` is
-  already a top-level input name. This mirrors the conformist#83 fix: a follows
-  aimed at a missing input fails eval; flakeclobber checks
-  `InputsAttrSet.TopLevelNames()["nixpkgs"]` before adding the follows line.
-- **Outputs arg**: `just-us,` spliced just after the opening `{`.
-- **Let binding**: `justPkg = just-us.packages.${system}.default;` spliced just
-  before `in`.
+- A fleet sweep is a shell script that calls flakeclobber with fixed flags; the
+  script is the reviewable migration record, audited at the same PR as the sweep.
+- A compiled-in table would require rebuilding the binary for each new migration.
+  Flag-driven substitutions can be pipelined (multiple `--old`/`--new` pairs in
+  one invocation) without a recompile.
+- The `FindList` abstraction (§4 original draft) was designed to support multiple
+  target lists. In practice, the only migration target is
+  `devShells.default.packages`, which is hardcoded. Generalizing was YAGNI.
+
+**What flakeclobber targets.** The scope is **list-element replacement** within
+the `devShells.default.packages` list, which is the only destructive mutation
+required by the fleet migration. It does NOT:
+
+- Add inputs, outputs arguments, or let bindings (those are additive and can be
+  handled by `conform` once the destructive part is done and a repo reaches 4-of-4
+  `conformistLetNames`).
+- Edit any structure other than the `devShells.default.packages` list.
+
+**Scope of the initial fleet sweep (`pkgs.just` → `justPkg`):**
+
+The sweep script handles ALL four parts of the migration:
+
+1. **Destructive (flakeclobber):** `pkgs.just` → `justPkg` in packages list.
+2. **Additive (conform or manual):** `just-us` input, `justPkg` let binding,
+   `just-us` outputs arg — these need to be applied to repos at 3-of-4 names
+   before or after flakeclobber. Currently tracked as a gap: flakeedit refuses
+   3-of-4 repos entirely. The sweep operator must apply additive edits by hand
+   or via a separate tool until that gap is closed (tracked as conformist#N).
 
 **Finding the element span in the source.** Given `ListSplice{CloseOff, Inner}`:
 
 - `Inner` is the full text of the list including brackets, so `Inner[0] == '['`
   and `Inner[len(Inner)-1] == ']'`.
-- The absolute source offset of `[` is `CloseOff - len(Inner) + 1`. This is
-  cleanly encapsulated by a method `ListSplice.OpenOff() int`.
-- A position `i` within `Inner` maps to source offset `OpenOff() + i`.
+- The absolute source offset of `[` is `CloseOff - len(Inner) + 1`.
+- A position `i` within `Inner` maps to source offset
+  `(CloseOff - len(Inner) + 1) + i`.
 
-To locate `pkgs.just`: scan `Inner` for a line whose trimmed content is exactly
-`pkgs.just`. If it appears more than once, fail loudly (ambiguous). If it is
-absent but `justPkg` is present at the same position, the entry is
-already-migrated → idempotent skip. If neither is found, the state is
-unexpected → fail loudly.
+To locate `pkgs.just`: scan `Inner` for the needle as a complete token
+(bounded by non-identifier chars). The resulting splice is a **Replace** covering
+only the token span (`oldStart` to `oldEnd`), or a whole-line deletion when the
+deletion case (`--new ""`) leaves the line otherwise blank.
 
-The resulting splice is a **Replace** covering the full line (from the start of
-its leading whitespace through the trailing newline) with the equivalent line
-using `NewElement` and the same indentation.
+The token boundary check uses `isIdentChar(r)` (identifiers, dotted attr-paths,
+`_`, `-`, `'`). This prevents `pkgs.just` from matching inside `pkgs.just-more`
+or `not-pkgs.just`.
 
 ### 5. Idempotency and Verification
 
-**Idempotency per entry:**
+**Element state categorization.** For each `--old`/`--new` pair and the current
+packages list:
 
-| Entry type | Already-done signal | Action |
-|---|---|---|
-| List-element replace | `OldElement` absent, `NewElement` present | skip |
-| Input addition | `just-us` in `InputsAttrSet.TopLevelNames()` | skip |
-| Outputs arg | `just-us` in `ParsedOutputs.ArgNames` | skip |
-| Let binding | `justPkg` in `ParsedOutputs.LetExisting` | skip |
+| State | Old present | New present | Action |
+|---|---|---|---|
+| `pending` | yes | no | apply replacement |
+| `satisfied` | no | yes | idempotent skip |
+| `N/A` | no | no | migration doesn't apply to this file |
+| `conflict` | yes | yes | error: ambiguous state |
 
-All entries skipped → exit 0, "nothing to do."
-Any entries skipped but not all → partial state → exit non-zero, no edits.
+For deletion migrations (`--new ""`): satisfied when Old is absent; pending when
+Old is present.
 
-**Parse verification.** After building the candidate output bytes, flakeclobber
-pipes them through `nix-instantiate --parse` before writing to disk. A migration
-that produces syntactically invalid Nix is rejected (exit 2, file unchanged).
-This mirrors `just verify-flakeedit-parse` and closes the same class of bug:
-a splice that yields unparseable Nix is caught before it reaches a git commit.
+**Atomicity.** All-or-none within a single invocation:
+
+- All pending → apply all; exit 0.
+- All satisfied/N/A → exit 0, "nothing to do."
+- Some satisfied + some pending → **partial state** → exit 1, no edits.
+- Any conflict or unexpected state → exit 1, no edits.
+
+**Parse verification.** In `--apply` mode, the candidate bytes are piped through
+`nix-instantiate --parse /dev/stdin` before writing. If the parse fails, the
+file is not written and the exit is 1.
 
 **Fixture matrix for `just verify-flakeclobber-parse`** (a new recipe in the
 `verify` lane, parallel to `verify-flakeedit-parse`):
 
 | Fixture | Shape | Pre-migration state | Expected outcome |
 |---|---|---|---|
-| `old-wiring.nix` | eachDefaultSystem | conformistPkg/eval/impureEval in let; pkgs.just in packages; no just-us | migrate → parse-clean → exit 0 |
-| `already-migrated.nix` | eachDefaultSystem | justPkg in let; just-us in inputs; justPkg in packages | no-op → exit 0 |
+| `old-wiring.nix` | eachDefaultSystem | pkgs.just in packages | migrate → parse-clean → exit 0 |
+| `already-migrated.nix` | eachDefaultSystem | justPkg in packages (pkgs.just gone) | no-op → exit 0 |
 | `unrecognized.nix` | forAllSystems / other | (any) | refuse → exit 1 → file unchanged |
-| `eng-inputs.nix` | eachDefaultSystem | igloo + nixpkgs-master inputs; no top-level nixpkgs | migrate without `just-us.inputs.nixpkgs.follows`; parse-clean |
+| `no-devshell.nix` | eachDefaultSystem | no devShells.default packages list | error → exit 1 → file unchanged |
+| `no-just.nix` | eachDefaultSystem | neither pkgs.just nor justPkg in packages | N/A → exit 0 → file unchanged |
 
-The `eng-inputs.nix` fixture exercises the conformist#83 class: igloo-style repos
-use `igloo` and `nixpkgs-master` as top-level inputs but have no top-level
-`nixpkgs`. Adding `just-us.inputs.nixpkgs.follows = "nixpkgs"` would point a
-follows at a missing input and fail eval. flakeclobber must skip that follows
-line for any input dependency not present as a top-level name.
+Note: `verify-flakeclobber-parse` is not yet implemented. It is tracked as a
+follow-up.
 
 ### 6. Sweep Invocation
 
@@ -314,17 +311,20 @@ modelled on `bin/update-repo-in-session.bash`:
 set -euo pipefail
 repo="$1"
 
-# 1. Destructive flake.nix surgery.
-flakeclobber --apply "$repo/flake.nix"
+# 0. Additive wiring (just-us input, justPkg let binding, just-us arg).
+#    This step currently requires manual editing or a separate tool for
+#    repos at 3-of-4 conformistLetNames (see §4 scope note).
+
+# 1. Destructive flake.nix surgery (pkgs.just → justPkg in packages list).
+flakeclobber --apply --old pkgs.just --new justPkg "$repo/flake.nix"
 
 # 2. Fetch the new input (adds just-us to flake.lock).
 (cd "$repo" && nix flake update just-us)
 
-# 3. Stage the two changed files.
+# 3. Stage the changed files.
 (cd "$repo" && git add flake.nix flake.lock)
 
-# 4. Commit (conformist --commit runs the full gate inline if desired,
-#    but a plain commit is enough here; the gate runs at step 5).
+# 4. Commit.
 (cd "$repo" && git commit -m "chore: migrate devShells.default to just-us input")
 
 # 5. Pre-merge gate (just = validate build test verify lint).
@@ -336,9 +336,6 @@ sc run "$repo"
 flakeclobber is responsible only for editing `flake.nix` and validating the
 result with `nix-instantiate --parse`. It does not run `nix flake update`,
 commit, or push. Those steps belong to the sweep script.
-
-The `conformist.nix` change (enabling `justfile-orphan-summary`) is a separate
-step not included in this sweep — see §7.
 
 ## 7. Open Question: justfile-orphan-summary Timing
 
@@ -380,33 +377,29 @@ A single combined pass risks stalling the fleet sweep on repos where the
 justfile drift is non-trivial to fix, creating a false dependency between two
 independent concerns.
 
-## Interface Sketch
+## Interface
 
-These are type and function signatures to anchor the implementation; they are
-not final API. All are subject to the usual Go style and review process.
+These are the actual types and functions as implemented.
 
 ```go
-// Package flakeparse: shared PEG infrastructure (new package)
+// Package flakeparse: shared PEG infrastructure
 
 var ErrUnrecognized = errors.New(
     "flakeparse: flake.nix is not the recognized eachDefaultSystem shape",
 )
 
-type Splice struct{ Offset, End int; Text string }
+type Splice struct { Offset, End int; Text string }
 
 func (s Splice) ApplyTo(src []byte) []byte
 
 // ListSplice locates a Nix list for in-place operations.
 // Inner is the full source text of the list including brackets.
 // CloseOff is the absolute source offset of the closing ']'.
-type ListSplice struct{ CloseOff int; Inner string }
+type ListSplice struct { CloseOff int; Inner string }
 
-func (ls ListSplice) OpenOff() int { return ls.CloseOff - len(ls.Inner) + 1 }
+type ValueRange struct { Start, End int }
 
-type ValueRange struct{ Start, End int }
-
-type InputsAttrSet struct { /* existing fields, exported */ }
-func FindInputsAttrSet(tree langlang.Tree, src []byte) (InputsAttrSet, bool)
+type InputsAttrSet struct { /* ... */ }
 func (i InputsAttrSet) TopLevelNames() map[string]bool
 
 type ParsedOutputs struct {
@@ -423,27 +416,42 @@ type ParsedOutputs struct {
     FormatterValue   *ValueRange
 }
 
-func OutputsValueSpan(tree langlang.Tree) (start, end int, ok bool)
-func ParseOutputs(src []byte, base, end int) (ParsedOutputs, bool)
+func ParseFlake(src []byte) (InputsAttrSet, ParsedOutputs, error)
 
-// Package flakeclobber: migration binary (new)
+// Package flakeclobber: migration binary
 
+// ListElementMigration is one substitution within the devShells.default
+// packages list. Old is the token to find; New is the replacement (empty
+// means deletion).
 type ListElementMigration struct {
-    ID          string
-    Description string
-    FindList    func(out flakeparse.ParsedOutputs) (*flakeparse.ListSplice, bool)
-    OldElement  string
-    NewElement  string
+    Old string
+    New string
 }
 
 type ClobberReport struct {
-    Applied []string // entry IDs applied
-    Skipped []string // entry IDs that were already satisfied
+    Applied   []string // descriptions of applied migrations
+    Satisfied []string // descriptions of already-satisfied migrations
 }
 
-// Clobber applies the migration table to src and returns the rewritten
-// source. It returns ErrUnrecognized when the file is not the recognized
-// shape, and a non-nil error on partial state or unexpected element state.
-// src is returned unchanged on any error.
-func Clobber(src []byte, mig []ListElementMigration) ([]byte, ClobberReport, error)
+func (r ClobberReport) Changed() bool { return len(r.Applied) > 0 }
+
+// Clobber applies migrations to src and returns the rewritten source.
+//
+// Errors:
+//   - flakeparse.ErrUnrecognized: not the recognized eachDefaultSystem shape
+//   - ErrNoDevShell: no devShells.default packages list found
+//   - ErrPartialState: some entries satisfied, some pending; no edits applied
+//   - other non-nil: conflict (both old and new found) or operational failure
+//
+// src is always returned unchanged on any error.
+func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberReport, error)
+```
+
+Exit codes:
+
+```
+0 — all files processed (changes applied, already migrated, or dry-run)
+1 — one or more files could not be migrated (shape unrecognized,
+    partial state, parse failure); non-failing files still processed
+2 — operational error (bad flags, I/O failure)
 ```

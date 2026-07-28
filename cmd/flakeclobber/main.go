@@ -1,30 +1,36 @@
-// flakeclobber is a one-shot fleet-migration tool that applies targeted
-// list-element replacements to flake.nix files. It is a separate binary
-// from conformist: fleet sweeps are deliberate, not incidentally triggered
-// by conform walking a repo.
+// flakeclobber applies targeted list-element replacements to flake.nix files
+// as part of a fleet migration.
+//
+// By default flakeclobber runs in dry-run mode: it prints what it would
+// change and exits 0 without writing any file. Pass --apply to write.
+// When --apply is set, each rewritten file is verified via
+// nix-instantiate --parse before being written to disk.
 //
 // Usage:
 //
-//	flakeclobber [--old OLD --new NEW]... <file> [<file>...]
+//	flakeclobber [--old OLD --new NEW]... [--apply] <file>...
 //
 // Each --old/--new pair defines one substitution applied to every file.
-// --new may be omitted (or "") to delete the matched element. Files that
-// do not match the recognized eachDefaultSystem shape are skipped.
+// --new may be omitted (or "") to delete the matched element.
 //
 // Exit codes:
 //
-//	0 — all files processed (including skips); at least one file changed
-//	    when --require-change is not set (default permissive)
-//	1 — no files were changed (useful for --dry-run auditing)
-//	2 — operational error (parse failure, I/O, bad flags)
+//	0 — all files processed (changes applied, already migrated, or dry-run)
+//	1 — one or more files could not be migrated (shape unrecognized,
+//	    partial state, parse failure); non-failing files still processed
+//	2 — operational error (bad flags, I/O failure)
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
+
+	flakeparse "code.linenisgreat.com/conformist/cmd/conform/flakeparse"
 )
 
 func main() {
@@ -35,74 +41,110 @@ func main() {
 
 func newRoot() *cobra.Command {
 	var (
-		olds []string
-		news []string
+		olds  []string
+		news  []string
+		apply bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "flakeclobber [--old OLD --new NEW]... <file>...",
+		Use:   "flakeclobber [--old OLD --new NEW]... [--apply] <file>...",
 		Short: "fleet-migration list-element substitutions in flake.nix files",
 		Long: `flakeclobber applies targeted list-element replacements to flake.nix files.
-Each --old/--new pair is one substitution applied to every listed file.
-Files not matching the recognized eachDefaultSystem shape are skipped.`,
+
+By default it is a dry-run: changes are printed but no file is written.
+Pass --apply to write. Each --old/--new pair is one substitution.`,
 		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			return run(olds, news, args)
+			return run(olds, news, apply, args)
 		},
 	}
 
 	cmd.Flags().StringArrayVar(&olds, "old", nil, "element to replace (repeatable)")
 	cmd.Flags().StringArrayVar(&news, "new", nil, "replacement (parallel to --old; empty = delete)")
+	cmd.Flags().BoolVar(&apply, "apply", false, "write changes (default is dry-run)")
 
 	return cmd
 }
 
-func run(olds, news []string, files []string) error {
+func run(olds, news []string, apply bool, files []string) error {
 	migrations, err := buildMigrations(olds, news)
 	if err != nil {
 		return err
 	}
 
-	var changed int
+	var failures int
 
 	for _, path := range files {
-		src, err := os.ReadFile(path)
+		src, err := os.ReadFile(path) //nolint:gosec // G304: user-supplied path
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 
-		out, report, err := Clobber(src, migrations)
-		if err != nil {
-			return fmt.Errorf("%s: %w", path, err)
-		}
-
-		if report.Skipped != "" {
-			fmt.Fprintf(os.Stderr, "skip %s: %s\n", path, report.Skipped)
-
+		out, report, clobberErr := Clobber(src, migrations)
+		if clobberErr != nil {
+			switch {
+			case errors.Is(clobberErr, flakeparse.ErrUnrecognized):
+				fmt.Fprintf(os.Stderr,
+					"error: %s: not the recognized eachDefaultSystem shape\n", path)
+			case errors.Is(clobberErr, ErrNoDevShell):
+				fmt.Fprintf(os.Stderr,
+					"error: %s: no devShells.default packages list found\n", path)
+			default:
+				fmt.Fprintf(os.Stderr, "error: %s: %v\n", path, clobberErr)
+			}
+			failures++
 			continue
 		}
 
 		if !report.Changed() {
+			// Already migrated (or N/A): print satisfied entries and continue.
+			for _, s := range report.Satisfied {
+				fmt.Printf("%s: %s\n", path, s)
+			}
 			continue
 		}
 
-		err = os.WriteFile(path, out, 0o600) //nolint:gosec // G703: user-supplied paths
-		if err != nil {
+		// Changes to apply (or report in dry-run).
+		prefix := ""
+		if !apply {
+			prefix = "[dry-run] "
+		}
+		for _, a := range report.Applied {
+			fmt.Printf("%s: %s%s\n", path, prefix, a)
+		}
+
+		if !apply {
+			continue
+		}
+
+		if err := nixParseCheck(out); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s: %v\n", path, err)
+			failures++
+			continue
+		}
+
+		if err = os.WriteFile(path, out, 0o600); err != nil { //nolint:gosec // G306
 			return fmt.Errorf("write %s: %w", path, err)
 		}
-
-		for _, a := range report.Applied {
-			fmt.Printf("%s: %s\n", path, a)
-		}
-
-		changed++
 	}
 
-	if changed == 0 {
+	if failures > 0 {
 		os.Exit(1)
 	}
 
+	return nil
+}
+
+// nixParseCheck pipes src through nix-instantiate --parse to verify the
+// rewritten flake.nix is syntactically valid before writing it to disk.
+func nixParseCheck(src []byte) error {
+	cmd := exec.Command("nix-instantiate", "--parse", "/dev/stdin")
+	cmd.Stdin = bytes.NewReader(src)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("nix-instantiate --parse: %w", err)
+	}
 	return nil
 }
 
@@ -115,7 +157,9 @@ func buildMigrations(olds, news []string) ([]ListElementMigration, error) {
 		news = append(news, "")
 	}
 	if len(news) > len(olds) {
-		return nil, fmt.Errorf("more --new flags (%d) than --old flags (%d)", len(news), len(olds))
+		return nil, fmt.Errorf(
+			"more --new flags (%d) than --old flags (%d)", len(news), len(olds),
+		)
 	}
 
 	migrations := make([]ListElementMigration, len(olds))
