@@ -23,6 +23,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -53,8 +54,8 @@ By default it is a dry-run: changes are printed but no file is written.
 Pass --apply to write. Each --old/--new pair is one substitution.`,
 		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, args []string) error {
-			return run(olds, news, apply, args)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(cmd.Context(), olds, news, apply, args)
 		},
 	}
 
@@ -65,7 +66,7 @@ Pass --apply to write. Each --old/--new pair is one substitution.`,
 	return cmd
 }
 
-func run(olds, news []string, apply bool, files []string) error {
+func run(ctx context.Context, olds, news []string, apply bool, files []string) error {
 	migrations, err := buildMigrations(olds, news)
 	if err != nil {
 		return err
@@ -74,7 +75,7 @@ func run(olds, news []string, apply bool, files []string) error {
 	var failures int
 
 	for _, path := range files {
-		src, err := os.ReadFile(path) //nolint:gosec // G304: user-supplied path
+		src, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
@@ -92,6 +93,7 @@ func run(olds, news []string, apply bool, files []string) error {
 				fmt.Fprintf(os.Stderr, "error: %s: %v\n", path, clobberErr)
 			}
 			failures++
+
 			continue
 		}
 
@@ -100,6 +102,7 @@ func run(olds, news []string, apply bool, files []string) error {
 			for _, s := range report.Satisfied {
 				fmt.Printf("%s: %s\n", path, s)
 			}
+
 			continue
 		}
 
@@ -116,9 +119,10 @@ func run(olds, news []string, apply bool, files []string) error {
 			continue
 		}
 
-		if err := nixParseCheck(out); err != nil {
+		if err := nixParseCheck(ctx, out); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", path, err)
 			failures++
+
 			continue
 		}
 
@@ -136,13 +140,15 @@ func run(olds, news []string, apply bool, files []string) error {
 
 // nixParseCheck pipes src through nix-instantiate --parse to verify the
 // rewritten flake.nix is syntactically valid before writing it to disk.
-func nixParseCheck(src []byte) error {
-	cmd := exec.Command("nix-instantiate", "--parse", "/dev/stdin")
+func nixParseCheck(ctx context.Context, src []byte) error {
+	cmd := exec.CommandContext(ctx, "nix-instantiate", "--parse", "/dev/stdin")
 	cmd.Stdin = bytes.NewReader(src)
 	cmd.Stderr = os.Stderr
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("nix-instantiate --parse: %w", err)
 	}
+
 	return nil
 }
 

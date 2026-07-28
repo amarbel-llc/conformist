@@ -87,7 +87,7 @@ func checkElement(inner string, m ListElementMigration) elementStatus {
 func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberReport, error) {
 	_, outs, err := flakeparse.ParseFlake(src)
 	if err != nil {
-		return src, ClobberReport{}, err // caller distinguishes ErrUnrecognized
+		return src, ClobberReport{}, fmt.Errorf("flakeclobber: %w", err)
 	}
 
 	if outs.DevShellPackages == nil {
