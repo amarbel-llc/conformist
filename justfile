@@ -8,6 +8,8 @@ default: validate build test verify lint
 validate: validate-devshell
 
 # The devshell must evaluate and build before anything else is worth trying.
+#
+# build the devShell to prove it evaluates
 validate-devshell:
     nix build --no-link .#devShells.{{ arch() }}-linux.default
 
@@ -17,6 +19,8 @@ lint: lint-fmt lint-worktree lint-go
 
 # Read-only gate via the self-consumed conformist `checks.formatting` derivation
 # (a `conformist check` run; the read-only counterpart to the writing `nix fmt`).
+#
+# run the read-only formatting check
 lint-fmt:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -26,6 +30,8 @@ lint-fmt:
 # Non-sandbox lane: run the IMPURE git-state whole-tree checks (e.g. git-remotes)
 # against the WORKING TREE, where .git is available. These can't run in the
 # sandboxed checks.formatting. Builds the impure config + binary via nix.
+#
+# run the impure git-state checks against the working tree
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -43,6 +49,8 @@ lint-worktree:
 # sweatfile-pinned $WORKTREE/.tmp path — makes nolint/generated-file suppression
 # fail open and leaks spurious findings, a non-deterministic merge gate
 # (conformist#34). Per-$PWD isolation keeps each worktree's cache self-consistent.
+#
+# run golangci-lint over the Go sources
 lint-go:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -54,7 +62,9 @@ lint-go:
 
 build: build-gomod2nix build-go build-nix
 
-# Regenerate gomod2nix.toml from go.mod/go.sum. Run after changing deps.
+# Run after changing deps.
+#
+# regenerate gomod2nix.toml from go.mod/go.sum
 build-gomod2nix:
     nix develop --command gomod2nix
 
@@ -67,20 +77,24 @@ build-gomod2nix:
 # cmd/init/init.toml). MUST run on x86_64-linux: the graph embeds linux/amd64-only
 # sources, so regenerating on another host corrupts it (igloo#33). Run after
 # changing imports/deps/embeds, then commit; drift-checked by debug-godyn-graph-drift.
+#
+# regenerate godyn-graph.json for the opt-in godyn build backend
 [group("debug")]
 debug-godyn-graph:
     nix develop --command env CGO_ENABLED=0 godyn-gen . godyn-graph.json
 
 # Out-of-nix go build for a fast inner loop. Version/commit stay dev/unknown
 # here; the nix build injects the real values (eng-versioning(7)).
+#
+# build the conformist binary out-of-nix for a fast inner loop
 build-go: build-gomod2nix
     nix develop --command go build -o build/conformist .
 
-# Full nix build of the default package (injects the real version/commit).
+# full nix build of the default package (injects the real version/commit)
 build-nix:
     nix build --show-trace
 
-# Pass-through: `nix run` the conformist flake with ARGS.
+# pass-through: `nix run` the conformist flake with ARGS
 run-nix *ARGS:
     nix run . -- {{ ARGS }}
 
@@ -89,6 +103,8 @@ run-nix *ARGS:
 # `pre-commit = "conformist-pre-commit"` would. Verifies the new module output
 # end-to-end (`conformist --staged --exit-zero-on-fix` with the store config);
 # stage some files first. Manual dogfood loop, not in any aggregate / the CI lane.
+#
+# run the store-pinned pre-commit hook against the staged files
 [group("explore")]
 explore-pre-commit:
     #!/usr/bin/env bash
@@ -99,6 +115,8 @@ explore-pre-commit:
 # Build conformist's own generated conformist.toml via self.lib.evalModule and
 # cat it, to inspect the emitted [formatter.*] / [linter.*] stanzas. Verifies the
 # Nix module's config generation (issue #4) without a full check run.
+#
+# print conformist's own generated conformist.toml
 [group("explore")]
 explore-show-config:
     #!/usr/bin/env bash
@@ -111,6 +129,8 @@ explore-show-config:
 # commit it, and run the sandboxed formatting check — the adopter's `nix flake
 # init -t .#eng` path (templates/eng/, #17). Fetches conformist from github, so
 # needs network; template-maintenance dev-loop, not in any aggregate / the CI lane.
+#
+# smoke-test the eng flake template end-to-end
 [group("explore")]
 explore-template-eng:
     #!/usr/bin/env bash
@@ -133,6 +153,8 @@ explore-template-eng:
 # fails on a lint, passes when clean, and the repair --fix removes it. Pulls a
 # Rust toolchain, so it is kept OUT of the verify/CI lane and built on demand
 # here. See nix/linter-fixtures.nix (the clippy block).
+#
+# run the clippy linter behavioral fixtures
 [group("explore")]
 explore-clippy-fixture:
     #!/usr/bin/env bash
@@ -150,6 +172,8 @@ explore-clippy-fixture:
 # target. Same golangci-lint-dewey build and cache isolation as lint-go; run it,
 # then re-check with `just lint-go`. Diagnostic aid for lint-go failures, not in
 # any aggregate / the CI lane.
+#
+# auto-fix the golangci-lint findings that support --fix
 [group("debug")]
 debug-golangci-autofix:
     #!/usr/bin/env bash
@@ -167,6 +191,8 @@ debug-golangci-autofix:
 # cold favors bga (one `go build`, no per-package overhead); godyn wins the
 # leaf/found incremental edits (recompiles only the changed dependency cone).
 # Diagnostic only — not wired into any aggregate / the CI lane.
+#
+# benchmark the godyn and bga build backends
 [group("debug")]
 debug-bench-backends iterations="3":
     #!/usr/bin/env bash
@@ -332,6 +358,8 @@ verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse
 # fixture trees and asserts the exit code + output token (nix/linter-fixtures.nix,
 # conformist#17). Builds only the aggregate — NOT a full `nix flake check`, which
 # would also realize the ~130 registry smoke checks.
+#
+# run the whole-tree linter behavioral fixtures
 verify-linter-fixtures:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -347,6 +375,8 @@ verify-linter-fixtures:
 # ffmpeg chain cannot creep back in. Source-level grep (the remarshal dep is a
 # build-time, not runtime, closure member, so it can't be asserted against a
 # realized closure).
+#
+# guard against remarshal-backed format generators outside nix/default.nix
 verify-no-remarshal:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -367,6 +397,8 @@ verify-no-remarshal:
 # `nix-instantiate --parse` each rewritten flake, so a flakeedit splice regression
 # that yields unparseable Nix fails the lane. Syntax-only (--parse, no eval), so
 # it stays cheap. --force-formatter exercises the value-replacement splice too.
+#
+# check the flake editor's rewrites stay parseable Nix
 verify-flakeedit-parse:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -403,6 +435,8 @@ verify-flakeedit-parse:
 # godyn-gen emits a host-platform graph that always "differs" from the
 # linux-locked committed one (a false positive; igloo#33). Keeps the working tree
 # untouched (unlike debug-godyn-graph, which writes in place).
+#
+# check the committed godyn-graph.json for drift
 [group("debug")]
 debug-godyn-graph-drift:
     #!/usr/bin/env bash
@@ -426,6 +460,8 @@ debug-godyn-graph-drift:
 # mkShell yields a near-empty $out whose runtime closure omits the dev tools.
 # Mirrors papi's `debug-why-depends ffmpeg-headless`. Diagnostic only — not in any
 # aggregate / the CI lane.
+#
+# trace why a build pulls NEEDLE into its runtime and build-time closures
 [group("debug")]
 debug-why-depends needle target="":
     #!/usr/bin/env bash
@@ -469,6 +505,8 @@ debug-why-depends needle target="":
 # to JSON with a neutral parser, and asserts semantic equality. Finally feeds the
 # yj-generated TOML to conformist itself to confirm it parses (exit 0/1 = parsed;
 # 2 = config/operational error). Diagnostic only — not in any aggregate / the CI lane.
+#
+# check yj round-trips the generated TOML config identically to remarshal
 [group("debug")]
 debug-toml-roundtrip:
     #!/usr/bin/env bash
@@ -537,6 +575,8 @@ debug-toml-roundtrip:
 # to YAML with both remarshal (incumbent) and yj, reparses each back to JSON with
 # a neutral parser, and asserts semantic equality. Diagnostic only — not in any
 # aggregate / the CI lane.
+#
+# check yj round-trips a YAML settings config identically to remarshal
 [group("debug")]
 debug-yaml-roundtrip:
     #!/usr/bin/env bash
@@ -571,7 +611,7 @@ debug-yaml-roundtrip:
 
 test: test-go
 
-# Run the Go test suite (-tags test); fail if the working tree mutates mid-run (#15).
+# run the Go test suite (-tags test); fail if the working tree mutates mid-run (#15)
 test-go:
     #!/usr/bin/env bash
     # Guard for conformist#15: the cmd integration tests run conformist against
@@ -596,22 +636,22 @@ test-go:
 
 codemod-fmt: codemod-fmt-conformist
 
-# Format conformist's own tree in place via `nix fmt` (repair mode).
+# format conformist's own tree in place via `nix fmt` (repair mode)
 codemod-fmt-conformist:
     nix fmt
 
 # --- maintenance ---
 
-# `go mod tidy`, then regenerate gomod2nix.toml (the && dependency).
+# `go mod tidy`, then regenerate gomod2nix.toml (the && dependency)
 update-go: && build-gomod2nix
     nix develop --command go mod tidy
 
-# Set CONFORMIST_VERSION in version.env (the single source of truth).
+# set CONFORMIST_VERSION in version.env (the single source of truth)
 [group("maintenance")]
 bump-version new_version:
     sed -E -i "s/^(export CONFORMIST_VERSION)=.*/\1={{ new_version }}/" version.env
 
-# Create, push, and verify a signed vX.Y.Z tag from version.env.
+# create, push, and verify a signed vX.Y.Z tag from version.env
 [group("maintenance")]
 tag message:
     #!/usr/bin/env bash
@@ -624,7 +664,7 @@ tag message:
     echo "Pushed $tag"
     git tag -v "$tag"
 
-# Cut a release from master: changelog, bump-version commit, signed tag, fj release.
+# cut a release from master: changelog, bump-version commit, signed tag, fj release
 [group("maintenance")]
 release new_version:
     #!/usr/bin/env bash
@@ -661,6 +701,6 @@ release new_version:
 
 clean: clean-build
 
-# Remove the nix `result` symlink and the build/ output dir.
+# remove the nix `result` symlink and the build/ output dir
 clean-build:
     rm -rf result build/

@@ -344,6 +344,13 @@ The check has *no repair*. Mechanically inserting the separator would
 satisfy it while leaving *--list* showing the same useless fragment, so
 the fix is editorial: write a summary that reads on its own.
 
+*Style.* A summary is a *lowercase verb phrase with no trailing
+period* --- _run the Go test suite_, not _Run the Go test suite._ ---
+so the *--list* description column reads as one uniform list. This is
+convention only, and deliberately unenforced: *justfile-orphan-summary*
+checks the summary's *structure* (that it stands alone), never its
+capitalization or punctuation.
+
 # LIFECYCLE GROUPS
 
 Recipes are grouped by the *lifecycle stage* they belong to, not by
