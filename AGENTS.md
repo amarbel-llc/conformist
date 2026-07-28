@@ -136,10 +136,12 @@ under fail-on-change.
   `justfile-orphan-summary` linter module) and the per-system outputs wiring
   (`cmd/conform/flakeedit/`, #61); any other shape (or
   `--no-edit`) falls back to printing the wiring to paste, and an existing
-  justfile is never edited (its recipes are printed). flakeedit is a shallow Nix
-  PEG (two grammars, `nix.peg` + `outputs.peg`, via the `clarete/langlang/go`
-  runtime — modelled on amarbel-llc/doppelgang's `nixedit`), splicing by byte
-  offset so the rest of the file is preserved verbatim; it is per-target
+  justfile is never edited (its recipes are printed). The shared PEG
+  infrastructure — grammars (`nix.peg`, `outputs.peg`), navigation helpers,
+  splice types, and `ParseFlake` — lives in `cmd/conform/flakeparse/` (modelled
+  on amarbel-llc/doppelgang's `nixedit`); flakeedit imports it for its
+  wiring-specific logic. flakeedit splices by byte offset so the rest of the
+  file is preserved verbatim; it is per-target
   idempotent and never clobbers an output attr it did not write. An existing
   `devShells.default` is merged into (conformist's tools spliced into its
   `packages` list) and an existing `formatter` is replaced only under
@@ -174,6 +176,15 @@ under fail-on-change.
   from the cobra tree at build time; `--init` writes a starter config via
   `cmd/init`, `--completion` emits shell completions. Config flags live on
   **persistent** flags so `check` inherits tree-root/walk/excludes/config-file.
+- `cmd/flakeclobber/` — a separate binary for fleet migration (RFC 0004,
+  conformist#99/#100). Applies targeted list-element replacements in
+  `devShells.default.packages` across a fleet of repos (e.g. `pkgs.just` →
+  `justPkg`). Shares the PEG infrastructure from `cmd/conform/flakeparse/`.
+  Dry-run by default (`--apply` to write); verifies each rewrite with
+  `nix-instantiate --parse` before writing to disk. Exit codes: 0 = success
+  (including already-migrated), 1 = one or more files had migration errors, 2 =
+  operational error (bad flags, I/O failure). Do NOT wire into `conform` — it is
+  an intentionally separate one-shot sweep tool.
 - `config/` — viper + TOML config loading. Config discovery searches upward for
   `conformist.toml`/`.conformist.toml`, with `treelint.toml` as a legacy
   fallback from the pre-rename `treelint` name (env: `CONFORMIST_CONFIG`).
