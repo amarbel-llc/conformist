@@ -49,11 +49,16 @@ const brownfieldEdited = `{
     utils.url = "github:numtide/flake-utils";
     conformist.url = "git+https://code.linenisgreat.com/conformist.git";
     conformist.inputs.utils.follows = "utils";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+    just-us.inputs.nixpkgs.follows = "nixpkgs";
+    just-us.inputs.flake-utils.follows = "utils";
+    just-us.inputs.conformist.follows = "conformist";
   };
 
   outputs =
     {
       conformist,
+      just-us,
       self,
       nixpkgs,
       utils,
@@ -65,12 +70,18 @@ const brownfieldEdited = `{
 
         conformistPkg = conformist.packages.${system}.default;
 
+        justPkg = just-us.packages.${system}.default;
+
         eval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng
+            just-us.lib.conformistLinters.justfile-orphan-summary
             ./conformist.nix
           ];
           package = conformistPkg;
+
+          linters.justfile-orphan-summary.enable = true;
+          linters.justfile-orphan-summary.justPackage = justPkg;
         };
 
         impureEval = conformist.lib.evalModule pkgs {
@@ -92,7 +103,7 @@ const brownfieldEdited = `{
             conformistPkg
             eval.config.build.preCommit
             eval.config.build.repair
-            pkgs.just
+            justPkg
           ];
         };
       }
@@ -118,12 +129,20 @@ func TestApplyBrownfield(t *testing.T) {
 	// top-level input is ever added for a pre-existing name (#83).
 	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 	require.Contains(t, got, `conformist.inputs.utils.follows = "utils";`)
-	require.NotContains(t, got, "nixpkgs.follows", "must not add follows for a pre-existing nixpkgs input")
+	require.NotContains(t, got, "\n    nixpkgs.follows", "must not add a top-level follows for a pre-existing nixpkgs input")
 	require.NotContains(t, got, `"conformist/utils"`, "must not add a top-level follows for a pre-existing utils input")
 
-	// outputs argument, let bindings, and the non-conflicting outputs.
+	// just-us is wired alongside conformist, its follows pointing at the
+	// consumer's own top-level inputs (never at inputs it lacks).
+	require.Contains(t, got, `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`)
+	require.Contains(t, got, `just-us.inputs.flake-utils.follows = "utils";`)
+	require.Contains(t, got, `just-us.inputs.conformist.follows = "conformist";`)
+
+	// outputs arguments, let bindings, and the non-conflicting outputs.
 	require.Contains(t, got, "conformist,")
+	require.Contains(t, got, "just-us,")
 	require.Contains(t, got, "conformistPkg = conformist.packages.${system}.default;")
+	require.Contains(t, got, "justPkg = just-us.packages.${system}.default;")
 	require.Contains(t, got, "eval = conformist.lib.evalModule pkgs {")
 	require.Contains(t, got, "impureEval = conformist.lib.evalModule pkgs {")
 	require.Contains(t, got, "checks.formatting = eval.config.build.check self;")
@@ -275,11 +294,13 @@ const nestedConformist = `{
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
     conformist.url = "github:amarbel-llc/conformist";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
   };
 
   outputs =
     {
       conformist,
+      just-us,
       self,
       nixpkgs,
       utils,
@@ -289,8 +310,9 @@ const nestedConformist = `{
       let
         pkgs = import nixpkgs { inherit system; };
         conformistPkg = conformist.packages.${system}.default;
+        justPkg = just-us.packages.${system}.default;
         eval = conformist.lib.evalModule pkgs {
-          imports = [ conformist.lib.presets.eng ./conformist.nix ];
+          imports = [ conformist.lib.presets.eng just-us.lib.conformistLinters.justfile-orphan-summary ./conformist.nix ];
           package = conformistPkg;
         };
         impureEval = conformist.lib.evalModule pkgs {
@@ -316,7 +338,7 @@ const nestedConformist = `{
               conformistPkg
               eval.config.build.preCommit
               eval.config.build.repair
-              pkgs.just
+              justPkg
             ];
           };
         };
@@ -414,11 +436,16 @@ const outerLetEdited = `{
     utils.url = "github:numtide/flake-utils";
     conformist.url = "git+https://code.linenisgreat.com/conformist.git";
     conformist.inputs.utils.follows = "utils";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+    just-us.inputs.nixpkgs.follows = "nixpkgs";
+    just-us.inputs.flake-utils.follows = "utils";
+    just-us.inputs.conformist.follows = "conformist";
   };
 
   outputs =
     {
       conformist,
+      just-us,
       self,
       nixpkgs,
       utils,
@@ -433,12 +460,18 @@ const outerLetEdited = `{
 
         conformistPkg = conformist.packages.${system}.default;
 
+        justPkg = just-us.packages.${system}.default;
+
         eval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng
+            just-us.lib.conformistLinters.justfile-orphan-summary
             ./conformist.nix
           ];
           package = conformistPkg;
+
+          linters.justfile-orphan-summary.enable = true;
+          linters.justfile-orphan-summary.justPackage = justPkg;
         };
 
         impureEval = conformist.lib.evalModule pkgs {
@@ -460,7 +493,7 @@ const outerLetEdited = `{
             conformistPkg
             eval.config.build.preCommit
             eval.config.build.repair
-            pkgs.just
+            justPkg
           ];
         };
       }
@@ -497,12 +530,15 @@ func TestApplyOuterLet(t *testing.T) {
 	// is deduped from inside the conformist input (#83).
 	require.Contains(t, got, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 	require.Contains(t, got, `conformist.inputs.utils.follows = "utils";`)
-	require.NotContains(t, got, "nixpkgs.follows")
+	require.Contains(t, got, `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`)
+	require.NotContains(t, got, "\n    nixpkgs.follows")
 	require.NotContains(t, got, `"conformist/utils"`)
 
-	// outputs arg, let bindings, and return attrs spliced into the inner scope.
+	// outputs args, let bindings, and return attrs spliced into the inner scope.
 	require.Contains(t, got, "conformist,")
+	require.Contains(t, got, "just-us,")
 	require.Contains(t, got, "conformistPkg = conformist.packages.${system}.default;")
+	require.Contains(t, got, "justPkg = just-us.packages.${system}.default;")
 	require.Contains(t, got, "eval = conformist.lib.evalModule pkgs {")
 	require.Contains(t, got, "impureEval = conformist.lib.evalModule pkgs {")
 	require.Contains(t, got, "formatter = eval.config.build.wrapper;")

@@ -131,8 +131,10 @@ under fail-on-change.
   `flake.nix`/`justfile`; all `//go:embed`-ed from `cmd/conform/scaffold/`, the
   flake.nix/justfile kept byte-identical to `templates/eng/` by a drift test —
   #41). An existing `flake.nix` that is the recognized `eachDefaultSystem` shape
-  is edited **in place** to splice the `conformist` input and the per-system
-  outputs wiring (`cmd/conform/flakeedit/`, #61); any other shape (or
+  is edited **in place** to splice the `conformist` and `just-us` inputs (the
+  latter supplying both the devShell's `just` and the
+  `justfile-orphan-summary` linter module) and the per-system outputs wiring
+  (`cmd/conform/flakeedit/`, #61); any other shape (or
   `--no-edit`) falls back to printing the wiring to paste, and an existing
   justfile is never edited (its recipes are printed). flakeedit is a shallow Nix
   PEG (two grammars, `nix.peg` + `outputs.peg`, via the `clarete/langlang/go`

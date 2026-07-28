@@ -1,9 +1,9 @@
 // Package flakeedit performs targeted in-place surgery on a flake.nix to
-// wire it into conformist: it splices the `conformist` input, the
-// `conformist` outputs argument, the per-system `let` bindings
-// (conformistPkg/eval/impureEval), and the per-system output attributes
-// (formatter/checks.formatting/packages.conformist-*/devShells.default),
-// preserving the rest of the file byte-for-byte.
+// wire it into conformist: it splices the `conformist` and `just-us`
+// inputs, their outputs arguments, the per-system `let` bindings
+// (conformistPkg/justPkg/eval/impureEval), and the per-system output
+// attributes (formatter/checks.formatting/packages.conformist-*/
+// devShells.default), preserving the rest of the file byte-for-byte.
 //
 // It recognizes exactly one flake shape — `outputs = { … }:
 // utils.lib.eachDefaultSystem (system: let … in { … })` — which the
@@ -31,6 +31,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -74,6 +75,14 @@ type Options struct {
 	ForceFormatter bool
 }
 
+// The two top-level flake inputs conform wires in. Each name is referenced
+// from several splices — the input bindings, the follows targets, and the
+// outputs pattern — so they are named rather than repeated as literals.
+const (
+	conformistInput = "conformist"
+	justUsInput     = "just-us"
+)
+
 // conformistDeps are conformist's own flake inputs, in the order their
 // follows lines are rendered. A consumer input with the same name is deduped
 // by a follows wired INSIDE the conformist input
@@ -81,8 +90,26 @@ type Options struct {
 // input (#83).
 var conformistDeps = []string{"igloo", "nixpkgs-master", "utils"}
 
-// the let bindings conform wires in, keyed by name for idempotency.
-var conformistLetNames = []string{"conformistPkg", "eval", "impureEval"}
+// justUsFollows are the follows wired INSIDE the just-us input, in render
+// order: dep is just-us's own input name, target the consumer's top-level
+// input it follows. Unlike conformistDeps this is a mapping, not an identity
+// dedupe — just-us calls its flake-utils input `flake-utils` where the
+// recognized shape calls it `utils`. just-us's `bats` input is deliberately
+// absent: it keeps its own pin (see just-us's flake.nix).
+var justUsFollows = []struct{ dep, target string }{
+	{"nixpkgs", "nixpkgs"},
+	{"flake-utils", "utils"},
+	{conformistInput, conformistInput},
+}
+
+// the let bindings conform wires in, keyed by name for idempotency. justPkg
+// is part of the sentinel, not an incremental addition: the devShell list and
+// the eval's linters block both REFERENCE it, so a flake carrying the other
+// three but not justPkg is a wiring conform predates and must not deepen —
+// splicing `justPkg` into its devShell would name an unbound variable. Such a
+// flake takes the print-only fallback (see the switch in Apply) and the user
+// pastes the current wiring.
+var conformistLetNames = []string{"conformistPkg", "justPkg", "eval", "impureEval"}
 
 // Apply splices conformist's wiring into src and returns the rewritten
 // source plus a report of what changed. It returns ErrUnrecognized (and
@@ -113,10 +140,10 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		return src, EditReport{}, ErrUnrecognized
 	}
 
-	// Idempotency sentinel: a fully-wired flake has all three let
-	// bindings; a flake that binds some of conformist's names but not all
-	// is either a foreign collision or a half-edit we must not deepen, so
-	// fall back to print-only.
+	// Idempotency sentinel: a fully-wired flake has every let binding; a
+	// flake that binds some of conformist's names but not all is either a
+	// foreign collision or a half-edit we must not deepen, so fall back to
+	// print-only.
 	have := 0
 	for _, n := range conformistLetNames {
 		if outs.letExisting[n] {
@@ -144,19 +171,16 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		report.Added = append(report.Added, labels...)
 	}
 
-	// 2. outputs argument
-	if !outs.argNames["conformist"] {
-		splices = append(splices, splice{
-			offset: outs.argInsertOff,
-			text:   "\n" + outs.argIndent + "conformist,",
-		})
-		report.Added = append(report.Added, "outputs arg conformist")
+	// 2. outputs arguments
+	if s, labels, ok := argSplice(outs); ok {
+		splices = append(splices, s)
+		report.Added = append(report.Added, labels...)
 	}
 
 	// 3. let bindings (only when not already wired)
 	if !alreadyWired {
 		splices = append(splices, letSplice(src, outs))
-		report.Added = append(report.Added, "let bindings (conformistPkg, eval, impureEval)")
+		report.Added = append(report.Added, "let bindings (conformistPkg, justPkg, eval, impureEval)")
 	}
 
 	// 4. return attributes
@@ -249,12 +273,16 @@ func (s splice) applyTo(src []byte) []byte {
 // `utils.follows` splice for a consumer WITHOUT utils stays: the
 // recognized shape (`utils.lib.eachDefaultSystem`) guarantees the outputs
 // pattern names `utils`.
+//
+// The just-us input follows the same rule from the other direction: it is a
+// new top-level input, so argSplice adds the matching outputs formal, and its
+// follows only ever name inputs that exist once this splice lands.
 func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 	present := ins.topLevelNames()
 
 	var lines, labels []string
 
-	if !present["conformist"] {
+	if !present[conformistInput] {
 		lines = append(lines, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 
 		for _, dep := range conformistDeps {
@@ -269,6 +297,30 @@ func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 	if !present["utils"] {
 		lines = append(lines, `utils.follows = "conformist/utils";`)
 		labels = append(labels, "input utils")
+	}
+
+	if !present[justUsInput] {
+		lines = append(lines, `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`)
+
+		// The follows targets that are top-level inputs once this splice
+		// lands: whatever the consumer already had, plus conformist and utils,
+		// which the lines above guarantee. A target that still would not exist
+		// — `nixpkgs` on an igloo/nixpkgs-master eng repo — is left unfollowed
+		// rather than named, since a follows pointing at a missing input fails
+		// eval just as surely as the top-level input of #83 would.
+		willExist := maps.Clone(present)
+		willExist[conformistInput] = true
+		willExist["utils"] = true
+
+		for _, f := range justUsFollows {
+			if !willExist[f.target] {
+				continue
+			}
+
+			lines = append(lines, fmt.Sprintf("just-us.inputs.%s.follows = %q;", f.dep, f.target))
+		}
+
+		labels = append(labels, "input just-us")
 	}
 
 	if len(labels) == 0 {
@@ -299,19 +351,58 @@ func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 	return splice{offset: ins.insertOffset, text: b.String()}, labels, true
 }
 
-// letSplice builds the insertion for the conformistPkg/eval/impureEval
-// let bindings, placed just before `in`.
+// argNames are the inputs the spliced per-system body references by name, in
+// the order they are added to the outputs pattern. Each one needs a formal:
+// under a strict (no-`...`) destructuring an input the pattern does not name
+// is not in scope, and eval fails on the first reference (conformist#83).
+var argNames = []string{conformistInput, justUsInput}
+
+// argSplice builds the single insertion adding the missing outputs-pattern
+// arguments, just after the argset's opening brace. One splice rather than one
+// per name: equal-offset splices have no defined order under Apply's sort, so
+// rendering them together is what keeps the result deterministic. ok is false
+// when the pattern already names all of them.
+func argSplice(outs parsedOutputs) (splice, []string, bool) {
+	var (
+		b      strings.Builder
+		labels []string
+	)
+
+	for _, name := range argNames {
+		if outs.argNames[name] {
+			continue
+		}
+
+		b.WriteString("\n" + outs.argIndent + name + ",")
+		labels = append(labels, "outputs arg "+name)
+	}
+
+	if len(labels) == 0 {
+		return splice{}, nil, false
+	}
+
+	return splice{offset: outs.argInsertOff, text: b.String()}, labels, true
+}
+
+// letSplice builds the insertion for the
+// conformistPkg/justPkg/eval/impureEval let bindings, placed just before `in`.
 func letSplice(src []byte, outs parsedOutputs) splice {
 	i := outs.letIndent
 	body := "" +
 		i + "conformistPkg = conformist.packages.${system}.default;\n" +
 		"\n" +
+		i + "justPkg = just-us.packages.${system}.default;\n" +
+		"\n" +
 		i + "eval = conformist.lib.evalModule pkgs {\n" +
 		i + "  imports = [\n" +
 		i + "    conformist.lib.presets.eng\n" +
+		i + "    just-us.lib.conformistLinters.justfile-orphan-summary\n" +
 		i + "    ./conformist.nix\n" +
 		i + "  ];\n" +
 		i + "  package = conformistPkg;\n" +
+		"\n" +
+		i + "  linters.justfile-orphan-summary.enable = true;\n" +
+		i + "  linters.justfile-orphan-summary.justPackage = justPkg;\n" +
 		i + "};\n" +
 		"\n" +
 		i + "impureEval = conformist.lib.evalModule pkgs {\n" +
@@ -356,7 +447,7 @@ func returnAttrs() []returnAttr {
 				i + "    conformistPkg\n" +
 				i + "    eval.config.build.preCommit\n" +
 				i + "    eval.config.build.repair\n" +
-				i + "    pkgs.just\n" +
+				i + "    justPkg\n" +
 				i + "  ];\n" +
 				i + "};\n"
 		}},
@@ -432,12 +523,18 @@ func dottedParent(path string) (string, bool) {
 }
 
 // devShellPackages are the tools conform merges into an existing
-// devShells.default packages list (#63), in order.
+// devShells.default packages list (#63), in order. `justPkg` — the just-us
+// fork's binary — rather than `pkgs.just`: the eng shell's command runner is
+// the same binary the justfile-orphan-summary check invokes, and a shell on
+// upstream `just` would drift from what the check reads (see the scaffold's
+// flake.nix). Every entry names a let binding letSplice writes, so this list
+// is only ever merged into a flake whose let block conformistLetNames
+// vouched for.
 var devShellPackages = []string{
 	"conformistPkg",
 	"eval.config.build.preCommit",
 	"eval.config.build.repair",
-	"pkgs.just",
+	"justPkg",
 }
 
 // devShellMergeSplice builds the insertion that adds conformist's tools to an

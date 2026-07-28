@@ -8,12 +8,27 @@
     conformist.url = "git+https://code.linenisgreat.com/conformist.git";
     nixpkgs.follows = "conformist/nixpkgs-master";
     utils.follows = "conformist/utils";
+
+    # just-us is the eng `just` fork. It supplies BOTH the devShell's `just` and
+    # the justfile-orphan-summary linter module: that check reads the fork-only
+    # `doc_prelude` field of `just --dump --dump-format json`, which upstream
+    # `just` never emits, so running it against `pkgs.just` would pass
+    # vacuously. The coupling lives in just-us rather than conformist because
+    # conformist must stay strictly upstream of its consumers. Its nixpkgs /
+    # flake-utils / conformist inputs follow this flake's so the closure stays
+    # shared; its `bats` input deliberately keeps its own pin (see just-us's
+    # flake.nix) and is unused here.
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+    just-us.inputs.nixpkgs.follows = "nixpkgs";
+    just-us.inputs.flake-utils.follows = "utils";
+    just-us.inputs.conformist.follows = "conformist";
   };
 
   outputs =
     {
       self,
       conformist,
+      just-us,
       nixpkgs,
       utils,
     }:
@@ -27,14 +42,27 @@
         # opt-in godyn build, x86_64-linux only.)
         conformistPkg = conformist.packages.${system}.default;
 
+        # The fork's `just`: the devShell's command runner AND the binary the
+        # justfile-orphan-summary check invokes. Never substitute `pkgs.just` —
+        # the check would then read as zero findings.
+        justPkg = just-us.packages.${system}.default;
+
         # Pure lane: the eng preset + this repo's own formatters/excludes
         # (./conformist.nix). Drives `nix fmt` and the sandboxed `checks.formatting`.
         eval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng
+            # The orphaned-summary rule ships from just-us, not conformist: no
+            # recipe may hide prose above the single comment line `just --list`
+            # prints as its description (conformist-justfile(7) RECIPE
+            # DESCRIPTIONS). No repair — the fix is editorial.
+            just-us.lib.conformistLinters.justfile-orphan-summary
             ./conformist.nix
           ];
           package = conformistPkg;
+
+          linters.justfile-orphan-summary.enable = true;
+          linters.justfile-orphan-summary.justPackage = justPkg;
         };
 
         # Impure lane: the git-state checks (git-remotes, sweatfile, agents-md).
@@ -78,7 +106,7 @@
             # name them.
             eval.config.build.preCommit
             eval.config.build.repair
-            pkgs.just
+            justPkg
           ];
         };
       }

@@ -10,6 +10,8 @@ lint: lint-fmt
 
 # Read-only formatting + the eng preset's file-based linters, via the sandboxed
 # checks.formatting derivation.
+#
+# run the read-only formatting check
 lint-fmt:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -22,6 +24,8 @@ lint-impure: lint-worktree
 # tree, where .git is available. Needs SSH remotes + a sweatfile; add lint-impure
 # to the `lint` aggregate above once your repo has them. Runs conformist from the
 # devShell (direnv `use flake`).
+#
+# run the impure eng checks against the working tree
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -32,6 +36,6 @@ lint-worktree:
 
 codemod-fmt: codemod-fmt-tree
 
-# Format the tree in place (repair mode) via `nix fmt`.
+# format the tree in place (repair mode) via `nix fmt`
 codemod-fmt-tree:
     nix fmt

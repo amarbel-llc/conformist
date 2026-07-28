@@ -9,17 +9,31 @@ Add conformist to flake.nix and wire it into your per-system outputs
     conformist.inputs.igloo.follows = "igloo";
     conformist.inputs.nixpkgs-master.follows = "nixpkgs-master";
     conformist.inputs.utils.follows = "utils";
+    # just-us is the eng `just` fork: it supplies BOTH the devShell's `just`
+    # and the justfile-orphan-summary linter module, which reads a fork-only
+    # field upstream `just` never emits. Drop a follows line for any input you
+    # do not have — a follows pointing at a missing input fails eval too:
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+    just-us.inputs.nixpkgs.follows = "nixpkgs";
+    just-us.inputs.flake-utils.follows = "utils";
+    just-us.inputs.conformist.follows = "conformist";
   };
 
-  # per system, with `pkgs` and the `conformist` input in scope:
+  # per system, with `pkgs` and the `conformist` / `just-us` inputs in scope:
   let
     conformistPkg = conformist.packages.${system}.default;
+    justPkg = just-us.packages.${system}.default;
     eval = conformist.lib.evalModule pkgs {
       imports = [
         conformist.lib.presets.eng   # the eng-convention roster
+        # the orphaned-summary rule, shipped from just-us (no repair):
+        just-us.lib.conformistLinters.justfile-orphan-summary
         ./conformist.nix             # this repo's overlay (written by `conform`)
       ];
       package = conformistPkg;
+
+      linters.justfile-orphan-summary.enable = true;
+      linters.justfile-orphan-summary.justPackage = justPkg;
     };
   in {
     formatter = eval.config.build.wrapper;             # `nix fmt`
@@ -43,7 +57,7 @@ Add conformist to flake.nix and wire it into your per-system outputs
         conformistPkg
         eval.config.build.preCommit
         eval.config.build.repair
-        pkgs.just
+        justPkg
       ];
     };
   }
