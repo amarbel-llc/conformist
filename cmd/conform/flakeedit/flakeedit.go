@@ -28,29 +28,18 @@
 package flakeedit
 
 import (
-	_ "embed"
 	"errors"
 	"fmt"
 	"maps"
 	"sort"
 	"strings"
+
+	flakeparse "code.linenisgreat.com/conformist/cmd/conform/flakeparse"
 )
 
-//go:embed nix.peg
-var nixGrammar []byte
-
-//go:embed outputs.peg
-var outputsGrammar []byte
-
-const (
-	nixEntry     = "nix.peg"
-	outputsEntry = "outputs.peg"
-)
-
-// ErrUnrecognized means the flake.nix is not the recognized
-// eachDefaultSystem shape (or already binds conformist's names to
-// something else). The caller should fall back to print-only.
-var ErrUnrecognized = errors.New("flakeedit: flake.nix is not the recognized eachDefaultSystem shape")
+// ErrUnrecognized is re-exported from flakeparse so callers that imported
+// this package directly continue to work.
+var ErrUnrecognized = flakeparse.ErrUnrecognized
 
 // EditReport summarizes what Apply changed, so the caller can report it
 // and decide an exit code.
@@ -75,40 +64,27 @@ type Options struct {
 	ForceFormatter bool
 }
 
-// The two top-level flake inputs conform wires in. Each name is referenced
-// from several splices — the input bindings, the follows targets, and the
-// outputs pattern — so they are named rather than repeated as literals.
+// The two top-level flake inputs conform wires in.
 const (
 	conformistInput = "conformist"
 	justUsInput     = "just-us"
 )
 
 // conformistDeps are conformist's own flake inputs, in the order their
-// follows lines are rendered. A consumer input with the same name is deduped
-// by a follows wired INSIDE the conformist input
-// (`conformist.inputs.<dep>.follows = "<dep>"`), never by a new top-level
-// input (#83).
+// follows lines are rendered.
 var conformistDeps = []string{"igloo", "nixpkgs-master", "utils"}
 
 // justUsFollows are the follows wired INSIDE the just-us input, in render
 // order: dep is just-us's own input name, target the consumer's top-level
-// input it follows. Unlike conformistDeps this is a mapping, not an identity
-// dedupe — just-us calls its flake-utils input `flake-utils` where the
-// recognized shape calls it `utils`. just-us's `bats` input is deliberately
-// absent: it keeps its own pin (see just-us's flake.nix).
+// input it follows.
 var justUsFollows = []struct{ dep, target string }{
 	{"nixpkgs", "nixpkgs"},
 	{"flake-utils", "utils"},
 	{conformistInput, conformistInput},
 }
 
-// the let bindings conform wires in, keyed by name for idempotency. justPkg
-// is part of the sentinel, not an incremental addition: the devShell list and
-// the eval's linters block both REFERENCE it, so a flake carrying the other
-// three but not justPkg is a wiring conform predates and must not deepen —
-// splicing `justPkg` into its devShell would name an unbound variable. Such a
-// flake takes the print-only fallback (see the switch in Apply) and the user
-// pastes the current wiring.
+// conformistLetNames are the let bindings conform wires in, keyed by name
+// for idempotency.
 var conformistLetNames = []string{"conformistPkg", "justPkg", "eval", "impureEval"}
 
 // Apply splices conformist's wiring into src and returns the rewritten
@@ -116,28 +92,13 @@ var conformistLetNames = []string{"conformistPkg", "justPkg", "eval", "impureEva
 // src unchanged) when the flake is not the recognized shape; the caller
 // then falls back to print-only.
 func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
-	matcher, err := newMatcher(nixEntry, nixGrammar)
+	ins, outs, err := flakeparse.ParseFlake(src)
 	if err != nil {
-		return src, EditReport{}, fmt.Errorf("flakeedit: compile grammar: %w", err)
-	}
-	tree, _, err := matcher.Match(src)
-	if err != nil {
-		return src, EditReport{}, ErrUnrecognized
-	}
+		if errors.Is(err, flakeparse.ErrUnrecognized) {
+			return src, EditReport{}, ErrUnrecognized
+		}
 
-	ins, ok := findInputsAttrSet(tree, src)
-	if !ok {
-		return src, EditReport{}, ErrUnrecognized
-	}
-
-	valStart, valEnd, ok := outputsValueSpan(tree)
-	if !ok {
-		return src, EditReport{}, ErrUnrecognized
-	}
-
-	outs, ok := parseOutputs(src, valStart, valEnd)
-	if !ok {
-		return src, EditReport{}, ErrUnrecognized
+		return src, EditReport{}, fmt.Errorf("flakeedit: %w", err)
 	}
 
 	// Idempotency sentinel: a fully-wired flake has every let binding; a
@@ -146,7 +107,7 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 	// print-only.
 	have := 0
 	for _, n := range conformistLetNames {
-		if outs.letExisting[n] {
+		if outs.LetExisting[n] {
 			have++
 		}
 	}
@@ -162,7 +123,7 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 
 	var (
 		report  EditReport
-		splices []splice
+		splices []flakeparse.Splice
 	)
 
 	// 1. inputs
@@ -184,35 +145,30 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 	}
 
 	// 4. return attributes
-	retSplice, added, conflicts := returnSplice(src, outs, alreadyWired, opts.ForceFormatter)
-	if retSplice.text != "" {
-		splices = append(splices, retSplice)
+	retS, added, conflicts := returnSplice(src, outs, alreadyWired, opts.ForceFormatter)
+	if retS.Text != "" {
+		splices = append(splices, retS)
 	}
 
 	report.Added = append(report.Added, added...)
 	report.Conflicts = append(report.Conflicts, conflicts...)
 
-	// 5. devShell packages-list merge (#63): when devShells.default already
-	// exists and we located its packages list, splice conformist's tools into
-	// that list instead of leaving it a conflict (returnSplice skips it).
-	if outs.devShellPackages != nil {
-		if s, ok := devShellMergeSplice(src, *outs.devShellPackages); ok {
+	// 5. devShell packages-list merge (#63)
+	if outs.DevShellPackages != nil {
+		if s, ok := devShellMergeSplice(src, *outs.DevShellPackages); ok {
 			splices = append(splices, s)
 			report.Added = append(report.Added, "devShells.default packages")
 		}
 	}
 
-	// 6. forced formatter replacement (#63): with --force-formatter, replace an
-	// existing formatter's value with conformist's wrapper rather than leaving
-	// it a conflict (returnSplice skips it). A no-op when the value is already
-	// the wrapper, so re-runs add nothing.
-	if opts.ForceFormatter && outs.formatterValue != nil {
+	// 6. forced formatter replacement (#63)
+	if opts.ForceFormatter && outs.FormatterValue != nil {
 		const wrapper = "eval.config.build.wrapper"
-		if strings.TrimSpace(string(src[outs.formatterValue.start:outs.formatterValue.end])) != wrapper {
-			splices = append(splices, splice{
-				offset: outs.formatterValue.start,
-				end:    outs.formatterValue.end,
-				text:   wrapper,
+		if strings.TrimSpace(string(src[outs.FormatterValue.Start:outs.FormatterValue.End])) != wrapper {
+			splices = append(splices, flakeparse.Splice{
+				Offset: outs.FormatterValue.Start,
+				End:    outs.FormatterValue.End,
+				Text:   wrapper,
 			})
 			report.Added = append(report.Added, "formatter (replaced)")
 		}
@@ -222,63 +178,28 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		return src, report, nil
 	}
 
-	// Apply highest offset first so earlier offsets stay valid. Splices are
-	// non-overlapping insertions plus at most one replacement (the forced
-	// formatter), so descending order keeps every other splice's offsets valid.
-	sort.Slice(splices, func(i, j int) bool { return splices[i].offset > splices[j].offset })
+	// Apply highest offset first so earlier offsets stay valid.
+	sort.Slice(splices, func(i, j int) bool { return splices[i].Offset > splices[j].Offset })
 	out := src
 	for _, s := range splices {
-		out = s.applyTo(out)
+		out = s.ApplyTo(out)
 	}
 
 	return out, report, nil
 }
 
-// splice is one pending edit: text inserted at offset, or — when end > offset —
-// replacing the byte range [offset, end).
-type splice struct {
-	offset int
-	end    int
-	text   string
-}
-
-// applyTo returns src with the splice applied: a replacement of [offset, end)
-// when end > offset, otherwise a pure insertion at offset.
-func (s splice) applyTo(src []byte) []byte {
-	if s.end > s.offset {
-		out := make([]byte, 0, len(src)-(s.end-s.offset)+len(s.text))
-		out = append(out, src[:s.offset]...)
-		out = append(out, s.text...)
-		out = append(out, src[s.end:]...)
-
-		return out
-	}
-
-	return spliceAt(src, s.offset, s.text)
-}
-
 // inputsSplice builds the insertion for the conformist input bindings not
-// already present, honoring block vs flat form. ok is false when nothing
-// needs adding.
+// already present, honoring block vs flat form.
 //
 // conformist#83: conform must never introduce a top-level input the
-// consumer's outputs pattern does not already name — a strict (no-`...`)
-// destructuring then fails eval with "called with unexpected argument".
-// The old splice added a top-level `nixpkgs.follows =
-// "conformist/nixpkgs-master"` whenever no `nixpkgs` input existed, which
-// broke every igloo/nixpkgs-master-shaped eng repo. Instead, each of
-// conformist's own inputs that the consumer also has is deduped from
-// INSIDE the conformist input (`conformist.inputs.<dep>.follows =
-// "<dep>"`), and no top-level nixpkgs is ever added. The top-level
-// `utils.follows` splice for a consumer WITHOUT utils stays: the
-// recognized shape (`utils.lib.eachDefaultSystem`) guarantees the outputs
-// pattern names `utils`.
-//
-// The just-us input follows the same rule from the other direction: it is a
-// new top-level input, so argSplice adds the matching outputs formal, and its
-// follows only ever name inputs that exist once this splice lands.
-func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
-	present := ins.topLevelNames()
+// consumer's outputs pattern does not already name — a strict
+// (no-`...`) destructuring then fails eval. Each of conformist's own
+// inputs that the consumer also has is deduped from INSIDE the conformist
+// input, and no top-level nixpkgs is ever added. The just-us input
+// follows the same rule from the other direction: only existing top-level
+// inputs are followed.
+func inputsSplice(ins flakeparse.InputsAttrSet) (flakeparse.Splice, []string, bool) {
+	present := ins.TopLevelNames()
 
 	var lines, labels []string
 
@@ -302,12 +223,6 @@ func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 	if !present[justUsInput] {
 		lines = append(lines, `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`)
 
-		// The follows targets that are top-level inputs once this splice
-		// lands: whatever the consumer already had, plus conformist and utils,
-		// which the lines above guarantee. A target that still would not exist
-		// — `nixpkgs` on an igloo/nixpkgs-master eng repo — is left unfollowed
-		// rather than named, since a follows pointing at a missing input fails
-		// eval just as surely as the top-level input of #83 would.
 		willExist := maps.Clone(present)
 		willExist[conformistInput] = true
 		willExist["utils"] = true
@@ -324,70 +239,66 @@ func inputsSplice(ins inputsAttrSet) (splice, []string, bool) {
 	}
 
 	if len(labels) == 0 {
-		return splice{}, nil, false
+		return flakeparse.Splice{}, nil, false
 	}
 
 	var b strings.Builder
 
 	for _, text := range lines {
-		if !ins.blockMode {
+		if !ins.BlockMode {
 			text = "inputs." + text
 		}
-		if ins.leadNewline {
+		if ins.LeadNewline {
 			b.WriteString("\n")
-			b.WriteString(ins.indent)
+			b.WriteString(ins.Indent)
 			b.WriteString(text)
 		} else {
-			b.WriteString(ins.indent)
+			b.WriteString(ins.Indent)
 			b.WriteString(text)
 			b.WriteString("\n")
 		}
 	}
-	if ins.leadNewline && ins.trailNewlineIndent != "" {
+	if ins.LeadNewline && ins.TrailNewlineIndent != "" {
 		b.WriteString("\n")
-		b.WriteString(ins.trailNewlineIndent)
+		b.WriteString(ins.TrailNewlineIndent)
 	}
 
-	return splice{offset: ins.insertOffset, text: b.String()}, labels, true
+	return flakeparse.Splice{Offset: ins.InsertOffset, Text: b.String()}, labels, true
 }
 
-// argNames are the inputs the spliced per-system body references by name, in
-// the order they are added to the outputs pattern. Each one needs a formal:
-// under a strict (no-`...`) destructuring an input the pattern does not name
-// is not in scope, and eval fails on the first reference (conformist#83).
+// argNames are the inputs the spliced per-system body references by name.
 var argNames = []string{conformistInput, justUsInput}
 
 // argSplice builds the single insertion adding the missing outputs-pattern
-// arguments, just after the argset's opening brace. One splice rather than one
-// per name: equal-offset splices have no defined order under Apply's sort, so
-// rendering them together is what keeps the result deterministic. ok is false
-// when the pattern already names all of them.
-func argSplice(outs parsedOutputs) (splice, []string, bool) {
+// arguments. One splice rather than one per name: equal-offset splices
+// have no defined order under Apply's sort, so rendering them together
+// keeps the result deterministic.
+func argSplice(outs flakeparse.ParsedOutputs) (flakeparse.Splice, []string, bool) {
 	var (
 		b      strings.Builder
 		labels []string
 	)
 
 	for _, name := range argNames {
-		if outs.argNames[name] {
+		if outs.ArgNames[name] {
 			continue
 		}
 
-		b.WriteString("\n" + outs.argIndent + name + ",")
+		b.WriteString("\n" + outs.ArgIndent + name + ",")
 		labels = append(labels, "outputs arg "+name)
 	}
 
 	if len(labels) == 0 {
-		return splice{}, nil, false
+		return flakeparse.Splice{}, nil, false
 	}
 
-	return splice{offset: outs.argInsertOff, text: b.String()}, labels, true
+	return flakeparse.Splice{Offset: outs.ArgInsertOff, Text: b.String()}, labels, true
 }
 
-// letSplice builds the insertion for the
-// conformistPkg/justPkg/eval/impureEval let bindings, placed just before `in`.
-func letSplice(src []byte, outs parsedOutputs) splice {
-	i := outs.letIndent
+// letSplice builds the insertion for the conformistPkg/justPkg/eval/impureEval
+// let bindings, placed just before `in`.
+func letSplice(src []byte, outs flakeparse.ParsedOutputs) flakeparse.Splice {
+	i := outs.LetIndent
 	body := "" +
 		i + "conformistPkg = conformist.packages.${system}.default;\n" +
 		"\n" +
@@ -411,13 +322,10 @@ func letSplice(src []byte, outs parsedOutputs) splice {
 		i + "  projectRootFile = \"flake.nix\";\n" +
 		i + "};\n"
 
-	// Separate the new bindings from the existing let bindings with a
-	// blank line.
-	return beforeCloser(src, outs.letCloseOff, "\n"+body)
+	return beforeCloser(src, outs.LetCloseOff, "\n"+body)
 }
 
-// returnAttr is one output attribute conform wires in: path is its
-// attr-path (for idempotency), text its rendered binding given an indent.
+// returnAttr is one output attribute conform wires in.
 type returnAttr struct {
 	path string
 	text func(indent string) string
@@ -455,11 +363,13 @@ func returnAttrs() []returnAttr {
 }
 
 // returnSplice builds the insertion for the output attributes not already
-// present. When the flake is not yet wired, an existing attribute is
-// reported as a conflict (left untouched); when already wired, an
-// existing attribute is a silent idempotent skip.
-func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter bool) (splice, []string, []string) {
-	i := outs.retIndent
+// present.
+func returnSplice(
+	src []byte,
+	outs flakeparse.ParsedOutputs,
+	alreadyWired, forceFormatter bool,
+) (flakeparse.Splice, []string, []string) {
+	i := outs.RetIndent
 
 	var (
 		body      strings.Builder
@@ -467,17 +377,12 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter b
 		conflicts []string
 	)
 	for _, a := range returnAttrs() {
-		if outs.retExisting[a.path] {
-			// devShells.default with a locatable packages list is merged into
-			// by the caller's devShell step, so it is neither re-added nor
-			// reported as a conflict here.
-			if a.path == "devShells.default" && outs.devShellPackages != nil {
+		if outs.RetExisting[a.path] {
+			if a.path == "devShells.default" && outs.DevShellPackages != nil {
 				continue
 			}
 
-			// formatter with --force-formatter is replaced by the caller's
-			// formatter step, so it is likewise neither re-added nor a conflict.
-			if a.path == "formatter" && forceFormatter && outs.formatterValue != nil {
+			if a.path == "formatter" && forceFormatter && outs.FormatterValue != nil {
 				continue
 			}
 
@@ -488,11 +393,7 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter b
 			continue
 		}
 
-		// If the attr's parent exists as a nested attrset (`packages = { … }`),
-		// splicing the dotted form (`packages.conformist-* = …`) would
-		// double-define it — invalid Nix. Report a conflict instead of adding
-		// (#63); merging into a nested attrset is out of scope.
-		if parent, ok := dottedParent(a.path); ok && outs.retExisting[parent] {
+		if parent, ok := dottedParent(a.path); ok && outs.RetExisting[parent] {
 			if !alreadyWired {
 				conflicts = append(conflicts, a.path)
 			}
@@ -504,16 +405,13 @@ func returnSplice(src []byte, outs parsedOutputs, alreadyWired, forceFormatter b
 		added = append(added, a.path)
 	}
 	if body.Len() == 0 {
-		return splice{}, added, conflicts
+		return flakeparse.Splice{}, added, conflicts
 	}
 
-	// Separate the new attributes from the existing ones with a blank line.
-	return beforeCloser(src, outs.retCloseOff, "\n"+body.String()), added, conflicts
+	return beforeCloser(src, outs.RetCloseOff, "\n"+body.String()), added, conflicts
 }
 
-// dottedParent returns the parent attr-path of a dotted path
-// ("packages.conformist-pre-commit" → "packages"), and false for a
-// single-segment path with no parent ("formatter").
+// dottedParent returns the parent attr-path of a dotted path.
 func dottedParent(path string) (string, bool) {
 	if i := strings.LastIndex(path, "."); i >= 0 {
 		return path[:i], true
@@ -523,13 +421,7 @@ func dottedParent(path string) (string, bool) {
 }
 
 // devShellPackages are the tools conform merges into an existing
-// devShells.default packages list (#63), in order. `justPkg` — the just-us
-// fork's binary — rather than `pkgs.just`: the eng shell's command runner is
-// the same binary the justfile-orphan-summary check invokes, and a shell on
-// upstream `just` would drift from what the check reads (see the scaffold's
-// flake.nix). Every entry names a let binding letSplice writes, so this list
-// is only ever merged into a flake whose let block conformistLetNames
-// vouched for.
+// devShells.default packages list (#63), in order.
 var devShellPackages = []string{
 	"conformistPkg",
 	"eval.config.build.preCommit",
@@ -537,16 +429,15 @@ var devShellPackages = []string{
 	"justPkg",
 }
 
-// devShellMergeSplice builds the insertion that adds conformist's tools to an
-// existing devShells.default packages list, skipping any already present so a
-// re-run is a no-op. ok is false when every tool is already in the list.
-func devShellMergeSplice(src []byte, ls listSplice) (splice, bool) {
-	indent := lineIndent(src, ls.closeOff) + "  "
+// devShellMergeSplice builds the insertion that adds conformist's tools
+// to an existing devShells.default packages list.
+func devShellMergeSplice(src []byte, ls flakeparse.ListSplice) (flakeparse.Splice, bool) {
+	indent := flakeparse.LineIndent(src, ls.CloseOff) + "  "
 
 	var body strings.Builder
 
 	for _, pkg := range devShellPackages {
-		if strings.Contains(ls.inner, pkg) {
+		if strings.Contains(ls.Inner, pkg) {
 			continue
 		}
 
@@ -554,23 +445,20 @@ func devShellMergeSplice(src []byte, ls listSplice) (splice, bool) {
 	}
 
 	if body.Len() == 0 {
-		return splice{}, false
+		return flakeparse.Splice{}, false
 	}
 
-	return beforeCloser(src, ls.closeOff, body.String()), true
+	return beforeCloser(src, ls.CloseOff, body.String()), true
 }
 
 // beforeCloser builds a splice that inserts body just before a closer
-// token (a `}` or the `in` keyword) at closeOff. When the closer sits on
-// its own line, body is inserted at the start of that line (body must end
-// in a newline so the closer stays put). Otherwise body is bracketed with
-// newlines so the closer is pushed onto its own line.
-func beforeCloser(src []byte, closeOff int, body string) splice {
-	if onlyBlankBefore(src, closeOff) {
-		return splice{offset: lineStart(src, closeOff), text: body}
+// token (a `}` or the `in` keyword) at closeOff.
+func beforeCloser(src []byte, closeOff int, body string) flakeparse.Splice {
+	if flakeparse.OnlyBlankBefore(src, closeOff) {
+		return flakeparse.Splice{Offset: flakeparse.LineStart(src, closeOff), Text: body}
 	}
 
-	closerIndent := lineIndent(src, closeOff)
+	closerIndent := flakeparse.LineIndent(src, closeOff)
 
-	return splice{offset: closeOff, text: "\n" + body + closerIndent}
+	return flakeparse.Splice{Offset: closeOff, Text: "\n" + body + closerIndent}
 }
