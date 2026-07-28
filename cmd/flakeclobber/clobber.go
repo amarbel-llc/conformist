@@ -139,7 +139,6 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 
 	// All satisfied/N/A → idempotent no-op.
 	if pending == 0 {
-		report.Applied = nil // already set in loop above
 		return src, report, nil
 	}
 

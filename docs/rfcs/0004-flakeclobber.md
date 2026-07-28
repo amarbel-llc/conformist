@@ -86,19 +86,19 @@ is extracted into a new package, `cmd/conform/flakeparse`.
 - The PEG grammars (`nix.peg`, `outputs.peg`) and their `//go:embed` vars
 - Grammar entry constants (`nixEntry`, `outputsEntry`)
 - `ErrUnrecognized`
-- `newMatcher()` and the navigation helpers: `nodeName()`, `childNamed()`,
-  `firstSequence()`, `topAttrSetSequence()`, `bindingKeyVal()`, `keyValPath()`,
-  `attrPathSegments()`, `valueItems()`, `soleGroup()`
-- Source-location helpers: `lineStart()`, `lineIndent()`, `onlyBlankBefore()`,
-  `spliceAt()`
+- `compileMatcher()` and the navigation helpers (all unexported): `nodeName()`,
+  `childNamed()`, `firstSequence()`, `topAttrSetSequence()`, `bindingKeyVal()`,
+  `keyValPath()`, `attrPathSegments()`, `valueItems()`, `soleGroup()`
+- Source-location helpers (exported): `LineStart()`, `LineIndent()`,
+  `OnlyBlankBefore()`; `TokenIndex()` and `IsNixIdentChar()` (exported, new)
 - The `Splice` type (exported) and its `ApplyTo()` method
 - `InputsAttrSet` (exported) and `FindInputsAttrSet()`, along with
-  `ScanBlockKeys()`, `IsAttrPath()`, `AttrPathBeforeEquals()`
-- `ParsedOutputs` (exported), `ParseOutputs()`, `OutputsValueSpan()`
-- `ListSplice` (exported) and `FindPackagesList()`
+  `ScanBlockKeys()`
+- `ParsedOutputs` (exported), `parseOutputs()`, `outputsValueSpan()`
+- `ListSplice` (exported), `InnerStart()`, and `findPackagesList()`
 - `ValueRange` (exported)
-- Binding helpers: `CollectBindings()`, `BindingPaths()`, `BindingNames()`,
-  `Identifiers()`, `BindingValue()`, `isBracketGroup()`, `packagesAssignment()`
+- Binding helpers (unexported): `collectBindings()`, `bindingPaths()`, `bindingNames()`,
+  `identifiers()`, `bindingValue()`, `isBracketGroup()`, `packagesAssignment()`
 
 **What stays in `flakeedit`:**
 
@@ -396,6 +396,9 @@ func (s Splice) ApplyTo(src []byte) []byte
 // Inner is the full source text of the list including brackets.
 // CloseOff is the absolute source offset of the closing ']'.
 type ListSplice struct { CloseOff int; Inner string }
+
+// InnerStart returns the absolute source offset of Inner[0] (the '[').
+func (ls ListSplice) InnerStart() int
 
 type ValueRange struct { Start, End int }
 
