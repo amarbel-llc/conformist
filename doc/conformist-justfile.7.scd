@@ -296,9 +296,53 @@ descriptions readable:
 
 - Keep the comment line *immediately above* the recipe a concise
   one-line summary --- this is what *--list* shows.
+- Where a recipe needs more rationale than fits on that line, keep the
+  prose *above* the summary and separate the two with a bare _#_ line,
+  so the summary is the last line and stands on its own (below).
 - Move longer rationale *into the recipe body* as inline comments.
 - Or set an explicit description with *[doc("...")]*, which is
   independent of the leading comment.
+
+The summary line MUST NOT be abutted by another comment line. Whatever
+sits directly above it is invisible to *--list*, so a block that runs
+straight into the recipe surfaces a fragment. A bare _#_ line (or a
+blank line) between the prose and the summary leaves the summary
+standing alone, and is the sanctioned way to write a long comment:
+
+```
+# Rewrite version.env (canonical source of truth) and the matching
+# Cargo.toml `version` line. Pure mutation; scoped to [package] so it
+# never touches [dependencies.*] version lines, which also sit at
+# column 0.
+#
+# rewrite the fork version in version.env and Cargo.toml
+[group("maintenance")]
+bump-version new_version:
+    ...
+```
+
+Both forms are accepted --- what matters is that no comment line
+directly abuts the summary, not which separator produced the gap. The
+prose above is discarded by *just* either way; it is there for the
+reader of the justfile, not for *--list*.
+
+Enforced by *justfile-orphan-summary*. Unlike the other *justfile-\**
+linters this one ships from *amarbel-llc/just-us*, not conformist: the
+rule reads the fork's _doc_prelude_ field --- the run of comment lines
+above the doc comment, which *just* discards at parse time and never
+exposes --- so the check MUST run the fork's binary. A repo enables it
+alongside the conformist presets:
+
+```
+imports = [ just-us.lib.conformistLinters.justfile-orphan-summary ];
+linters.justfile-orphan-summary.enable = true;
+linters.justfile-orphan-summary.justPackage =
+  just-us.packages.${system}.default;
+```
+
+The check has *no repair*. Mechanically inserting the separator would
+satisfy it while leaving *--list* showing the same useless fragment, so
+the fix is editorial: write a summary that reads on its own.
 
 # LIFECYCLE GROUPS
 
