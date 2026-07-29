@@ -349,6 +349,141 @@ debug-bench-backends iterations="3":
         done
     done
 
+# Bisect WHY a given flake.nix fails flakeparse's shape match. Truncates the
+# per-system `let` block one top-level binding at a time (from the end) and
+# re-tests, so the first binding whose removal makes the file parse is the
+# culprit. Uses flakeclobber as the parse oracle (its "not the recognized
+# eachDefaultSystem shape" message IS a ParseFlake failure). For chasing an
+# unexplained refusal in the fleet corpus — an unexplained refusal in a tool
+# that rewrites flake.nix is worth understanding before a sweep. Diagnostic
+# only; read-only with respect to the target.
+#
+# bisect which let binding makes a flake.nix fail the shape match
+[group("debug")]
+debug-flakeparse-bisect target:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    bin="$tmp/flakeclobber"
+    nix develop --command go build -o "$bin" ./cmd/flakeclobber || exit 2
+
+    # Capture first, then grep. A `cmd | grep -q` pipeline is WRONG here: under
+    # `set -o pipefail` the pipeline inherits flakeclobber's own exit 1, which
+    # masks grep's success and makes the oracle report "parses" in exactly the
+    # failing case.
+    parses() {
+        local out
+        out=$("$bin" --old zzz --new "" "$1" 2>&1)
+        case "$out" in
+            *"not the recognized"*) return 1 ;;
+            *) return 0 ;;
+        esac
+    }
+
+    cp "{{ target }}" "$tmp/full.nix"
+    if parses "$tmp/full.nix"; then
+        echo "debug-flakeparse-bisect: {{ target }} ALREADY parses — nothing to bisect"
+        exit 0
+    fi
+    echo "baseline: {{ target }} does NOT parse"
+
+    # Top-level bindings of the per-system let block are the lines at the let
+    # body's indent that look like `name =`. Collect their line numbers.
+    mapfile -t binds < <(grep -nE '^        [a-zA-Z_][a-zA-Z0-9_'"'"'-]*[[:space:]]*=' "$tmp/full.nix" | cut -d: -f1)
+    echo "found ${#binds[@]} candidate top-level let bindings"
+    if [ "${#binds[@]}" -eq 0 ]; then
+        echo "no candidates at the assumed indent — inspect by hand" >&2
+        exit 1
+    fi
+
+    # For each binding, delete just that binding (up to the line before the
+    # next one) and see whether the file starts parsing.
+    # The LAST binding runs to the line before `in`; without that case it would
+    # never be tested, and the culprit can perfectly well be the last one.
+    lastline=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    for i in "${!binds[@]}"; do
+        start=${binds[$i]}
+        if [ $((i + 1)) -lt "${#binds[@]}" ]; then
+            end=$(( binds[$((i + 1))] - 1 ))
+        elif [ -n "$lastline" ] && [ "$lastline" -gt "$start" ]; then
+            end=$(( lastline - 1 ))
+        else
+            continue
+        fi
+        sed "${start},${end}d" "$tmp/full.nix" > "$tmp/cut.nix"
+        if parses "$tmp/cut.nix"; then
+            echo
+            echo "CULPRIT: removing lines ${start}-${end} makes it parse:"
+            sed -n "${start},${end}p" "$tmp/full.nix" | sed 's/^/    /'
+            exit 0
+        fi
+    done
+    # Removing one binding may not clear the failure if SEVERAL independently
+    # break the parse. Invert the test: keep exactly ONE binding and drop the
+    # rest, which names every culprit instead of only a sole one.
+    echo
+    echo "no single removal explains it — testing each binding in ISOLATION"
+    inline2=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    letline2=$(grep -nE '^      let[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    culprits=0
+    for i in "${!binds[@]}"; do
+        start=${binds[$i]}
+        if [ $((i + 1)) -lt "${#binds[@]}" ]; then
+            end=$(( binds[$((i + 1))] - 1 ))
+        else
+            end=$(( inline2 - 1 ))
+        fi
+        # Delete the tail range first so the head range's numbers stay valid.
+        { [ "$end" -lt $(( inline2 - 1 )) ] && printf '%s,%sd\n' "$((end + 1))" "$((inline2 - 1))"; \
+          [ "$start" -gt $(( letline2 + 1 )) ] && printf '%s,%sd\n' "$((letline2 + 1))" "$((start - 1))"; } \
+            > "$tmp/script.sed"
+        sed -f "$tmp/script.sed" "$tmp/full.nix" > "$tmp/only.nix"
+        if ! parses "$tmp/only.nix"; then
+            culprits=$((culprits + 1))
+            echo "  CULPRIT lines ${start}-${end}:"
+            sed -n "${start},$(( start + 6 ))p" "$tmp/full.nix" | sed 's/^/      /'
+            echo
+        fi
+    done
+    if [ "$culprits" -gt 0 ]; then
+        echo "  $culprits binding(s) independently break the parse (see above)"
+        exit 0
+    fi
+
+    echo
+    echo "no single top-level binding explains it — isolating by region"
+
+    # Fall back to region isolation: blank out the per-system let BODY, then the
+    # return attrset BODY, and see which one clears the failure. That separates
+    # "some construct inside the let" from "some construct inside the returned
+    # attrset" from "the head/arg structure itself".
+    letline=$(grep -nE '^      let[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    inline=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    openline=$(( inline + 1 ))
+    closeline=$(grep -nE '^      \}[[:space:]]*$' "$tmp/full.nix" | tail -1 | cut -d: -f1)
+    echo "  let=$letline in=$inline return-open=$openline return-close=$closeline"
+
+    if [ -n "$letline" ] && [ -n "$inline" ] && [ "$inline" -gt "$((letline + 1))" ]; then
+        sed "$((letline + 1)),$((inline - 1))d" "$tmp/full.nix" > "$tmp/nolet.nix"
+        if parses "$tmp/nolet.nix"; then
+            echo "  => emptying the LET body fixes it: the culprit is inside the let block"
+            exit 0
+        fi
+        echo "  => emptying the LET body does NOT fix it"
+    fi
+
+    if [ -n "$closeline" ] && [ "$closeline" -gt "$((openline + 1))" ]; then
+        sed "$((openline + 1)),$((closeline - 1))d" "$tmp/full.nix" > "$tmp/noret.nix"
+        if parses "$tmp/noret.nix"; then
+            echo "  => emptying the RETURN attrset fixes it: the culprit is in the returned attrs"
+            exit 0
+        fi
+        echo "  => emptying the RETURN attrset does NOT fix it"
+    fi
+
+    echo "  => neither region alone explains it; suspect the arg set / head structure" >&2
+    exit 1
+
 # --- verify ---
 
 verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse verify-flakeclobber-parse
@@ -809,16 +944,23 @@ debug-flakeclobber-coverage root="/home/sasha/eng/repos":
     while IFS=$'\t' read -r verdict repo; do
         [ "$verdict" = unrecognized ] || continue
         f="{{ root }}/$repo/flake.nix"
-        if grep -qE '//[[:space:]]*($|.*eachDefaultSystem)' "$f"; then
-            why="hybrid-// (conformist#65, out of roster)"
-        elif grep -q 'flake-parts' "$f"; then
+        # The `//` hybrid has TWO spellings and both are out of roster: the
+        # merge can lead (`{ … } // eachDefaultSystem (…)`) or trail
+        # (`eachDefaultSystem (…) // { … }`, e.g. just-us). An earlier version
+        # of this classifier only caught the leading form and so mislabelled a
+        # hybrid as an unexplained in-roster refusal.
+        if grep -q 'flake-parts' "$f"; then
             why="flake-parts (out of roster)"
+        elif grep -qE '^[[:space:]]*//[[:space:]]*\{|//[[:space:]]*.*eachDefaultSystem' "$f"; then
+            why="hybrid-// (conformist#65, out of roster)"
         elif grep -qE 'forAllSystems|genAttrs' "$f"; then
             why="raw forAllSystems/genAttrs (out of roster)"
-        elif grep -qE '^[[:space:]]*\([[:space:]]*[A-Za-z_][A-Za-z0-9_.'"'"'-]*\.eachDefaultSystem' "$f"; then
-            why="paren-wrapped eachDefaultSystem — IN roster shape, refused"
+        elif grep -qE '^[[:space:]]*rec[[:space:]]*\{' "$f"; then
+            why="rec { } per-system return — splicable but rec-scoped, refused"
+        elif grep -qE '^[[:space:]]{6,10}[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*=[[:space:]]*with[[:space:]]' "$f"; then
+            why="top-level 'with <expr>;' in a binding value (conformist#103)"
         elif grep -q 'eachDefaultSystem' "$f"; then
-            why="PLAIN eachDefaultSystem — IN roster, other parser defect"
+            why="PLAIN eachDefaultSystem — IN roster, cause NOT identified"
         else
             why="no eachDefaultSystem (out of roster)"
         fi

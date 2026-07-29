@@ -25,7 +25,20 @@
 // into: all wiring lands in the inner per-system let block and return attrset.
 
 File         <- Trivia Outputs Trivia EOF
-Outputs      <- ArgSet Trivia Colon Trivia OuterLet? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia
+
+// Two alternatives differing ONLY in a redundant paren wrapping the whole
+// eachDefaultSystem application: `(utils.lib.eachDefaultSystem (…))` is the
+// same shape as `utils.lib.eachDefaultSystem (…)` — in Nix a wrapping paren is
+// identity, so refusing it was a parser limitation, not a policy choice
+// (conformist#101). It is NOT a roster widening: flake-parts, raw
+// forAllSystems/genAttrs and the `//` hybrid stay refused.
+//
+// The branches are written out in full rather than factored behind a shared
+// rule because ArgSet and SystemLambda must remain DIRECT children of Outputs:
+// the navigation helper descends only through anonymous/Sequence nodes, so a
+// named wrapper rule would hide them and break the offset math.
+Outputs      <- ArgSet Trivia Colon Trivia OuterLet? ParenOpen Trivia OuterLet? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia ParenClose Trivia
+              / ArgSet Trivia Colon Trivia OuterLet? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia
 OuterLet     <- LetKw LetBlock InKw Trivia
 
 // The function-argument attrset `{ self, conformist, ... }`. Parsed as a

@@ -121,6 +121,49 @@ func TestParseFlakeIdentifiersContainingKeywords(t *testing.T) {
 	}
 }
 
+// TestParseFlakeParenWrappedCall is conformist#101: a redundant paren around
+// the whole eachDefaultSystem application. In Nix a wrapping paren is identity,
+// so this is the SAME shape differing only in punctuation — refusing it was a
+// parser limitation. It accounted for 5 of the fleet's refusals (dodder,
+// madder, moxy, piggy, tacky).
+func TestParseFlakeParenWrappedCall(t *testing.T) {
+	src := `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    { self, nixpkgs, utils }:
+    (utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.just
+          ];
+        };
+      }
+    ));
+}
+`
+	_, outs, err := flakeparse.ParseFlake([]byte(src))
+	require.NoError(t, err, "a redundant wrapping paren must not make the shape match fail")
+
+	assert.True(t, outs.LetExisting["pkgs"])
+	require.NotNil(t, outs.DevShellPackages)
+
+	// The splice offsets must still be absolute and correct through the extra
+	// paren — that is the part a punctuation change could silently break.
+	ls := *outs.DevShellPackages
+	assert.Equal(t, byte(']'), src[ls.CloseOff])
+	assert.Equal(t, byte('['), src[ls.InnerStart()])
+	assert.Contains(t, ls.Inner, "pkgs.just")
+}
+
 // TestParseFlakeUnrecognizedShapes pins the refusals. The narrow roster IS the
 // safety story for a destructive sweep, so these must keep failing.
 func TestParseFlakeUnrecognizedShapes(t *testing.T) {
@@ -144,6 +187,43 @@ func TestParseFlakeUnrecognizedShapes(t *testing.T) {
         pkgs = 1;
       in
       { packages.default = pkgs; }
+    );
+}
+`,
+		// The hybrid's other spelling, with the merge AFTER the call (just-us).
+		// Accepting the conformist#101 paren must not accidentally admit this:
+		// the trailing `// { … }` puts real outputs outside the per-system body,
+		// so splicing into the eachDefaultSystem attrset alone would be wrong.
+		"hybrid // trailing": `{
+  outputs =
+    { self, utils }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = 1;
+      in
+      { packages.default = pkgs; }
+    )
+    // {
+      lib.thing = ./thing.nix;
+    };
+}
+`,
+		// A `rec { … }` per-system return (posh, smith). Structurally splicable,
+		// but `rec` makes every sibling attr a binding in scope, so an inserted
+		// attr can be captured by — or shadow — a name the repo already defines.
+		// Left refused deliberately; see the issue filed alongside #101.
+		"rec return attrset": `{
+  outputs =
+    { self, utils }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = 1;
+      in
+      rec {
+        packages.default = pkgs;
+      }
     );
 }
 `,
@@ -180,8 +260,40 @@ func TestParseFlakeLocatesDevShellPackages(t *testing.T) {
 		"Inner must be exactly the source span it claims")
 }
 
+// TestParseFlakeTopLevelWithClause documents a KNOWN GAP, not desired
+// behaviour: a `with <expr>;` prefix at the top level of a binding value ends
+// the binding at the `with`'s semicolon, exactly like the nested-`let` defect
+// did. `Value` stops at the first top-level `;`, and `with pkgs;` puts one
+// there before the value proper begins.
+//
+// Nested inside a group it is fine (TestParseFlakeWithClause below) because
+// `Inner` treats `;` as content — which is why this went unnoticed. It is the
+// real cause of posh's refusal (two `with pkgs; [ … ]` let bindings), found by
+// `just debug-flakeparse-bisect`.
+//
+// Pinned so the gap is visible and so whoever fixes it sees this test flip.
+// The fix is a `WithGroup` alternative in `Value`, mirroring `LetGroup`.
+func TestParseFlakeTopLevelWithClause(t *testing.T) {
+	src := wrap(
+		`        buildInputs = with pkgs; [
+          openssl
+          zlib
+        ];
+`,
+		`        packages.default = pkgs.hello;
+`,
+	)
+
+	_, _, err := flakeparse.ParseFlake([]byte(src))
+	require.ErrorIs(t, err, flakeparse.ErrUnrecognized,
+		"KNOWN GAP: if this now parses, the with-clause defect is fixed — "+
+			"delete this test and add a positive one")
+}
+
 // TestParseFlakeWithClause covers `packages = with pkgs; [ … ]`, which the
-// packages-assignment regex has to see through.
+// packages-assignment regex has to see through. Note the `with` here is nested
+// inside `pkgs.mkShell { … }`, where `;` is group content — contrast with
+// TestParseFlakeTopLevelWithClause above.
 func TestParseFlakeWithClause(t *testing.T) {
 	src := wrap("", `        devShells.default = pkgs.mkShell {
           packages = with pkgs; [

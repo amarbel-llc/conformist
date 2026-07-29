@@ -140,7 +140,17 @@ under fail-on-change.
   infrastructure — grammars (`nix.peg`, `outputs.peg`), navigation helpers,
   splice types, and `ParseFlake` — lives in `cmd/conform/flakeparse/` (modelled
   on amarbel-llc/doppelgang's `nixedit`); flakeedit imports it for its
-  wiring-specific logic. flakeedit splices by byte offset so the rest of the
+  wiring-specific logic. The recognized shape tolerates a redundant paren
+  wrapping the whole `eachDefaultSystem` application (`(utils.lib.eachDefaultSystem
+  (…))`) — in Nix that paren is identity, so refusing it was a parser limitation
+  rather than a roster choice (conformist#101). Still refused, deliberately:
+  flake-parts, raw `forAllSystems`/`genAttrs`, the `//` hybrid in **either**
+  spelling (merge leading OR trailing the call — conformist#65), a `rec { … }`
+  per-system return (structurally splicable, but `rec` puts every sibling attr
+  in scope, so an inserted attr could be captured by or shadow a name the repo
+  already binds), and a top-level `with <expr>;` in a binding value
+  (conformist#103 — its `;` ends the binding early, the same defect class as the
+  nested `let … in`). flakeedit splices by byte offset so the rest of the
   file is preserved verbatim; it is per-target
   idempotent and never clobbers an output attr it did not write. A flake
   carrying only SOME of the `conformistPkg`/`justPkg`/`eval`/`impureEval` let
