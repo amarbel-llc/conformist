@@ -484,6 +484,87 @@ debug-flakeparse-bisect target:
     echo "  => neither region alone explains it; suspect the arg set / head structure" >&2
     exit 1
 
+# Differential check against a REFERENCE commit: build flakeclobber from both
+# that commit and the working tree, run each over every fleet flake.nix, and
+# diff the resulting bytes AND the reported outcome. Parser widening is supposed
+# to be purely additive — a repo the reference already accepted must migrate
+# identically — but a grammar edit can silently move a byte offset in an
+# already-accepted shape, and that is the one failure that could disturb a
+# migration already in flight. This recipe is how that claim gets evidence
+# instead of assurance. Read-only w.r.t. the fleet: every edit lands on a copy.
+#
+# diff flakeclobber's fleet-wide output against a reference commit
+[group("debug")]
+debug-flakeclobber-regression ref="383ed65" root="/home/sasha/eng/repos":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+    # Materialise the reference commit WITHOUT touching the working tree or the
+    # worktree's git state (no stash, no `git worktree add`) — a sweep is using
+    # this checkout.
+    mkdir -p "$tmp/ref"
+    git archive "{{ ref }}" | tar -x -C "$tmp/ref" || exit 2
+    ( cd "$tmp/ref" && nix develop "$PWD/../.." --command go build -o "$tmp/fc-ref" ./cmd/flakeclobber ) \
+        || nix develop --command sh -c "cd '$tmp/ref' && go build -o '$tmp/fc-ref' ./cmd/flakeclobber" \
+        || exit 2
+    nix develop --command go build -o "$tmp/fc-new" ./cmd/flakeclobber || exit 2
+
+    same=0; differ=0; newly=0
+    for f in "{{ root }}"/*/flake.nix; do
+        [ -e "$f" ] || continue
+        repo=$(basename "$(dirname "$f")")
+
+        for variant in ref new; do
+            d="$tmp/$variant/$repo"; mkdir -p "$d"
+            cp "$f" "$d/flake.nix"
+            "$tmp/fc-$variant" --apply --old pkgs.just --new "" "$d/flake.nix" \
+                > "$d/raw-out.txt" 2> "$d/raw-err.txt"
+            echo "$?" > "$d/rc.txt"
+            # flakeclobber echoes back the path it was handed, and the two runs
+            # are handed DIFFERENT temp paths — so the messages differ on every
+            # repo for a reason that has nothing to do with the code. Normalise
+            # the path away before comparing, or this harness reports a
+            # fleet-wide regression that does not exist.
+            sed "s#$tmp/$variant/$repo#<repo>#g" "$d/raw-out.txt" > "$d/out.txt"
+            sed "s#$tmp/$variant/$repo#<repo>#g" "$d/raw-err.txt" > "$d/err.txt"
+        done
+
+        refrc=$(cat "$tmp/ref/$repo/rc.txt"); newrc=$(cat "$tmp/new/$repo/rc.txt")
+
+        if grep -q 'not the recognized' "$tmp/ref/$repo/err.txt"; then
+            # The reference refused this repo. The new build accepting it is the
+            # POINT of the widening, not a regression.
+            if grep -q 'not the recognized' "$tmp/new/$repo/err.txt"; then
+                same=$((same + 1))
+            else
+                newly=$((newly + 1))
+                echo "  NEWLY ACCEPTED  $repo"
+            fi
+            continue
+        fi
+
+        # The reference accepted it: bytes and outcome must match EXACTLY.
+        if diff -q "$tmp/ref/$repo/flake.nix" "$tmp/new/$repo/flake.nix" >/dev/null \
+            && [ "$refrc" = "$newrc" ] \
+            && diff -q "$tmp/ref/$repo/out.txt" "$tmp/new/$repo/out.txt" >/dev/null; then
+            same=$((same + 1))
+        else
+            differ=$((differ + 1))
+            echo "  *** REGRESSION  $repo (rc $refrc -> $newrc)"
+            diff -u "$tmp/ref/$repo/flake.nix" "$tmp/new/$repo/flake.nix" | head -40
+            diff -u "$tmp/ref/$repo/out.txt" "$tmp/new/$repo/out.txt" | head -10
+        fi
+    done
+
+    echo
+    echo "=== vs {{ ref }}: identical=$same newly-accepted=$newly REGRESSED=$differ ==="
+    if [ "$differ" -gt 0 ]; then
+        echo "A repo the reference already migrated behaves differently — a sweep in flight is at risk." >&2
+        exit 1
+    fi
+    echo "No repo the reference accepted changed behaviour; the widening is additive."
+
 # --- verify ---
 
 verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse verify-flakeclobber-parse

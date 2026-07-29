@@ -161,7 +161,14 @@ under fail-on-change.
   `eachSystem` variant, and a `rec { … }` per-system return (structurally
   splicable, but `rec` puts every sibling attr in scope, so an inserted attr
   could be captured by or shadow a name the repo already binds — "we could
-  splice it" is not "it is safe to"). flakeedit splices by byte offset so the rest of the
+  splice it" is not "it is safe to"). Also accepted: an **at-pattern** argument
+  in either spelling (`{ … }@inputs:` / `inputs@{ … }:`, conformist#104 — the
+  bound name is added to `ArgNames` because Nix rejects a formal that collides
+  with it), and a **chained `let … in let … in`** per-system body
+  (conformist#105 — sibling blocks, distinct from the nested-in-a-value case;
+  `LetExisting` is the UNION across blocks so the idempotency sentinel cannot
+  misfire, and the splice point is the LAST `in` so a new binding can reference
+  anything bound earlier). flakeedit splices by byte offset so the rest of the
   file is preserved verbatim; it is per-target
   idempotent and never clobbers an output attr it did not write. A flake
   carrying only SOME of the `conformistPkg`/`justPkg`/`eval`/`impureEval` let

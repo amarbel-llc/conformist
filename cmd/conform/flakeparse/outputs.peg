@@ -48,8 +48,25 @@ File         <- Trivia Outputs Trivia EOF
 //
 // An unbalanced OpenParen? without its CloseParen? cannot slip through: the
 // leftover `)` would then be unconsumed and `File <- … Trivia EOF` fails.
-Outputs      <- ArgSet Trivia Colon Trivia OuterLet? LeadMerge? OpenParen? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose CloseParen? TrailMerge? Trivia
+//   AtLead?/AtTrail?        — an at-pattern binding the whole argument
+//                             attrset to a name, in either spelling:
+//                             `inputs@{ … }:` or `{ … }@inputs:` (just-us).
+//                             Another pure spelling difference: the call, the
+//                             per-system body and every splice target are
+//                             identical (conformist#104).
+Outputs      <- AtLead? ArgSet AtTrail? Trivia Colon Trivia OuterLet? LeadMerge? OpenParen? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose CloseParen? TrailMerge? Trivia
 OuterLet     <- LetKw LetBlock InKw Trivia
+
+// The bound name is captured (AtName) so the caller can add it to ArgNames:
+// Nix rejects `{ conformist, … }@conformist:` as a duplicate formal, so an
+// argument conform would splice must not collide with the at-pattern's name.
+AtLead       <- AtName Trivia At Trivia
+AtTrail      <- Trivia At Trivia AtName
+// Lexical, not `AtName <- Identifier`: a rule that merely forwards to another
+// rule need not yield a node of its own, and the caller looks this one up by
+// name.
+AtName       <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
+At           <- '@'
 
 OpenParen    <- ParenOpen Trivia
 CloseParen   <- Trivia ParenClose
@@ -77,7 +94,19 @@ EachFn       <- 'eachDefaultSystem' ![a-zA-Z0-9_]
 
 // `system: let <bindings> in { <attrs> }`. The lambda parameter is a
 // bare identifier (eachDefaultSystem passes the system string).
-SystemLambda <- Identifier Trivia Colon Trivia LetKw LetBlock InKw Trivia ReturnAttrSet
+// The per-system body may open SEVERAL sibling `let … in` blocks before the
+// returned attrset — a normal way to stage bindings that depend on an earlier
+// block (clown). Distinct from a NESTED let, which sits inside a binding value
+// and is handled by LetGroup; these are siblings (conformist#105).
+//
+// Written as an inline group repetition rather than a named LetChain rule on
+// purpose: a named wrapper would hide LetBlock and InKw from the navigation
+// helper, which descends only through anonymous/Sequence nodes. The caller
+// takes the LAST InKw as the splice point (so new bindings can reference
+// anything bound earlier) and the UNION of every LetBlock's names (so the
+// idempotency sentinel cannot misfire on a flake whose conformist bindings
+// live in an earlier block).
+SystemLambda <- Identifier Trivia Colon Trivia (LetKw LetBlock InKw Trivia)+ ReturnAttrSet
 LetKw        <- 'let' ![a-zA-Z0-9_'\-]
 InKw         <- 'in' ![a-zA-Z0-9_'\-]
 WithKw       <- 'with' ![a-zA-Z0-9_'\-]

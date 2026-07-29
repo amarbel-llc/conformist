@@ -321,6 +321,123 @@ func withInputs(outputs string) string {
 `
 }
 
+// TestParseFlakeAtPattern is conformist#104: an at-pattern binding the whole
+// argument attrset to a name, in BOTH spellings. Another pure spelling
+// difference — the call, the per-system body and every splice target are
+// identical, only the argument is written differently. Frees just-us.
+func TestParseFlakeAtPattern(t *testing.T) {
+	cases := map[string]string{
+		// just-us's spelling.
+		"trailing @inputs": `    {
+      self,
+      nixpkgs,
+      utils,
+      ...
+    }@inputs:
+`,
+		// The other spelling Nix allows.
+		"leading inputs@": `    inputs@{
+      self,
+      nixpkgs,
+      utils,
+      ...
+    }:
+`,
+	}
+
+	for name, argPattern := range cases {
+		t.Run(name, func(t *testing.T) {
+			src := withInputs(argPattern + `    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.just
+          ];
+        };
+      }
+    );
+`)
+			_, outs, err := flakeparse.ParseFlake([]byte(src))
+			require.NoError(t, err, "an at-pattern argument must not fail the shape match")
+
+			assert.True(t, outs.LetExisting["pkgs"])
+			assertPackagesOffsets(t, src, outs)
+
+			// The destructured formals must still be readable — they decide
+			// whether conform has to splice `conformist`/`just-us` args in.
+			assert.True(t, outs.ArgNames["self"])
+			assert.True(t, outs.ArgNames["nixpkgs"])
+			assert.False(t, outs.ArgNames["conformist"], "an absent formal must not be reported")
+
+			// The at-pattern's own name shares the formal namespace: Nix rejects
+			// `{ inputs, … }@inputs:` as a duplicate formal, so conform must see
+			// it as taken.
+			assert.True(t, outs.ArgNames["inputs"],
+				"the at-pattern name must be registered so a splice cannot collide with it")
+
+			// The argument splice still lands just inside the brace.
+			assert.Equal(t, byte('{'), src[outs.ArgInsertOff-1],
+				"ArgInsertOff must sit immediately after the argset's opening brace")
+		})
+	}
+}
+
+// TestParseFlakeChainedLet is conformist#105: sibling `let … in let … in`
+// blocks before the returned attrset. Distinct from the nested let (which sits
+// inside a binding VALUE); these are siblings, a normal way to stage bindings
+// that depend on an earlier block. Frees clown.
+func TestParseFlakeChainedLet(t *testing.T) {
+	src := withInputs(
+		`    { self, nixpkgs, utils }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        conformistPkg = pkgs.hello;
+      in
+      let
+        lib = pkgs.lib;
+      in
+      let
+        third = lib.id 1;
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.just
+          ];
+        };
+      }
+    );
+`,
+	)
+
+	_, outs, err := flakeparse.ParseFlake([]byte(src))
+	require.NoError(t, err, "chained sibling let blocks must not fail the shape match")
+
+	// LetExisting must be the UNION across every block. Reading only the first
+	// (or only the last) would let the idempotency sentinel misfire: a flake
+	// whose conformist bindings live in an earlier block would look unwired and
+	// get a duplicate set spliced in.
+	for _, name := range []string{"pkgs", "conformistPkg", "lib", "third"} {
+		assert.True(t, outs.LetExisting[name],
+			"binding %q from a chained block must be in the union", name)
+	}
+
+	// The splice point must be the LAST `in`, so a new binding can reference
+	// anything bound in an earlier block.
+	assert.Equal(t, "in", src[outs.LetCloseOff:outs.LetCloseOff+2],
+		"LetCloseOff must point at an `in` keyword")
+	assert.Greater(t, outs.LetCloseOff, strings.Index(src, "third = "),
+		"LetCloseOff must be the LAST `in`, after every chained block")
+
+	assertPackagesOffsets(t, src, outs)
+}
+
 // TestParseFlakeUnrecognizedShapes pins the refusals. The narrow roster IS the
 // safety story for a destructive sweep, so widening it for the paren
 // (conformist#101) or the hybrid (conformist#65) must not drag these in too.
@@ -380,52 +497,6 @@ func TestParseFlakeUnrecognizedShapes(t *testing.T) {
 		"no let in": withInputs(
 			`    { self, nixpkgs, utils }:
     utils.lib.eachDefaultSystem (system: { packages.default = 1; });
-`,
-		),
-
-		// A CHAINED `let … in let … in { … }` per-system body (clown). Distinct
-		// from the already-fixed NESTED let, which sits inside a binding value;
-		// this one is two sibling let blocks. SystemLambda allows only one, so
-		// ReturnAttrSet finds `let` where it wants `{`. Another parser gap —
-		// pinned so the current behaviour is explicit.
-		"chained let in let": withInputs(
-			`    { self, nixpkgs, utils }:
-    utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in
-      let
-        lib = pkgs.lib;
-      in
-      {
-        packages.default = lib.id pkgs.hello;
-      }
-    );
-`,
-		),
-
-		// An `}@inputs:` at-pattern on the outputs argument (just-us). ArgSet is
-		// followed directly by `Trivia Colon`, so the `@inputs` between them
-		// fails the match. Arguably another pure parser gap rather than a
-		// genuinely different shape — pinned here so the current behaviour is
-		// explicit rather than incidental.
-		"at-pattern outputs arg": withInputs(
-			`    {
-      self,
-      nixpkgs,
-      utils,
-      ...
-    }@inputs:
-    utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in
-      {
-        packages.default = pkgs.hello;
-      }
-    );
 `,
 		),
 

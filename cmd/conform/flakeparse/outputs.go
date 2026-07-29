@@ -186,19 +186,49 @@ func parseOutputs(src []byte, base, end int) (ParsedOutputs, bool) {
 	out.ArgIndent = LineIndent(src, base+tree.Span(braceOpen).Start.Cursor) + "  "
 	out.ArgNames = identifiers(tree.Text(argSet))
 
-	inKw, ok := childNamed(tree, sysLambda, "InKw")
-	if !ok {
+	// An at-pattern's bound name shares the formal namespace: Nix rejects
+	// `{ conformist, … }@conformist:` as a duplicate formal argument. The name
+	// is NOT inside argSet's text, so register it explicitly or conform could
+	// splice an argument that collides with it (conformist#104). Both spellings
+	// are checked; the lookup goes via the wrapper because the navigation
+	// helper does not descend into a named node.
+	for _, ruleName := range []string{"AtLead", "AtTrail"} {
+		at, ok := childNamed(tree, outputs, ruleName)
+		if !ok {
+			continue
+		}
+
+		if name, ok := childNamed(tree, at, "AtName"); ok {
+			out.ArgNames[tree.Text(name)] = true
+		}
+	}
+
+	// The per-system body may chain several sibling `let … in` blocks
+	// (conformist#105). Splice before the LAST `in`, so a new binding can
+	// reference anything bound in an earlier block.
+	inKws := childrenNamed(tree, sysLambda, "InKw")
+	if len(inKws) == 0 {
 		return ParsedOutputs{}, false
 	}
-	letClose := tree.Span(inKw).Start.Cursor
+	letClose := tree.Span(inKws[len(inKws)-1]).Start.Cursor
 	out.LetCloseOff = base + letClose
 	out.LetIndent = LineIndent(src, out.LetCloseOff) + "  "
 
-	letBlock, ok := childNamed(tree, sysLambda, "LetBlock")
-	if !ok {
+	// Names come from the UNION of every block. Reading only one would let the
+	// idempotency sentinel misfire: a flake whose conformist bindings sit in an
+	// earlier block would look unwired and get a duplicate set spliced in.
+	letBlocks := childrenNamed(tree, sysLambda, "LetBlock")
+	if len(letBlocks) == 0 {
 		return ParsedOutputs{}, false
 	}
-	out.LetExisting = bindingNames(tree, letBlock)
+
+	out.LetExisting = map[string]bool{}
+
+	for _, block := range letBlocks {
+		for name := range bindingNames(tree, block) {
+			out.LetExisting[name] = true
+		}
+	}
 
 	retSet, ok := childNamed(tree, sysLambda, "ReturnAttrSet")
 	if !ok {

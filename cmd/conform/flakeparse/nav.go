@@ -38,6 +38,33 @@ func childNamed(tree langlang.Tree, n langlang.NodeID, name string) (langlang.No
 	return 0, false
 }
 
+// childrenNamed returns EVERY direct (or single-child) descendant of n whose
+// rule name matches, in source order. It uses the same containment rule as
+// childNamed — descend through anonymous/Sequence wrappers, never into another
+// named node — so a repeated group like SystemLambda's `(LetKw LetBlock InKw
+// Trivia)+` yields exactly that chain's nodes, without reaching into a
+// LetBlock and picking up a NESTED let's LetKw/InKw (conformist#105).
+func childrenNamed(tree langlang.Tree, n langlang.NodeID, name string) []langlang.NodeID {
+	var out []langlang.NodeID
+
+	var walk func(langlang.NodeID)
+	walk = func(node langlang.NodeID) {
+		for _, c := range tree.Children(node) {
+			if nodeName(tree, c) == name {
+				out = append(out, c)
+
+				continue
+			}
+			if nodeName(tree, c) == "" || tree.Type(c) == langlang.NodeType_Sequence {
+				walk(c)
+			}
+		}
+	}
+	walk(n)
+
+	return out
+}
+
 // firstSequence returns the first Sequence node at or just below n.
 func firstSequence(tree langlang.Tree, n langlang.NodeID) (langlang.NodeID, bool) {
 	if tree.Type(n) == langlang.NodeType_Sequence {
