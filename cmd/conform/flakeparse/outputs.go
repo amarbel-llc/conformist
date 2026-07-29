@@ -419,26 +419,10 @@ func bindingPaths(tree langlang.Tree, block langlang.NodeID) map[string]bool {
 
 // collectBindings returns the direct Binding nodes under a node,
 // descending through anonymous/Sequence wrappers but never into a
-// Binding itself.
+// Binding itself — childrenNamed's containment rule, which is exactly
+// this one, so there is a single implementation of it.
 func collectBindings(tree langlang.Tree, node langlang.NodeID) []langlang.NodeID {
-	var out []langlang.NodeID
-	var walk func(n langlang.NodeID)
-	walk = func(n langlang.NodeID) {
-		for _, c := range tree.Children(n) {
-			if nodeName(tree, c) == ruleBinding {
-				out = append(out, c)
-
-				continue
-			}
-
-			if nodeName(tree, c) == "" || tree.Type(c) == langlang.NodeType_Sequence {
-				walk(c)
-			}
-		}
-	}
-	walk(node)
-
-	return out
+	return childrenNamed(tree, node, ruleBinding)
 }
 
 // identifiers returns the set of bare identifiers appearing in s (used

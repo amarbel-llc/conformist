@@ -144,35 +144,26 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 
 	ls := *outs.DevShellPackages
 
-	// Categorize each migration entry.
-	type entry struct {
-		m      ListElementMigration
-		status elementStatus
-	}
-	entries := make([]entry, len(migrations))
-	for i, m := range migrations {
-		entries[i] = entry{m: m, status: checkElement(ls.Inner, m)}
-	}
-
+	// Categorize each migration, collecting the pending ones as we go rather
+	// than tagging every entry and re-filtering for the same predicate twice
+	// below. The satisfied count is just len(report.Satisfied).
 	var (
-		report    ClobberReport
-		pending   int
-		satisfied int
+		report  ClobberReport
+		pending []ListElementMigration
 	)
 
-	for _, e := range entries {
-		switch e.status {
+	for _, m := range migrations {
+		switch checkElement(ls.Inner, m) {
 		case elementPending:
-			pending++
+			pending = append(pending, m)
 		case elementSatisfied:
-			satisfied++
-			if e.m.New != "" {
+			if m.New != "" {
 				report.Satisfied = append(
 					report.Satisfied,
-					fmt.Sprintf("%q already replaced with %q", e.m.Old, e.m.New),
+					fmt.Sprintf("%q already replaced with %q", m.Old, m.New),
 				)
 			} else {
-				report.Satisfied = append(report.Satisfied, fmt.Sprintf("%q already removed", e.m.Old))
+				report.Satisfied = append(report.Satisfied, fmt.Sprintf("%q already removed", m.Old))
 			}
 		case elementUnknown:
 			// N/A: neither Old nor New found; migration doesn't apply to this
@@ -180,66 +171,58 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 			// it so the sweep log says so rather than staying silent.
 			report.NotApplicable = append(
 				report.NotApplicable,
-				fmt.Sprintf("%q not present — migration does not apply", e.m.Old),
+				fmt.Sprintf("%q not present — migration does not apply", m.Old),
 			)
 		case elementConflict:
 			return src, ClobberReport{}, fmt.Errorf(
 				"flakeclobber: both %q and %q present in packages list — ambiguous state",
-				e.m.Old, e.m.New,
+				m.Old, m.New,
 			)
 		}
 	}
 
 	// All satisfied/N/A → idempotent no-op.
-	if pending == 0 {
+	if len(pending) == 0 {
 		return src, report, nil
 	}
 
 	// Mixed satisfied + pending → partial state, refuse all edits.
-	if satisfied > 0 {
+	if len(report.Satisfied) > 0 {
 		return src, ClobberReport{}, ErrPartialState
 	}
 
 	// Preconditions checked BEFORE any splice is built, so a refusal leaves
 	// src untouched.
-	for _, e := range entries {
-		if e.status != elementPending {
-			continue
-		}
-
+	for _, m := range pending {
 		// A duplicated element cannot be migrated by a single-span splice:
 		// rewriting the first occurrence would strand the rest.
-		if n := len(flakeparse.TokenIndices(ls.Inner, e.m.Old)); n > 1 {
+		if n := len(flakeparse.TokenIndices(ls.Inner, m.Old)); n > 1 {
 			return src, ClobberReport{}, fmt.Errorf(
-				"%w: %q appears %d times", ErrDuplicateElement, e.m.Old, n,
+				"%w: %q appears %d times", ErrDuplicateElement, m.Old, n,
 			)
 		}
 
-		if err := checkBound(outs, e.m.New); err != nil {
+		if err := checkBound(outs, m.New); err != nil {
 			return src, ClobberReport{}, err
 		}
 	}
 
-	// All pending → build splices and apply highest-offset first so earlier
-	// offsets stay valid (same invariant as flakeedit.Apply).
-	var splices []flakeparse.Splice
+	// Build splices and apply highest-offset first so earlier offsets stay
+	// valid (same invariant as flakeedit.Apply).
+	splices := make([]flakeparse.Splice, 0, len(pending))
 
-	for _, e := range entries {
-		if e.status != elementPending {
-			continue
-		}
-
-		sp, ok := listElementSplice(src, ls, e.m)
+	for _, m := range pending {
+		sp, ok := listElementSplice(src, ls, m)
 		if !ok {
-			return src, ClobberReport{}, fmt.Errorf("flakeclobber: could not locate span for %q", e.m.Old)
+			return src, ClobberReport{}, fmt.Errorf("flakeclobber: could not locate span for %q", m.Old)
 		}
 
 		splices = append(splices, sp)
 
-		if e.m.New == "" {
-			report.Applied = append(report.Applied, fmt.Sprintf("removed %q", e.m.Old))
+		if m.New == "" {
+			report.Applied = append(report.Applied, fmt.Sprintf("removed %q", m.Old))
 		} else {
-			report.Applied = append(report.Applied, fmt.Sprintf("replaced %q with %q", e.m.Old, e.m.New))
+			report.Applied = append(report.Applied, fmt.Sprintf("replaced %q with %q", m.Old, m.New))
 		}
 	}
 

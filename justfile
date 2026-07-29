@@ -396,20 +396,28 @@ debug-flakeparse-bisect target:
         exit 1
     fi
 
-    # For each binding, delete just that binding (up to the line before the
-    # next one) and see whether the file starts parsing.
-    # The LAST binding runs to the line before `in`; without that case it would
-    # never be tested, and the culprit can perfectly well be the last one.
-    lastline=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    # The let block's delimiters, resolved ONCE and reused by all three phases.
+    letline=$(grep -nE '^      let[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+    inline=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
+
+    # Each binding spans from its own line to the line before the next one; the
+    # LAST runs to the line before `in`. Computed once into a parallel array so
+    # the two phases below cannot disagree about the ranges.
+    ranges=()
     for i in "${!binds[@]}"; do
         start=${binds[$i]}
         if [ $((i + 1)) -lt "${#binds[@]}" ]; then
-            end=$(( binds[$((i + 1))] - 1 ))
-        elif [ -n "$lastline" ] && [ "$lastline" -gt "$start" ]; then
-            end=$(( lastline - 1 ))
-        else
-            continue
+            ranges[$i]="${start}:$(( binds[$((i + 1))] - 1 ))"
+        elif [ -n "$inline" ] && [ "$inline" -gt "$start" ]; then
+            ranges[$i]="${start}:$(( inline - 1 ))"
         fi
+    done
+
+    # Phase 1 — necessity: does removing this binding alone clear the failure?
+    # Kept ahead of phase 2 only because its single-culprit output is the
+    # clearest answer when there IS exactly one; phase 2 subsumes it otherwise.
+    for i in "${!ranges[@]}"; do
+        IFS=: read -r start end <<< "${ranges[$i]}"
         sed "${start},${end}d" "$tmp/full.nix" > "$tmp/cut.nix"
         if parses "$tmp/cut.nix"; then
             echo
@@ -423,19 +431,12 @@ debug-flakeparse-bisect target:
     # rest, which names every culprit instead of only a sole one.
     echo
     echo "no single removal explains it — testing each binding in ISOLATION"
-    inline2=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
-    letline2=$(grep -nE '^      let[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
     culprits=0
-    for i in "${!binds[@]}"; do
-        start=${binds[$i]}
-        if [ $((i + 1)) -lt "${#binds[@]}" ]; then
-            end=$(( binds[$((i + 1))] - 1 ))
-        else
-            end=$(( inline2 - 1 ))
-        fi
+    for i in "${!ranges[@]}"; do
+        IFS=: read -r start end <<< "${ranges[$i]}"
         # Delete the tail range first so the head range's numbers stay valid.
-        { [ "$end" -lt $(( inline2 - 1 )) ] && printf '%s,%sd\n' "$((end + 1))" "$((inline2 - 1))"; \
-          [ "$start" -gt $(( letline2 + 1 )) ] && printf '%s,%sd\n' "$((letline2 + 1))" "$((start - 1))"; } \
+        { [ "$end" -lt $(( inline - 1 )) ] && printf '%s,%sd\n' "$((end + 1))" "$((inline - 1))"; \
+          [ "$start" -gt $(( letline + 1 )) ] && printf '%s,%sd\n' "$((letline + 1))" "$((start - 1))"; } \
             > "$tmp/script.sed"
         sed -f "$tmp/script.sed" "$tmp/full.nix" > "$tmp/only.nix"
         if ! parses "$tmp/only.nix"; then
@@ -457,8 +458,6 @@ debug-flakeparse-bisect target:
     # return attrset BODY, and see which one clears the failure. That separates
     # "some construct inside the let" from "some construct inside the returned
     # attrset" from "the head/arg structure itself".
-    letline=$(grep -nE '^      let[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
-    inline=$(grep -nE '^      in[[:space:]]*$' "$tmp/full.nix" | head -1 | cut -d: -f1)
     openline=$(( inline + 1 ))
     closeline=$(grep -nE '^      \}[[:space:]]*$' "$tmp/full.nix" | tail -1 | cut -d: -f1)
     echo "  let=$letline in=$inline return-open=$openline return-close=$closeline"
@@ -495,9 +494,13 @@ debug-flakeparse-bisect target:
 #
 # diff flakeclobber's fleet-wide output against a reference commit
 [group("debug")]
-debug-flakeclobber-regression ref="383ed65" root="/home/sasha/eng/repos":
+debug-flakeclobber-regression ref="master" root=env_var_or_default("ENG_REPOS", ""):
     #!/usr/bin/env bash
     set -uo pipefail
+    if [ -z "{{ root }}" ]; then
+        echo "set ENG_REPOS (or pass root=…) to the directory holding the fleet's repos" >&2
+        exit 2
+    fi
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
     # Materialise the reference commit WITHOUT touching the working tree or the
@@ -505,10 +508,13 @@ debug-flakeclobber-regression ref="383ed65" root="/home/sasha/eng/repos":
     # this checkout.
     mkdir -p "$tmp/ref"
     git archive "{{ ref }}" | tar -x -C "$tmp/ref" || exit 2
-    ( cd "$tmp/ref" && nix develop "$PWD/../.." --command go build -o "$tmp/fc-ref" ./cmd/flakeclobber ) \
-        || nix develop --command sh -c "cd '$tmp/ref' && go build -o '$tmp/fc-ref' ./cmd/flakeclobber" \
-        || exit 2
-    nix develop --command go build -o "$tmp/fc-new" ./cmd/flakeclobber || exit 2
+    # Both builds enter the WORKING TREE's devShell (the reference checkout has
+    # no flake context of its own here) and build in one shell, so this costs
+    # one devShell entry rather than two.
+    nix develop --command sh -c "
+        cd '$tmp/ref' && go build -o '$tmp/fc-ref' ./cmd/flakeclobber || exit 1
+        cd '$PWD'     && go build -o '$tmp/fc-new' ./cmd/flakeclobber
+    " || exit 2
 
     same=0; differ=0; newly=0
     for f in "{{ root }}"/*/flake.nix; do
@@ -657,7 +663,10 @@ verify-flakeedit-parse:
 verify-flakeclobber-parse:
     #!/usr/bin/env bash
     set -euo pipefail
-    bin="$(mktemp -d)/flakeclobber"
+    # One scratch root with a trap: this runs in the CI lane on every merge, so
+    # per-fixture mktemp -d without cleanup would accumulate ~7 dirs per run.
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    bin="$tmp/flakeclobber"
     nix develop --command go build -o "$bin" ./cmd/flakeclobber
 
     fail=0
@@ -676,7 +685,7 @@ verify-flakeclobber-parse:
             echo "verify-flakeclobber-parse: missing fixture $src" >&2
             exit 2
         fi
-        d="$(mktemp -d)"
+        d="$(mktemp -d -p "$tmp")"
         cp "$src" "$d/flake.nix"
         before="$(sha256sum < "$d/flake.nix")"
 
@@ -716,7 +725,7 @@ verify-flakeclobber-parse:
     # The conformist#100 hazard: replacing pkgs.just with an identifier nothing
     # binds must be REFUSED, not written. --parse cannot catch it (syntax-only),
     # so this asserts the static binding check does.
-    d="$(mktemp -d)"
+    d="$(mktemp -d -p "$tmp")"
     cp test/flakeclobber/old-wiring.nix "$d/flake.nix"
     before="$(sha256sum < "$d/flake.nix")"
     rc=0
@@ -922,48 +931,6 @@ debug-yaml-roundtrip:
         exit "$fail"
     ' bash "$tmp"
 
-# Reproducer for the flakeclobber --apply parse gate never passing,
-# so no file is ever written. Isolates the four ways nix-instantiate can be handed
-# a source (path / /dev/stdin from a redirect / /dev/stdin from a PIPE / `-` from a
-# pipe) — Go gives a non-*os.File Stdin an os.Pipe, so nix resolves /dev/stdin to
-# /proc/N/fd/pipe:[…], which is not a path — then runs the real binary end-to-end
-# and reports whether the target file actually changed on disk. Diagnostic only —
-# the standing gate is verify-flakeclobber-parse.
-#
-# reproduce the flakeclobber --apply parse-gate failure
-[group("debug")]
-debug-flakeclobber-stdin:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-    cp test/flakeclobber/old-wiring.nix "$tmp/probe.nix"
-
-    echo "=== nix-instantiate --parse input modes (nix $(nix --version | awk '{print $3}')) ==="
-    nix-instantiate --parse "$tmp/probe.nix" >/dev/null 2>&1
-    echo "  --parse <file path>            exit=$?"
-    nix-instantiate --parse /dev/stdin < "$tmp/probe.nix" >/dev/null 2>&1
-    echo "  --parse /dev/stdin < file      exit=$?"
-    cat "$tmp/probe.nix" | nix-instantiate --parse /dev/stdin >/dev/null 2>&1
-    echo "  --parse /dev/stdin from PIPE   exit=$?"
-    cat "$tmp/probe.nix" | nix-instantiate --parse - >/dev/null 2>&1
-    echo "  --parse - from PIPE            exit=$?"
-
-    echo
-    echo "=== flakeclobber --apply end-to-end (does the file change on disk?) ==="
-    bin="$tmp/flakeclobber"
-    nix develop --command go build -o "$bin" ./cmd/flakeclobber
-    cp test/flakeclobber/old-wiring.nix "$tmp/flake.nix"
-    before=$(sha256sum < "$tmp/flake.nix")
-    "$bin" --apply --old pkgs.just --new justPkg "$tmp/flake.nix"
-    echo "  flakeclobber exit=$?"
-    after=$(sha256sum < "$tmp/flake.nix")
-    if [ "$before" = "$after" ]; then
-        echo "  RESULT: file is BYTE-IDENTICAL — the write never happened"
-    else
-        echo "  RESULT: file was rewritten"
-        grep -n 'justPkg\|pkgs.just' "$tmp/flake.nix"
-    fi
-
 # Measure flakeclobber's recognition coverage across the real fleet: DRY-RUN the
 # binary over every repo's top-level flake.nix under ROOT and tally the outcomes
 # (would-migrate / already-migrated / not-applicable / unrecognized / no-devshell).
@@ -973,12 +940,39 @@ debug-flakeclobber-stdin:
 #
 # tally flakeclobber recognition across the fleet's flake.nix files
 [group("debug")]
-debug-flakeclobber-coverage root="/home/sasha/eng/repos":
+debug-flakeclobber-coverage root=env_var_or_default("ENG_REPOS", ""):
     #!/usr/bin/env bash
     set -uo pipefail
+    if [ -z "{{ root }}" ]; then
+        echo "set ENG_REPOS (or pass root=…) to the directory holding the fleet's repos" >&2
+        exit 2
+    fi
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
     bin="$tmp/flakeclobber"
     nix develop --command go build -o "$bin" ./cmd/flakeclobber || exit 2
+
+    # ONE classifier for all three passes below. It matches on message text
+    # owned by clobber.go/main.go, so a reworded message must be reflected here
+    # — having had three copies, the third had already drifted (it dropped the
+    # unbound-justPkg arm), which silently bucketed a real verdict as "other".
+    # $2 is the applied/satisfied verb pair, which differs between replace mode
+    # ("replaced") and delete mode ("removed").
+    classify() {
+        case "$1" in
+            *"not the recognized eachDefaultSystem shape"*)       echo unrecognized ;;
+            *"no devShells.default packages list"*)               echo no-devshell ;;
+            *"is neither a let binding nor an outputs argument"*) echo unbound-justPkg ;;
+            *"redefined on the trailing // merge side"*)          echo shadowed-devshell ;;
+            *"[dry-run] $2"*)                                     echo would-migrate ;;
+            *"already $2"*)                                       echo already-migrated ;;
+            *"migration does not apply"*)                         echo not-applicable ;;
+            "")                                                   echo SILENT ;;
+            *)                                                    echo other ;;
+        esac
+    }
+    tally() {
+        sort "$1" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
+    }
 
     : > "$tmp/log"
     total=0
@@ -987,21 +981,11 @@ debug-flakeclobber-coverage root="/home/sasha/eng/repos":
         total=$((total + 1))
         repo=$(basename "$(dirname "$f")")
         out=$("$bin" --old pkgs.just --new justPkg "$f" 2>&1)
-        case "$out" in
-            *"not the recognized eachDefaultSystem shape"*) verdict=unrecognized ;;
-            *"no devShells.default packages list"*)         verdict=no-devshell ;;
-            *"is neither a let binding nor an outputs argument"*) verdict=unbound-justPkg ;;
-            *"[dry-run] replaced"*)                         verdict=would-migrate ;;
-            *"already replaced"*)                           verdict=already-migrated ;;
-            *"migration does not apply"*)                   verdict=not-applicable ;;
-            "")                                             verdict=SILENT ;;
-            *)                                              verdict=other ;;
-        esac
-        printf '%s\t%s\n' "$verdict" "$repo" >> "$tmp/log"
+        printf '%s\t%s\n' "$(classify "$out" replaced)" "$repo" >> "$tmp/log"
     done
 
     echo "=== flakeclobber coverage over {{ root }} ($total flake.nix files) ==="
-    sort "$tmp/log" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
+    tally "$tmp/log"
     echo
     echo "=== repos with pkgs.just on its own line (the migration population) ==="
     pop=0
@@ -1078,16 +1062,7 @@ debug-flakeclobber-coverage root="/home/sasha/eng/repos":
         cp "$f" "$d/flake.nix"
         ( cd "$d" && "$conformbin" conform ) >/dev/null 2>&1 || true
         out=$("$bin" --old pkgs.just --new justPkg "$d/flake.nix" 2>&1)
-        case "$out" in
-            *"not the recognized eachDefaultSystem shape"*) verdict=unrecognized ;;
-            *"no devShells.default packages list"*)         verdict=no-devshell ;;
-            *"is neither a let binding nor an outputs argument"*) verdict=unbound-justPkg ;;
-            *"[dry-run] replaced"*)                         verdict=would-migrate ;;
-            *"already replaced"*)                           verdict=already-migrated ;;
-            *"migration does not apply"*)                   verdict=not-applicable ;;
-            "")                                             verdict=SILENT ;;
-            *)                                              verdict=other ;;
-        esac
+        verdict=$(classify "$out" replaced)
         printf '%s\t%s\n' "$verdict" "$repo" >> "$tmp/log2"
         # Surface anything the classifier does not recognize verbatim, so an
         # unexpected outcome is never silently bucketed into "other".
@@ -1102,7 +1077,7 @@ debug-flakeclobber-coverage root="/home/sasha/eng/repos":
         echo
     fi
     echo "=== after conform (additive) THEN flakeclobber --new justPkg ==="
-    sort "$tmp/log2" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
+    tally "$tmp/log2"
     echo
     sort "$tmp/log2" | sed 's/^/  /'
 
@@ -1116,20 +1091,11 @@ debug-flakeclobber-coverage root="/home/sasha/eng/repos":
         [ -d "$d" ] || continue
         repo=$(basename "$d")
         out=$("$bin" --old pkgs.just --new "" "$d/flake.nix" 2>&1)
-        case "$out" in
-            *"not the recognized eachDefaultSystem shape"*) verdict=unrecognized ;;
-            *"no devShells.default packages list"*)         verdict=no-devshell ;;
-            *"[dry-run] removed"*)                          verdict=would-migrate ;;
-            *"already removed"*)                            verdict=already-migrated ;;
-            *"migration does not apply"*)                   verdict=not-applicable ;;
-            "")                                             verdict=SILENT ;;
-            *)                                              verdict=other ;;
-        esac
-        printf '%s\t%s\n' "$verdict" "$repo" >> "$tmp/log3"
+        printf '%s\t%s\n' "$(classify "$out" removed)" "$repo" >> "$tmp/log3"
     done
     echo
     echo '=== after conform THEN flakeclobber --new "" (delete) — the completing path ==='
-    sort "$tmp/log3" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
+    tally "$tmp/log3"
 
 # --- test ---
 

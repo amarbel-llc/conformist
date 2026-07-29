@@ -127,14 +127,7 @@ func TestParseFlakeIdentifiersContainingKeywords(t *testing.T) {
 // parser limitation. It accounted for 5 of the fleet's refusals (dodder,
 // madder, moxy, piggy, tacky).
 func TestParseFlakeParenWrappedCall(t *testing.T) {
-	src := `{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    utils.url = "github:numtide/flake-utils";
-  };
-
-  outputs =
-    { self, nixpkgs, utils }:
+	src := withInputs(`    { self, nixpkgs, utils }:
     (utils.lib.eachDefaultSystem (
       system:
       let
@@ -148,20 +141,15 @@ func TestParseFlakeParenWrappedCall(t *testing.T) {
         };
       }
     ));
-}
-`
+`)
 	_, outs, err := flakeparse.ParseFlake([]byte(src))
 	require.NoError(t, err, "a redundant wrapping paren must not make the shape match fail")
 
 	assert.True(t, outs.LetExisting["pkgs"])
-	require.NotNil(t, outs.DevShellPackages)
 
 	// The splice offsets must still be absolute and correct through the extra
 	// paren — that is the part a punctuation change could silently break.
-	ls := *outs.DevShellPackages
-	assert.Equal(t, byte(']'), src[ls.CloseOff])
-	assert.Equal(t, byte('['), src[ls.InnerStart()])
-	assert.Contains(t, ls.Inner, "pkgs.just")
+	assertPackagesOffsets(t, src, outs)
 }
 
 // assertPackagesOffsets is the check that actually matters for the hybrid
@@ -274,22 +262,14 @@ func TestParseFlakeHybridMerge(t *testing.T) {
 // reports success and does nothing. The names must be recovered so the caller
 // can refuse instead.
 func TestParseFlakeHybridMergeSideAttrsRecorded(t *testing.T) {
-	src := `{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    utils.url = "github:numtide/flake-utils";
-  };
-
-  outputs =
-    { self, nixpkgs, utils }:
+	src := withInputs(`    { self, nixpkgs, utils }:
     utils.lib.eachDefaultSystem (
 ` + hybridBody + `    )
     // {
       nixosModules.default = ./module.nix;
       formatter = pkgs.alejandra;
     };
-}
-`
+`)
 	_, outs, err := flakeparse.ParseFlake([]byte(src))
 	require.NoError(t, err)
 

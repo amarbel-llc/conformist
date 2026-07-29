@@ -160,9 +160,10 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		outdatedWiring = true
 	}
 
-	// Both states mean the existing output attrs are conformist's own, so
-	// they are not reported as conflicts to reconcile.
-	conformistWired := alreadyWired || outdatedWiring
+	// Any non-zero count means the existing output attrs are conformist's own
+	// (the partial case that is NOT ours already returned above), so they are
+	// not reported as conflicts to reconcile.
+	conformistWired := have > 0
 
 	var (
 		report  EditReport
@@ -456,7 +457,7 @@ func returnAttrs() []returnAttr {
 func returnSplice(
 	src []byte,
 	outs flakeparse.ParsedOutputs,
-	alreadyWired, forceFormatter bool,
+	conformistWired, forceFormatter bool,
 ) (flakeparse.Splice, []string, []string) {
 	i := outs.RetIndent
 
@@ -486,7 +487,7 @@ func returnSplice(
 				continue
 			}
 
-			if !alreadyWired {
+			if !conformistWired {
 				conflicts = append(conflicts, a.path)
 			}
 
@@ -494,7 +495,7 @@ func returnSplice(
 		}
 
 		if parent, ok := dottedParent(a.path); ok && outs.RetExisting[parent] {
-			if !alreadyWired {
+			if !conformistWired {
 				conflicts = append(conflicts, a.path)
 			}
 

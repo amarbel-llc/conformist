@@ -60,6 +60,14 @@ not run `just`/`just lint` again right before merging.
   emitting per-build durations to stats-me as `gobuild.conformist.<backend>.<phase>`
   timers (a protocol shared with igloo's dewey bench; uses `nixgc` for cold
   rebuilds). Diagnostic only — not in the CI lane.
+- Fleet-migration diagnostics, all debug-grouped and all taking the fleet root
+  from `$ENG_REPOS` (or `root=…`): `just debug-flakeclobber-coverage` tallies
+  which repos flakeclobber recognizes and why each refusal refuses, over both
+  sweep passes; `just debug-flakeparse-bisect <flake.nix>` isolates which let
+  binding (or which region) makes a file fail the shape match; `just
+  debug-flakeclobber-regression [ref]` builds flakeclobber from a reference
+  commit AND the working tree and diffs their fleet-wide output, so a parser
+  widening can be shown additive rather than assumed so.
 - `just run-nix -- <args>` — `nix run . -- <args>`.
 - `just bump-version` / `just tag` / `just release` — versioning (release only
   from `master`).

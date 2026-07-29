@@ -154,11 +154,14 @@ LetSemiChar   <- !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*'
 //
 // Nested inside a group this never bit, because Inner treats `;` as content —
 // which is exactly why it went unnoticed until posh.
+// The scope expression reuses OuterText: it needs exactly OuterText's
+// behaviour — stop at `;` (here the `with`'s own terminator rather than the
+// binding's), stop at a let/with keyword, consume words atomically. Spelling
+// out a private WithText/WithChunk/WithChar triple produced three rules
+// character-identical to their Outer* counterparts, which meant the
+// keyword-exclusion set had to be kept in lockstep by hand in two places.
 WithGroup     <- WithKw WithScope Semi
-WithScope     <- (Group / String / Comment / WithText)*
-WithText      <- (!(LetKw) !(WithKw) WithChunk)+
-WithChunk     <- OuterWord / WithChar
-WithChar      <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
+WithScope     <- (Group / String / Comment / OuterText)*
 
 Value      <- (LetGroup / WithGroup / Group / String / Comment / OuterText)*
 Inner      <- (Group / String / Comment / InnerText)*

@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/spf13/cobra"
 )
@@ -139,11 +140,7 @@ func run(ctx context.Context, olds, news []string, apply bool, files []string) e
 			// Already migrated, or the migration does not apply. Print BOTH
 			// kinds of entry: a file that produced no output at all is
 			// indistinguishable from a successful migration in a sweep log.
-			for _, s := range report.Satisfied {
-				fmt.Printf("%s: %s\n", path, s)
-			}
-
-			for _, s := range report.NotApplicable {
+			for _, s := range slices.Concat(report.Satisfied, report.NotApplicable) {
 				fmt.Printf("%s: %s\n", path, s)
 			}
 
