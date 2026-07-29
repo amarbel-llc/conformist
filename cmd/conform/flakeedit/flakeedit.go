@@ -209,8 +209,9 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 	report.Added = append(report.Added, added...)
 	report.Conflicts = append(report.Conflicts, conflicts...)
 
-	// 5. devShell packages-list merge (#63)
-	if outs.DevShellPackages != nil {
+	// 5. devShell packages-list merge (#63). Skipped when a trailing `//`
+	// merge redefines devShells: the list we would edit is the shadowed one.
+	if outs.DevShellPackages != nil && !outs.MergeShadows("devShells.default") {
 		if s, ok := devShellMergeSplice(src, *outs.DevShellPackages); ok {
 			splices = append(splices, s)
 			report.Added = append(report.Added, "devShells.default packages")
@@ -465,6 +466,17 @@ func returnSplice(
 		conflicts []string
 	)
 	for _, a := range returnAttrs() {
+		// An attr defined on a TRAILING `//` merge side overrides the same attr
+		// in the per-system body (conformist#65). Splicing it anyway would
+		// produce wiring that is silently dead — a conform run reporting
+		// success while changing nothing observable. Report it instead.
+		if outs.MergeShadows(a.path) {
+			conflicts = append(conflicts,
+				a.path+" (defined on the trailing // merge side, which would override it)")
+
+			continue
+		}
+
 		if outs.RetExisting[a.path] {
 			if a.path == "devShells.default" && outs.DevShellPackages != nil {
 				continue

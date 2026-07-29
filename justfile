@@ -944,21 +944,36 @@ debug-flakeclobber-coverage root="/home/sasha/eng/repos":
     while IFS=$'\t' read -r verdict repo; do
         [ "$verdict" = unrecognized ] || continue
         f="{{ root }}/$repo/flake.nix"
-        # The `//` hybrid has TWO spellings and both are out of roster: the
-        # merge can lead (`{ … } // eachDefaultSystem (…)`) or trail
-        # (`eachDefaultSystem (…) // { … }`, e.g. just-us). An earlier version
-        # of this classifier only caught the leading form and so mislabelled a
-        # hybrid as an unexplained in-roster refusal.
-        if grep -q 'flake-parts' "$f"; then
-            why="flake-parts (out of roster)"
-        elif grep -qE '^[[:space:]]*//[[:space:]]*\{|//[[:space:]]*.*eachDefaultSystem' "$f"; then
-            why="hybrid-// (conformist#65, out of roster)"
-        elif grep -qE 'forAllSystems|genAttrs' "$f"; then
-            why="raw forAllSystems/genAttrs (out of roster)"
+        # NOTE: the `//` hybrid (conformist#65) and the wrapping paren
+        # (conformist#101) are now RECOGNIZED, so neither is a refusal reason
+        # any more — do not re-add them here. Order matters: the specific
+        # shapes are tested before the generic fallbacks, because a file can
+        # match several greps at once (which is why these labels are a
+        # heuristic, not proof — verify a surprising one by reading the file).
+        if grep -qE '\}[[:space:]]*@[[:space:]]*[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*:' "$f"; then
+            why="@-pattern outputs arg (\`}@inputs:\`) — parser gap"
+        elif grep -qE 'lib\.eachSystem|eachSystemMap' "$f"; then
+            why="eachSystem variant, not eachDefaultSystem (out of roster)"
         elif grep -qE '^[[:space:]]*rec[[:space:]]*\{' "$f"; then
             why="rec { } per-system return — splicable but rec-scoped, refused"
-        elif grep -qE '^[[:space:]]{6,10}[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*=[[:space:]]*with[[:space:]]' "$f"; then
-            why="top-level 'with <expr>;' in a binding value (conformist#103)"
+        # A bare `in` line immediately followed by a bare `let` line. awk, not
+        # grep: this is a two-LINE pattern, and `grep -E` does not interpret a
+        # \n in the pattern (it warns "stray \ before n" and silently matches
+        # nothing).
+        elif awk '
+                prev ~ /^[[:space:]]*in[[:space:]]*$/ && $0 ~ /^[[:space:]]*let[[:space:]]*$/ { found = 1 }
+                { prev = $0 }
+                END { exit !found }
+            ' "$f"; then
+            why="chained 'let … in let … in' per-system body — parser gap"
+        # forAllSystems/genAttrs is checked BEFORE flake-parts: a repo often
+        # merely DECLARES flake-parts as an input while its outputs are a raw
+        # genAttrs flake (igloo), and testing for the string first mislabels it.
+        # flake-parts proper is identified by its mkFlake call.
+        elif grep -qE 'forAllSystems|genAttrs' "$f"; then
+            why="raw forAllSystems/genAttrs (out of roster)"
+        elif grep -q 'mkFlake' "$f"; then
+            why="flake-parts (out of roster)"
         elif grep -q 'eachDefaultSystem' "$f"; then
             why="PLAIN eachDefaultSystem — IN roster, cause NOT identified"
         else

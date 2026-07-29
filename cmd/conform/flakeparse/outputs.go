@@ -32,6 +32,24 @@ type ParsedOutputs struct {
 	RetIndent   string
 	RetExisting map[string]bool
 
+	// MergeExisting is the set of attr-paths defined on the MERGE side of an
+	// eng-hybrid `<attrs> // eachDefaultSystem (…)` (or its trailing spelling).
+	// Empty when there is no merge.
+	//
+	// It exists because `//` gives the RIGHT operand precedence. An attr
+	// defined on a trailing merge side SHADOWS the same attr in the per-system
+	// body, so wiring spliced into the per-system attrset would be silently
+	// overridden — the failure mode would be a conform run that reports success
+	// and changes nothing observable. Callers check this and report a conflict
+	// rather than writing dead wiring (conformist#65).
+	MergeExisting map[string]bool
+
+	// MergeIsTrailing reports whether the merge attrset FOLLOWS the call
+	// (`each (…) // { … }`), which is the direction that actually shadows.
+	// A leading merge (`{ … } // each (…)`) is overridden BY the per-system
+	// body, so a collision there is harmless to the splice.
+	MergeIsTrailing bool
+
 	// DevShellPackages, when non-nil, locates the `packages = [ … ]` list
 	// inside an existing devShells.default binding, so conform can merge
 	// its tools into that list instead of reporting a conflict. Nil when
@@ -42,6 +60,36 @@ type ParsedOutputs struct {
 	// formatter attribute's value, so conform can replace it under
 	// --force-formatter. Nil when formatter is absent.
 	FormatterValue *ValueRange
+}
+
+// MergeShadows reports whether splicing the attr-path path into the
+// per-system return attrset would be overridden by the hybrid's merge side.
+//
+// Only a TRAILING merge shadows: `each (…) // { … }` gives the merge side
+// precedence, so an attr defined there wins over the same attr in the
+// per-system body. A LEADING merge (`{ … } // each (…)`) is the other way
+// round and is harmless.
+//
+// Only the ROOT segment of each side is compared, because `//` is a SHALLOW
+// update: it replaces whole top-level attrs rather than deep-merging them. A
+// merge side spelling `devShells.x86_64-linux.default = …` therefore replaces
+// the ENTIRE `devShells` attr, shadowing `devShells.default` in the per-system
+// body — so comparing full paths, or only the query's root against a literal
+// merge key, would both miss it.
+func (p ParsedOutputs) MergeShadows(path string) bool {
+	if !p.MergeIsTrailing || len(p.MergeExisting) == 0 {
+		return false
+	}
+
+	want, _, _ := strings.Cut(path, ".")
+
+	for key := range p.MergeExisting {
+		if root, _, _ := strings.Cut(key, "."); root == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ListSplice locates an existing Nix list for in-place merging: CloseOff
@@ -164,6 +212,28 @@ func parseOutputs(src []byte, base, end int) (ParsedOutputs, bool) {
 	out.RetCloseOff = base + retClose
 	out.RetIndent = LineIndent(src, out.RetCloseOff) + "  "
 	out.RetExisting = bindingPaths(tree, retSet)
+
+	out.MergeExisting = map[string]bool{}
+
+	// A trailing merge shadows the per-system body; a leading one is shadowed
+	// by it. Record which, so the caller only treats the dangerous direction
+	// as a conflict.
+	mergeNode, mergeOK := childNamed(tree, outputs, "TrailMerge")
+	if mergeOK {
+		out.MergeIsTrailing = true
+	} else {
+		mergeNode, mergeOK = childNamed(tree, outputs, "LeadMerge")
+	}
+
+	if mergeOK {
+		if set, ok := childNamed(tree, mergeNode, "MergeSet"); ok {
+			if inner, ok := childNamed(tree, set, "Inner"); ok {
+				for _, key := range ScanBlockKeys(tree.Text(inner)) {
+					out.MergeExisting[key] = true
+				}
+			}
+		}
+	}
 
 	if out.RetExisting["devShells.default"] {
 		if val, ok := bindingValue(tree, retSet, "devShells.default"); ok {

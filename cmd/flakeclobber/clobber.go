@@ -29,6 +29,15 @@ var ErrNoDevShell = errors.New("flakeclobber: no devShells.default packages list
 // all-or-nothing contract; the operator dedupes by hand.
 var ErrDuplicateElement = errors.New("flakeclobber: element occurs more than once in packages list")
 
+// ErrShadowedTarget is returned when the flake is an eng-hybrid whose trailing
+// `//` merge redefines devShells. `//` gives its right operand precedence, so
+// the per-system packages list this tool edits is not the one the flake
+// actually exposes; rewriting it would be a destructive edit with no effect.
+var ErrShadowedTarget = errors.New(
+	"flakeclobber: devShells is redefined on the trailing // merge side, " +
+		"so the per-system packages list is shadowed",
+)
+
 // ErrUnboundElement is returned when New is a bare identifier that nothing in
 // the flake binds — neither a per-system `let` binding nor an outputs
 // argument.
@@ -66,8 +75,7 @@ type ClobberReport struct {
 	// NotApplicable lists each migration whose Old and New are both absent,
 	// so it does not apply to this file. Recorded explicitly so a sweep over
 	// ~34 repos reports "did not apply" instead of printing nothing, which in
-	// a run log is indistinguishable from a successful migration
-	//.
+	// a run log is indistinguishable from a successful migration.
 	NotApplicable []string
 }
 
@@ -120,6 +128,14 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 	_, outs, err := flakeparse.ParseFlake(src)
 	if err != nil {
 		return src, ClobberReport{}, fmt.Errorf("flakeclobber: %w", err)
+	}
+
+	// An eng-hybrid whose TRAILING `//` merge redefines devShells overrides the
+	// per-system list this tool edits, so a rewrite here would change bytes
+	// that no longer affect the flake's outputs — a destructive edit with no
+	// effect, which is worse than refusing (conformist#65).
+	if outs.MergeShadows("devShells.default") {
+		return src, ClobberReport{}, ErrShadowedTarget
 	}
 
 	if outs.DevShellPackages == nil {

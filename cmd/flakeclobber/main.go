@@ -138,8 +138,7 @@ func run(ctx context.Context, olds, news []string, apply bool, files []string) e
 		if !report.Changed() {
 			// Already migrated, or the migration does not apply. Print BOTH
 			// kinds of entry: a file that produced no output at all is
-			// indistinguishable from a successful migration in a sweep log
-			//.
+			// indistinguishable from a successful migration in a sweep log.
 			for _, s := range report.Satisfied {
 				fmt.Printf("%s: %s\n", path, s)
 			}

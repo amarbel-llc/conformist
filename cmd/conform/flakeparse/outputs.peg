@@ -26,20 +26,44 @@
 
 File         <- Trivia Outputs Trivia EOF
 
-// Two alternatives differing ONLY in a redundant paren wrapping the whole
-// eachDefaultSystem application: `(utils.lib.eachDefaultSystem (…))` is the
-// same shape as `utils.lib.eachDefaultSystem (…)` — in Nix a wrapping paren is
-// identity, so refusing it was a parser limitation, not a policy choice
-// (conformist#101). It is NOT a roster widening: flake-parts, raw
-// forAllSystems/genAttrs and the `//` hybrid stay refused.
+// ONE sequence with optional parts, rather than an alternative per shape:
+// the eng-hybrid `//` merge (conformist#65) and the redundant wrapping paren
+// (conformist#101) combine freely, and spelling them out would need eight
+// branches.
 //
-// The branches are written out in full rather than factored behind a shared
-// rule because ArgSet and SystemLambda must remain DIRECT children of Outputs:
-// the navigation helper descends only through anonymous/Sequence nodes, so a
-// named wrapper rule would hide them and break the offset math.
-Outputs      <- ArgSet Trivia Colon Trivia OuterLet? ParenOpen Trivia OuterLet? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia ParenClose Trivia
-              / ArgSet Trivia Colon Trivia OuterLet? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose Trivia
+//   OpenParen?/CloseParen?  — a redundant paren around the whole application.
+//                             In Nix it is identity, so refusing it was a
+//                             parser limitation (conformist#101).
+//   LeadMerge?/TrailMerge?  — the eng-hybrid, in BOTH spellings: the merge
+//                             attrset may precede (`{ mods } // each (…)`,
+//                             e.g. circus) or follow (`each (…) // { mods }`,
+//                             e.g. piggy/just-us) the call. dodder and piggy
+//                             are paren-wrapped AND merged, so the optionals
+//                             must compose.
+//
+// ArgSet and SystemLambda stay DIRECT children of Outputs — the navigation
+// helper descends only through anonymous/Sequence nodes, so hiding them
+// behind a named wrapper would silently break the splice offset math. The
+// optional pieces below are named rules, but none of them encloses those two.
+//
+// An unbalanced OpenParen? without its CloseParen? cannot slip through: the
+// leftover `)` would then be unconsumed and `File <- … Trivia EOF` fails.
+Outputs      <- ArgSet Trivia Colon Trivia OuterLet? LeadMerge? OpenParen? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose CloseParen? TrailMerge? Trivia
 OuterLet     <- LetKw LetBlock InKw Trivia
+
+OpenParen    <- ParenOpen Trivia
+CloseParen   <- Trivia ParenClose
+
+// The merged attrset is parsed as an opaque balanced brace group; the caller
+// text-scans it for the attr names it defines. Those names matter: `//` gives
+// the RIGHT side precedence, so an output attr present on the merge side would
+// silently shadow the same attr spliced into the per-system body. parseOutputs
+// records them as MergeExisting so the caller reports a conflict instead of
+// writing wiring that never takes effect.
+LeadMerge    <- MergeSet Trivia MergeOp Trivia
+TrailMerge   <- Trivia MergeOp Trivia MergeSet
+MergeSet     <- BraceOpen Inner BraceClose
+MergeOp      <- '//'
 
 // The function-argument attrset `{ self, conformist, ... }`. Parsed as a
 // balanced brace group; the caller text-scans its inner content for the
@@ -56,6 +80,7 @@ EachFn       <- 'eachDefaultSystem' ![a-zA-Z0-9_]
 SystemLambda <- Identifier Trivia Colon Trivia LetKw LetBlock InKw Trivia ReturnAttrSet
 LetKw        <- 'let' ![a-zA-Z0-9_'\-]
 InKw         <- 'in' ![a-zA-Z0-9_'\-]
+WithKw       <- 'with' ![a-zA-Z0-9_'\-]
 LetBlock     <- Trivia Binding*
 ReturnAttrSet <- BraceOpen Trivia Binding* BraceClose
 
@@ -91,21 +116,36 @@ LetSemiText   <- (!(LetKw) !(InKw) LetSemiChunk)+
 LetSemiChunk  <- OuterWord / LetSemiChar
 LetSemiChar   <- !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
 
-Value      <- (LetGroup / Group / String / Comment / OuterText)*
+// `with <expr>;` is the OTHER construct whose `;` is not the binding
+// terminator (conformist#103). `buildInputs = with pkgs; [ openssl ];` put a
+// semicolon before the value proper, so Value ended the binding at
+// `with pkgs;` and the leftover `[ … ];` failed the shape match. WithGroup
+// consumes the scope expression AND its terminating semicolon, so the `*`
+// loop in Value then reads the real value normally.
+//
+// Nested inside a group this never bit, because Inner treats `;` as content —
+// which is exactly why it went unnoticed until posh.
+WithGroup     <- WithKw WithScope Semi
+WithScope     <- (Group / String / Comment / WithText)*
+WithText      <- (!(LetKw) !(WithKw) WithChunk)+
+WithChunk     <- OuterWord / WithChar
+WithChar      <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
+
+Value      <- (LetGroup / WithGroup / Group / String / Comment / OuterText)*
 Inner      <- (Group / String / Comment / InnerText)*
 Group      <- BraceOpen Inner BraceClose
             / BracketOpen Inner BracketClose
             / ParenOpen Inner ParenClose
-// OuterText stops at a `let` keyword. The exclusion is required even
-// though LetGroup is tried first in Value's alternation: without it the
-// greedy `+` swallows straight through a `let` appearing after other
-// value content, never handing control back to LetGroup. Words are
-// consumed ATOMICALLY (OuterWord) so the LetKw lookahead is only ever
+// OuterText stops at a `let` or `with` keyword. The exclusions are required
+// even though LetGroup/WithGroup are tried first in Value's alternation:
+// without them the greedy `+` swallows straight through a keyword appearing
+// after other value content, never handing control back. Words are
+// consumed ATOMICALLY (OuterWord) so the lookaheads are only ever
 // tested at a token boundary — otherwise an identifier merely ENDING in
-// "let" (`outlet`, `applet`) would falsely stop the run and fail the
-// parse. `'` is deliberately excluded from OuterWord so the `''`
-// indented-string opener still reaches the String alternative.
-OuterText  <- (!(LetKw) OuterChunk)+
+// "let" or "with" (`outlet`, `applet`, `runcommandwith`) would falsely stop
+// the run and fail the parse. `'` is deliberately excluded from OuterWord so
+// the `''` indented-string opener still reaches the String alternative.
+OuterText  <- (!(LetKw) !(WithKw) OuterChunk)+
 OuterChunk <- OuterWord / OuterChar
 OuterWord  <- #([a-zA-Z_] [a-zA-Z0-9_\-]*)
 OuterChar  <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .

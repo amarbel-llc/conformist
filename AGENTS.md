@@ -143,14 +143,25 @@ under fail-on-change.
   wiring-specific logic. The recognized shape tolerates a redundant paren
   wrapping the whole `eachDefaultSystem` application (`(utils.lib.eachDefaultSystem
   (…))`) — in Nix that paren is identity, so refusing it was a parser limitation
-  rather than a roster choice (conformist#101). Still refused, deliberately:
-  flake-parts, raw `forAllSystems`/`genAttrs`, the `//` hybrid in **either**
-  spelling (merge leading OR trailing the call — conformist#65), a `rec { … }`
-  per-system return (structurally splicable, but `rec` puts every sibling attr
-  in scope, so an inserted attr could be captured by or shadow a name the repo
-  already binds), and a top-level `with <expr>;` in a binding value
-  (conformist#103 — its `;` ends the binding early, the same defect class as the
-  nested `let … in`). flakeedit splices by byte offset so the rest of the
+  rather than a roster choice (conformist#101) — a top-level `with <expr>;` in a
+  binding value (conformist#103; its `;` belongs to the `with`, not the binding,
+  the same defect class as the nested `let … in`) — and the **eng-hybrid `//`
+  merge** in either spelling (conformist#65): the merge attrset may lead
+  (`{ mods } // each (…)`, circus) or trail (`each (…) // { mods }`,
+  just-us/piggy), and composes with the paren (dodder/piggy are both). Across
+  the fleet the merge side carries only system-independent outputs
+  (`nixosModules`, `homeManagerModules`, `lib`), so the per-system attrset is
+  the unambiguous splice target. But `//` is a **shallow** update giving its
+  right operand precedence, so a *trailing* merge redefining a top-level attr
+  conformist wires (`formatter`/`checks`/`packages`/`devShells`) would silently
+  override wiring spliced into the per-system body — `ParsedOutputs.MergeShadows`
+  compares root segments and callers report a conflict (flakeedit) or refuse
+  (flakeclobber's `ErrShadowedTarget`) rather than writing dead wiring. Still
+  refused, deliberately: flake-parts, raw `forAllSystems`/`genAttrs`, the
+  `eachSystem` variant, and a `rec { … }` per-system return (structurally
+  splicable, but `rec` puts every sibling attr in scope, so an inserted attr
+  could be captured by or shadow a name the repo already binds — "we could
+  splice it" is not "it is safe to"). flakeedit splices by byte offset so the rest of the
   file is preserved verbatim; it is per-target
   idempotent and never clobbers an output attr it did not write. A flake
   carrying only SOME of the `conformistPkg`/`justPkg`/`eval`/`impureEval` let

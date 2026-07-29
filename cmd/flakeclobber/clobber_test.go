@@ -238,6 +238,104 @@ func TestClobber_DottedReplacementNotBindingChecked(t *testing.T) {
 	assert.True(t, report.Changed())
 }
 
+// TestClobber_HybridMergeAccepted: the eng-hybrid is now a recognized shape
+// (conformist#65), and its merge side normally holds only system-independent
+// outputs, so the per-system packages list is the unambiguous target.
+func TestClobber_HybridMergeAccepted(t *testing.T) {
+	src := `{
+  inputs = {
+    utils.url = "github:numtide/flake-utils";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+  };
+
+  outputs = { self, utils, conformist, just-us }:
+    (utils.lib.eachDefaultSystem (system: let
+      pkgs = import <nixpkgs> { inherit system; };
+      justPkg = just-us.packages.${system}.default;
+    in {
+      devShells.default = pkgs.mkShell {
+        packages = [
+          pkgs.just
+        ];
+      };
+    }))
+    // {
+      nixosModules.default = ./module.nix;
+    };
+}
+`
+	out, report, err := Clobber([]byte(src), []ListElementMigration{{Old: "pkgs.just", New: "justPkg"}})
+	require.NoError(t, err)
+	assert.True(t, report.Changed())
+	assert.Contains(t, string(out), "justPkg")
+	assert.NotContains(t, string(out), "pkgs.just")
+	// The merge side must survive the rewrite untouched.
+	assert.Contains(t, string(out), "nixosModules.default = ./module.nix;")
+}
+
+// TestClobber_ShadowedDevShellRefused: when the trailing merge REDEFINES
+// devShells, `//` gives it precedence, so the per-system list this tool edits
+// is not the one the flake exposes. Rewriting it would be a destructive edit
+// with no effect — worse than refusing.
+func TestClobber_ShadowedDevShellRefused(t *testing.T) {
+	src := `{
+  inputs = {
+    utils.url = "github:numtide/flake-utils";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+  };
+
+  outputs = { self, utils, just-us }:
+    utils.lib.eachDefaultSystem (system: let
+      pkgs = import <nixpkgs> { inherit system; };
+      justPkg = just-us.packages.${system}.default;
+    in {
+      devShells.default = pkgs.mkShell {
+        packages = [
+          pkgs.just
+        ];
+      };
+    })
+    // {
+      devShells.x86_64-linux.default = "overridden";
+    };
+}
+`
+	out, _, err := Clobber([]byte(src), []ListElementMigration{{Old: "pkgs.just", New: "justPkg"}})
+	require.ErrorIs(t, err, ErrShadowedTarget)
+	assert.Equal(t, []byte(src), out, "a shadowed target must not modify src")
+}
+
+// TestClobber_LeadingMergeNotShadowing is the control: a LEADING merge is
+// overridden BY the per-system body, so it must NOT trigger the refusal.
+func TestClobber_LeadingMergeNotShadowing(t *testing.T) {
+	src := `{
+  inputs = {
+    utils.url = "github:numtide/flake-utils";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+  };
+
+  outputs = { self, utils, just-us }:
+    {
+      devShells.x86_64-linux.other = "harmless";
+    }
+    // utils.lib.eachDefaultSystem (system: let
+      pkgs = import <nixpkgs> { inherit system; };
+      justPkg = just-us.packages.${system}.default;
+    in {
+      devShells.default = pkgs.mkShell {
+        packages = [
+          pkgs.just
+        ];
+      };
+    });
+}
+`
+	_, report, err := Clobber([]byte(src), []ListElementMigration{{Old: "pkgs.just", New: "justPkg"}})
+	require.NoError(t, err, "a leading merge cannot shadow the per-system body")
+	assert.True(t, report.Changed())
+}
+
 // TestClobber_DuplicateElement pins the half-apply refusal: the splice
 // machinery addresses ONE byte span, so a list naming the element twice would
 // be rewritten in part and stranded in part.
