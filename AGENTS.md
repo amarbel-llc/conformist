@@ -475,6 +475,26 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
 
 ## Conventions and gotchas
 
+- **A check that passes or fails for an incidental reason is worse than no
+  check, because it is believed.** Three real instances in this repo, all
+  caught only because a result contradicted a direct invocation:
+  - A `"$bin" … | grep -q 'not the recognized'` oracle under
+    `set -o pipefail` inherits the tool's own exit 1, masking grep's success —
+    so it reported "parses" in exactly the failing case. Capture output to a
+    variable, then match; never end a pipeline in `grep -q` under `pipefail`
+    when the left-hand side exits non-zero by design.
+  - Every case in `TestParseFlakeUnrecognizedShapes` once lacked an `inputs`
+    block. `ParseFlake` requires one, so each case refused for that trivial
+    reason and never exercised the shape it claimed to pin. A refusal-roster
+    test needs a **positive control** asserting the wrapper itself parses, or
+    the refusals prove nothing.
+  - `debug-flakeclobber-regression` first diffed output containing the target
+    path, which necessarily differed between the two runs — reporting a
+    fleet-wide regression while the bytes were identical. Normalise
+    run-specific values (paths, temp dirs, timestamps) before comparing.
+
+  When a verification result is surprising in EITHER direction, re-derive it
+  by running the underlying tool by hand before acting on it or reporting it.
 - **`nix build` against a dirty tree only sees git-tracked files.** `git add`
   new `.go`/`.nix` files (staging is enough, no commit) before `nix build`, or
   you'll get phantom "cannot find package" errors.
