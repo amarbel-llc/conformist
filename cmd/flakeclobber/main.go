@@ -11,13 +11,20 @@
 //	flakeclobber [--old OLD --new NEW]... [--apply] <file>...
 //
 // Each --old/--new pair defines one substitution applied to every file.
-// --new may be omitted (or "") to delete the matched element.
+// --old and --new must be paired one-for-one; pass an explicit empty
+// --new "" to DELETE the matched element.
+//
+// Writes are two-phase: every rewrite is computed and parse-gated before any
+// file is written, so a splice regression cannot half-migrate a fleet. See
+// run for the exact failure taxonomy and the residual non-atomicity.
 //
 // Exit codes:
 //
-//	0 — all files processed (changes applied, already migrated, or dry-run)
+//	0 — all files processed (changes applied, already migrated, N/A, or dry-run)
 //	1 — one or more files could not be migrated (shape unrecognized,
-//	    partial state, parse failure); non-failing files still processed
+//	    partial state, duplicate element); other files still processed.
+//	    Also returned when a rewrite failed the nix parse gate — in which
+//	    case NO file was written at all.
 //	2 — operational error (bad flags, I/O failure)
 package main
 
@@ -60,19 +67,50 @@ Pass --apply to write. Each --old/--new pair is one substitution.`,
 	}
 
 	cmd.Flags().StringArrayVar(&olds, "old", nil, "element to replace (repeatable)")
-	cmd.Flags().StringArrayVar(&news, "new", nil, "replacement (parallel to --old; empty = delete)")
+	cmd.Flags().StringArrayVar(&news, "new", nil,
+		`replacement (one per --old, in order; pass "" to delete)`)
 	cmd.Flags().BoolVar(&apply, "apply", false, "write changes (default is dry-run)")
 
 	return cmd
 }
 
+// pendingWrite is a rewrite that passed the parse gate and is queued for
+// phase 2.
+type pendingWrite struct {
+	path string
+	out  []byte
+}
+
+// run is two-phase so a multi-file sweep cannot leave the fleet half-migrated.
+//
+// Phase 1 computes and parse-gates every rewrite, writing nothing. Phase 2
+// writes the queued rewrites only if phase 1 produced no parse-gate failure.
+// The two failure kinds are deliberately treated differently:
+//
+//   - A per-file MIGRATION refusal (unrecognized shape, no devShell, partial
+//     state, duplicate element) is data, not a defect: those shapes are
+//     expected across a heterogeneous fleet. It fails that file only and does
+//     not block the others, and it never queues a write, so it cannot leave
+//     partial state.
+//   - A PARSE-GATE failure means the splice logic emitted invalid Nix. That
+//     indicts the tool, so every other file's rewrite is equally suspect and
+//     nothing is written at all.
+//
+// Residual non-atomicity: an I/O error partway through phase 2 leaves the
+// files already written in their migrated state. Making that atomic would
+// need a cross-file transaction; it is out of scope, so it is reported
+// explicitly rather than papered over.
 func run(ctx context.Context, olds, news []string, apply bool, files []string) error {
 	migrations, err := buildMigrations(olds, news)
 	if err != nil {
 		return err
 	}
 
-	var failures int
+	var (
+		migrationFailures int
+		parseFailures     int
+		queued            []pendingWrite
+	)
 
 	for _, path := range files {
 		src, err := os.ReadFile(path)
@@ -92,14 +130,21 @@ func run(ctx context.Context, olds, news []string, apply bool, files []string) e
 			default:
 				fmt.Fprintf(os.Stderr, "error: %s: %v\n", path, clobberErr)
 			}
-			failures++
+			migrationFailures++
 
 			continue
 		}
 
 		if !report.Changed() {
-			// Already migrated (or N/A): print satisfied entries and continue.
+			// Already migrated, or the migration does not apply. Print BOTH
+			// kinds of entry: a file that produced no output at all is
+			// indistinguishable from a successful migration in a sweep log
+			//.
 			for _, s := range report.Satisfied {
+				fmt.Printf("%s: %s\n", path, s)
+			}
+
+			for _, s := range report.NotApplicable {
 				fmt.Printf("%s: %s\n", path, s)
 			}
 
@@ -121,17 +166,29 @@ func run(ctx context.Context, olds, news []string, apply bool, files []string) e
 
 		if err := nixParseCheck(ctx, out); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", path, err)
-			failures++
+			parseFailures++
 
 			continue
 		}
 
-		if err = os.WriteFile(path, out, 0o600); err != nil { //nolint:gosec // G306
-			return fmt.Errorf("write %s: %w", path, err)
+		queued = append(queued, pendingWrite{path: path, out: out})
+	}
+
+	// Phase 2. A parse-gate failure aborts every write, including the
+	// rewrites that individually passed.
+	if parseFailures > 0 {
+		fmt.Fprintf(os.Stderr,
+			"error: %d file(s) failed the nix parse gate — no file was written\n",
+			parseFailures)
+	} else {
+		for _, w := range queued {
+			if err := os.WriteFile(w.path, w.out, 0o600); err != nil {
+				return fmt.Errorf("write %s: %w", w.path, err)
+			}
 		}
 	}
 
-	if failures > 0 {
+	if migrationFailures+parseFailures > 0 {
 		os.Exit(1)
 	}
 
@@ -140,8 +197,16 @@ func run(ctx context.Context, olds, news []string, apply bool, files []string) e
 
 // nixParseCheck pipes src through nix-instantiate --parse to verify the
 // rewritten flake.nix is syntactically valid before writing it to disk.
+//
+// The source argument MUST be "-" (read stdin), not "/dev/stdin": Go backs a
+// non-*os.File cmd.Stdin with an os.Pipe, so nix resolves the /dev/stdin
+// symlink to `/proc/<pid>/fd/pipe:[<inode>]` and rejects it with "path … does
+// not exist" — making the gate fail unconditionally and silently reducing
+// --apply to a no-op. Measured on nix 2.31.2: a path and
+// `-` from a pipe both exit 0; /dev/stdin exits 0 only from a shell redirect
+// and 1 from a pipe.
 func nixParseCheck(ctx context.Context, src []byte) error {
-	cmd := exec.CommandContext(ctx, "nix-instantiate", "--parse", "/dev/stdin")
+	cmd := exec.CommandContext(ctx, "nix-instantiate", "--parse", "-")
 	cmd.Stdin = bytes.NewReader(src)
 	cmd.Stderr = os.Stderr
 
@@ -152,17 +217,21 @@ func nixParseCheck(ctx context.Context, src []byte) error {
 	return nil
 }
 
+// buildMigrations pairs each --old with its --new. The counts must match
+// EXACTLY: --new is never inferred. Padding a short --new list with empty
+// strings would silently turn a missing or misspelled flag into a deletion —
+// `--apply --old pkgs.just <file>` would remove the element rather than
+// replace it. For a destructive tool that is an error, so deleting an element
+// requires an explicit empty `--new ""`.
 func buildMigrations(olds, news []string) ([]ListElementMigration, error) {
 	if len(olds) == 0 {
 		return nil, errors.New("at least one --old flag is required")
 	}
-	// Pad news to match olds length with empty strings (= delete).
-	for len(news) < len(olds) {
-		news = append(news, "")
-	}
-	if len(news) > len(olds) {
+	if len(news) != len(olds) {
 		return nil, fmt.Errorf(
-			"more --new flags (%d) than --old flags (%d)", len(news), len(olds),
+			"--old and --new must be paired: got %d --old and %d --new; "+
+				`pass an explicit --new "" to delete an element`,
+			len(olds), len(news),
 		)
 	}
 

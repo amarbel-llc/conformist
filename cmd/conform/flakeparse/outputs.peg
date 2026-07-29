@@ -41,8 +41,8 @@ EachFn       <- 'eachDefaultSystem' ![a-zA-Z0-9_]
 // `system: let <bindings> in { <attrs> }`. The lambda parameter is a
 // bare identifier (eachDefaultSystem passes the system string).
 SystemLambda <- Identifier Trivia Colon Trivia LetKw LetBlock InKw Trivia ReturnAttrSet
-LetKw        <- 'let' ![a-zA-Z0-9_]
-InKw         <- 'in' ![a-zA-Z0-9_]
+LetKw        <- 'let' ![a-zA-Z0-9_'\-]
+InKw         <- 'in' ![a-zA-Z0-9_'\-]
 LetBlock     <- Trivia Binding*
 ReturnAttrSet <- BraceOpen Trivia Binding* BraceClose
 
@@ -56,12 +56,46 @@ AttrPath   <- AttrName (Trivia Dot Trivia AttrName)*
 AttrName   <- Identifier / String
 Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
 
-Value      <- (Group / String / Comment / OuterText)*
+// A binding value inside the per-system let block may itself be a
+// `let … in …` expression (e.g. `version = let raw = builtins.readFile
+// ./version.env; in lib.removePrefix "V=" raw;`). Its inner `;` are
+// let-binding separators, not this binding's terminator, so Value must
+// treat `let … in` as a balanced construct or it ends the binding at the
+// first nested `;` and the whole shape match fails.
+// This mirrors nix.peg's LetGroup, which fixed the same defect one level
+// up for an OUTER `let … in` before eachDefaultSystem (conformist#81);
+// the nested case was never ported into this second-pass grammar.
+LetGroup      <- LetKw LetInner InKw
+LetInner      <- (LetGroup / Group / String / Comment / LetSemiText)*
+// LetSemiText runs up to the `in` that closes the let. `;` is content
+// here (it separates let bindings). Like OuterText below, words are
+// consumed ATOMICALLY so the LetKw/InKw lookaheads are only tested at a
+// token boundary — without that, any identifier ending in "in" would end
+// the run mid-word, and `bin` / `writeShellScriptBin` / `plugin` are
+// everywhere in real flakes. The lookaheads stay OUTSIDE #(…) because
+// langlang v0.0.12 does not support named rule refs inside #(…).
+LetSemiText   <- (!(LetKw) !(InKw) LetSemiChunk)+
+LetSemiChunk  <- OuterWord / LetSemiChar
+LetSemiChar   <- !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
+
+Value      <- (LetGroup / Group / String / Comment / OuterText)*
 Inner      <- (Group / String / Comment / InnerText)*
 Group      <- BraceOpen Inner BraceClose
             / BracketOpen Inner BracketClose
             / ParenOpen Inner ParenClose
-OuterText  <- #((!(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
+// OuterText stops at a `let` keyword. The exclusion is required even
+// though LetGroup is tried first in Value's alternation: without it the
+// greedy `+` swallows straight through a `let` appearing after other
+// value content, never handing control back to LetGroup. Words are
+// consumed ATOMICALLY (OuterWord) so the LetKw lookahead is only ever
+// tested at a token boundary — otherwise an identifier merely ENDING in
+// "let" (`outlet`, `applet`) would falsely stop the run and fail the
+// parse. `'` is deliberately excluded from OuterWord so the `''`
+// indented-string opener still reaches the String alternative.
+OuterText  <- (!(LetKw) OuterChunk)+
+OuterChunk <- OuterWord / OuterChar
+OuterWord  <- #([a-zA-Z_] [a-zA-Z0-9_\-]*)
+OuterChar  <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
 InnerText  <- #((!('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
 
 String        <- DString / IString

@@ -130,7 +130,18 @@
           src = self;
           pwd = ./.;
           modules = ./gomod2nix.toml;
-          subPackages = [ "." ];
+          # flakeclobber (RFC 0004, the fleet-migration sweeper) is built here
+          # so it cannot rot unnoticed: it shipped non-functional precisely
+          # because nothing built or ran it. It stays a
+          # SEPARATE binary — a one-shot destructive sweep tool, never wired
+          # into `conform`. Deliberately NOT added to conformist-native's
+          # bgaArgs below: godyn's committed graph.json enumerates per-package
+          # sources by hand, so a new subpackage there would need a graph
+          # regen, and godyn is opt-in (igloo#33).
+          subPackages = [
+            "."
+            "cmd/flakeclobber"
+          ];
           # igloo's pkgs.go (1.26.3), shared with the native (godyn) backend so
           # both build paths use one compiler (igloo#29). go.mod is `go 1.26.1`;
           # GOTOOLCHAIN = "local" pins to pkgs.go rather than fetching a toolchain.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -180,6 +181,123 @@ func TestClobber_NoDevShell(t *testing.T) {
 	)
 	require.ErrorIs(t, err, ErrNoDevShell)
 	assert.Equal(t, []byte(noDevShellFlake), out, "no-devshell flake must be returned unchanged")
+}
+
+// TestClobber_UnboundReplacement pins the conformist#100 guard: replacing an
+// element with an identifier nothing binds would write a flake referencing an
+// UNDEFINED variable. `nix-instantiate --parse` cannot catch that (it is
+// syntax-only), so Clobber refuses statically against the parse tree.
+func TestClobber_UnboundReplacement(t *testing.T) {
+	// Same shape as minimalFlake but WITHOUT the justPkg let binding — i.e. a
+	// repo whose additive migration half has not run yet.
+	src := `{
+  inputs = {
+    utils.url = "github:numtide/flake-utils";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+  };
+
+  outputs = { self, utils, conformist }:
+    utils.lib.eachDefaultSystem (system: let
+      pkgs = import <nixpkgs> { inherit system; };
+      conformistPkg = conformist.packages.${system}.default;
+    in {
+      devShells.default = pkgs.mkShell {
+        packages = [
+          conformistPkg
+          pkgs.just
+        ];
+      };
+    });
+}
+`
+	out, _, err := Clobber([]byte(src), []ListElementMigration{{Old: "pkgs.just", New: "justPkg"}})
+	require.ErrorIs(t, err, ErrUnboundElement)
+	assert.Equal(t, []byte(src), out, "an unbound replacement must not modify src")
+}
+
+// TestClobber_BoundReplacementAccepted is the control for the test above: the
+// identical migration succeeds once the binding exists.
+func TestClobber_BoundReplacementAccepted(t *testing.T) {
+	_, report, err := Clobber(
+		[]byte(minimalFlake),
+		[]ListElementMigration{{Old: "pkgs.just", New: "justPkg"}},
+	)
+	require.NoError(t, err)
+	assert.True(t, report.Changed())
+}
+
+// TestClobber_DottedReplacementNotBindingChecked: a dotted path resolves
+// through machinery this shallow parser does not model, so it is deliberately
+// exempt from the binding check rather than falsely refused.
+func TestClobber_DottedReplacementNotBindingChecked(t *testing.T) {
+	_, report, err := Clobber(
+		[]byte(minimalFlake),
+		[]ListElementMigration{{Old: "pkgs.just", New: "pkgs.just_1_36"}},
+	)
+	require.NoError(t, err)
+	assert.True(t, report.Changed())
+}
+
+// TestClobber_DuplicateElement pins the half-apply refusal: the splice
+// machinery addresses ONE byte span, so a list naming the element twice would
+// be rewritten in part and stranded in part.
+func TestClobber_DuplicateElement(t *testing.T) {
+	src := strings.Replace(
+		minimalFlake,
+		"          pkgs.just\n",
+		"          pkgs.just\n          pkgs.just\n",
+		1,
+	)
+	require.Equal(t, 2, strings.Count(src, "pkgs.just"), "fixture should name the element twice")
+
+	out, _, err := Clobber([]byte(src), []ListElementMigration{{Old: "pkgs.just", New: "justPkg"}})
+	require.ErrorIs(t, err, ErrDuplicateElement)
+	assert.Equal(t, []byte(src), out, "a duplicate element must not modify src")
+}
+
+// TestClobber_NotApplicableIsReported: a migration that does not apply must be
+// stated, not merely absent. In a 34-repo sweep log, printing nothing is
+// indistinguishable from a successful migration.
+func TestClobber_NotApplicableIsReported(t *testing.T) {
+	_, report, err := Clobber(
+		[]byte(minimalFlake),
+		[]ListElementMigration{{Old: "pkgs.nonexistent", New: "somethingBound"}},
+	)
+	require.NoError(t, err)
+	assert.False(t, report.Changed())
+	require.Len(t, report.NotApplicable, 1)
+	assert.Contains(t, report.NotApplicable[0], "pkgs.nonexistent")
+}
+
+// TestBuildMigrations_PairingIsStrict pins the destructive-default fix: a
+// missing --new must be an error, never an implicit deletion.
+func TestBuildMigrations_PairingIsStrict(t *testing.T) {
+	t.Run("missing new is an error", func(t *testing.T) {
+		_, err := buildMigrations([]string{"pkgs.just"}, nil)
+		require.Error(t, err, "a bare --old must not silently become a delete")
+	})
+
+	t.Run("too many new is an error", func(t *testing.T) {
+		_, err := buildMigrations([]string{"a"}, []string{"x", "y"})
+		require.Error(t, err)
+	})
+
+	t.Run("no old is an error", func(t *testing.T) {
+		_, err := buildMigrations(nil, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("explicit empty new is a deletion", func(t *testing.T) {
+		got, err := buildMigrations([]string{"pkgs.just"}, []string{""})
+		require.NoError(t, err)
+		require.Equal(t, []ListElementMigration{{Old: "pkgs.just", New: ""}}, got)
+	})
+
+	t.Run("paired", func(t *testing.T) {
+		got, err := buildMigrations([]string{"a", "b"}, []string{"x", "y"})
+		require.NoError(t, err)
+		require.Equal(t, []ListElementMigration{{Old: "a", New: "x"}, {Old: "b", New: "y"}}, got)
+	})
 }
 
 func TestTokenIndex(t *testing.T) {

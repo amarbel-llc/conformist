@@ -351,7 +351,7 @@ debug-bench-backends iterations="3":
 
 # --- verify ---
 
-verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse
+verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse verify-flakeclobber-parse
 
 # Behavioral fixture tests for the nix/linters/ whole-tree checks: build the
 # `linter-fixtures` aggregate, which runs each compiled linter against pass/fail
@@ -426,6 +426,105 @@ verify-flakeedit-parse:
         fi
         echo "verify-flakeedit-parse: ok ($(basename "$f"))"
     done
+
+# End-to-end gate for flakeclobber (conformist#99), the fleet-migration sweeper.
+# Runs the REAL BINARY over test/flakeclobber/ fixtures in throwaway temp dirs and
+# asserts, per the RFC 0004 §5 matrix, both the exit code AND what happened to the
+# file on disk — then `nix-instantiate --parse`s every rewrite.
+#
+# Exercising main.go end-to-end is the whole point: every Go test calls Clobber()
+# directly, so the shipped --apply path had NO coverage at all and a parse gate
+# that could never pass went green through a full CI lane. A unit
+# test cannot catch that class of defect; only running the binary can.
+#
+# check flakeclobber's rewrites apply and stay parseable Nix
+verify-flakeclobber-parse:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin="$(mktemp -d)/flakeclobber"
+    nix develop --command go build -o "$bin" ./cmd/flakeclobber
+
+    fail=0
+    # fixture:expected-exit:expected-disk-state
+    checks=(
+        "old-wiring.nix:0:changed"
+        "already-migrated.nix:0:unchanged"
+        "no-just.nix:0:unchanged"
+        "no-devshell.nix:1:unchanged"
+        "unrecognized.nix:1:unchanged"
+    )
+    for entry in "${checks[@]}"; do
+        IFS=: read -r fixture want_rc want_state <<< "$entry"
+        src="test/flakeclobber/$fixture"
+        if [ ! -e "$src" ]; then
+            echo "verify-flakeclobber-parse: missing fixture $src" >&2
+            exit 2
+        fi
+        d="$(mktemp -d)"
+        cp "$src" "$d/flake.nix"
+        before="$(sha256sum < "$d/flake.nix")"
+
+        rc=0
+        out="$("$bin" --apply --old pkgs.just --new justPkg "$d/flake.nix" 2>&1)" || rc=$?
+        after="$(sha256sum < "$d/flake.nix")"
+
+        state=unchanged
+        [ "$before" = "$after" ] || state=changed
+
+        if [ "$rc" != "$want_rc" ]; then
+            echo "verify-flakeclobber-parse: $fixture: exit $rc, want $want_rc" >&2
+            echo "$out" | sed 's/^/    /' >&2
+            fail=1
+        fi
+        if [ "$state" != "$want_state" ]; then
+            echo "verify-flakeclobber-parse: $fixture: file $state, want $want_state" >&2
+            echo "$out" | sed 's/^/    /' >&2
+            fail=1
+        fi
+        # A rewrite that is not parseable Nix is the regression this gate exists
+        # to catch; an unchanged file is re-parsed too, proving the fixture itself
+        # is valid and the assertion above is meaningful.
+        if ! nix-instantiate --parse "$d/flake.nix" >/dev/null; then
+            echo "verify-flakeclobber-parse: $fixture: result is not parseable Nix" >&2
+            fail=1
+        fi
+        # A non-silent report is part of the contract: a file that prints nothing
+        # is indistinguishable from a successful migration in a 34-repo sweep log.
+        if [ -z "$out" ]; then
+            echo "verify-flakeclobber-parse: $fixture: produced NO output" >&2
+            fail=1
+        fi
+        [ "$fail" = 0 ] && echo "verify-flakeclobber-parse: ok ($fixture: exit $rc, $state)"
+    done
+
+    # The conformist#100 hazard: replacing pkgs.just with an identifier nothing
+    # binds must be REFUSED, not written. --parse cannot catch it (syntax-only),
+    # so this asserts the static binding check does.
+    d="$(mktemp -d)"
+    cp test/flakeclobber/old-wiring.nix "$d/flake.nix"
+    before="$(sha256sum < "$d/flake.nix")"
+    rc=0
+    out="$("$bin" --apply --old pkgs.just --new noSuchBinding "$d/flake.nix" 2>&1)" || rc=$?
+    if [ "$rc" = 0 ] || [ "$before" != "$(sha256sum < "$d/flake.nix")" ]; then
+        echo "verify-flakeclobber-parse: unbound replacement was NOT refused (exit $rc)" >&2
+        echo "$out" | sed 's/^/    /' >&2
+        fail=1
+    else
+        echo "verify-flakeclobber-parse: ok (unbound replacement refused, exit $rc)"
+    fi
+
+    # A missing --new must be an error, never an implicit deletion.
+    rc=0
+    out="$("$bin" --apply --old pkgs.just "$d/flake.nix" 2>&1)" || rc=$?
+    if [ "$rc" != 2 ]; then
+        echo "verify-flakeclobber-parse: bare --old should exit 2, got $rc" >&2
+        echo "$out" | sed 's/^/    /' >&2
+        fail=1
+    else
+        echo "verify-flakeclobber-parse: ok (unpaired --old refused, exit 2)"
+    fi
+
+    exit "$fail"
 
 # OPT-IN: drift check for the committed godyn-graph.json — regenerate the graph
 # into a scratch file and diff it against the committed copy, failing if they
@@ -606,6 +705,193 @@ debug-yaml-roundtrip:
         diff -u "$tmp/remarshal.yaml" "$tmp/yj.yaml" || true
         exit "$fail"
     ' bash "$tmp"
+
+# Reproducer for the flakeclobber --apply parse gate never passing,
+# so no file is ever written. Isolates the four ways nix-instantiate can be handed
+# a source (path / /dev/stdin from a redirect / /dev/stdin from a PIPE / `-` from a
+# pipe) — Go gives a non-*os.File Stdin an os.Pipe, so nix resolves /dev/stdin to
+# /proc/N/fd/pipe:[…], which is not a path — then runs the real binary end-to-end
+# and reports whether the target file actually changed on disk. Diagnostic only —
+# the standing gate is verify-flakeclobber-parse.
+#
+# reproduce the flakeclobber --apply parse-gate failure
+[group("debug")]
+debug-flakeclobber-stdin:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    cp test/flakeclobber/old-wiring.nix "$tmp/probe.nix"
+
+    echo "=== nix-instantiate --parse input modes (nix $(nix --version | awk '{print $3}')) ==="
+    nix-instantiate --parse "$tmp/probe.nix" >/dev/null 2>&1
+    echo "  --parse <file path>            exit=$?"
+    nix-instantiate --parse /dev/stdin < "$tmp/probe.nix" >/dev/null 2>&1
+    echo "  --parse /dev/stdin < file      exit=$?"
+    cat "$tmp/probe.nix" | nix-instantiate --parse /dev/stdin >/dev/null 2>&1
+    echo "  --parse /dev/stdin from PIPE   exit=$?"
+    cat "$tmp/probe.nix" | nix-instantiate --parse - >/dev/null 2>&1
+    echo "  --parse - from PIPE            exit=$?"
+
+    echo
+    echo "=== flakeclobber --apply end-to-end (does the file change on disk?) ==="
+    bin="$tmp/flakeclobber"
+    nix develop --command go build -o "$bin" ./cmd/flakeclobber
+    cp test/flakeclobber/old-wiring.nix "$tmp/flake.nix"
+    before=$(sha256sum < "$tmp/flake.nix")
+    "$bin" --apply --old pkgs.just --new justPkg "$tmp/flake.nix"
+    echo "  flakeclobber exit=$?"
+    after=$(sha256sum < "$tmp/flake.nix")
+    if [ "$before" = "$after" ]; then
+        echo "  RESULT: file is BYTE-IDENTICAL — the write never happened"
+    else
+        echo "  RESULT: file was rewritten"
+        grep -n 'justPkg\|pkgs.just' "$tmp/flake.nix"
+    fi
+
+# Measure flakeclobber's recognition coverage across the real fleet: DRY-RUN the
+# binary over every repo's top-level flake.nix under ROOT and tally the outcomes
+# (would-migrate / already-migrated / not-applicable / unrecognized / no-devshell).
+# This is the number that says whether a parser change actually bought coverage —
+# the corpus is the fleet, not the fixtures. Read-only: never passes --apply.
+# Diagnostic only; the standing gate is verify-flakeclobber-parse.
+#
+# tally flakeclobber recognition across the fleet's flake.nix files
+[group("debug")]
+debug-flakeclobber-coverage root="/home/sasha/eng/repos":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    bin="$tmp/flakeclobber"
+    nix develop --command go build -o "$bin" ./cmd/flakeclobber || exit 2
+
+    : > "$tmp/log"
+    total=0
+    for f in "{{ root }}"/*/flake.nix; do
+        [ -e "$f" ] || continue
+        total=$((total + 1))
+        repo=$(basename "$(dirname "$f")")
+        out=$("$bin" --old pkgs.just --new justPkg "$f" 2>&1)
+        case "$out" in
+            *"not the recognized eachDefaultSystem shape"*) verdict=unrecognized ;;
+            *"no devShells.default packages list"*)         verdict=no-devshell ;;
+            *"is neither a let binding nor an outputs argument"*) verdict=unbound-justPkg ;;
+            *"[dry-run] replaced"*)                         verdict=would-migrate ;;
+            *"already replaced"*)                           verdict=already-migrated ;;
+            *"migration does not apply"*)                   verdict=not-applicable ;;
+            "")                                             verdict=SILENT ;;
+            *)                                              verdict=other ;;
+        esac
+        printf '%s\t%s\n' "$verdict" "$repo" >> "$tmp/log"
+    done
+
+    echo "=== flakeclobber coverage over {{ root }} ($total flake.nix files) ==="
+    sort "$tmp/log" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
+    echo
+    echo "=== repos with pkgs.just on its own line (the migration population) ==="
+    pop=0
+    for f in "{{ root }}"/*/flake.nix; do
+        [ -e "$f" ] || continue
+        grep -qE '^[[:space:]]*pkgs\.just[[:space:]]*$' "$f" && pop=$((pop + 1))
+    done
+    echo "  $pop"
+    echo
+    echo "=== per-repo verdicts ==="
+    sort "$tmp/log" | sed 's/^/  /'
+
+    # Classify the refusals. A repo whose outputs are flake-parts, a raw
+    # forAllSystems/genAttrs, or the `<attrs> // eachDefaultSystem (…)` hybrid is
+    # LEGITIMATELY outside flakeedit's deliberately narrow roster (conformist#65)
+    # and must be left alone. A repo that IS a plain eachDefaultSystem and still
+    # fails to parse is a parser defect worth chasing — that distinction is the
+    # only way to tell a coverage ceiling from a bug.
+    echo
+    echo "=== why each refusal refuses ==="
+    while IFS=$'\t' read -r verdict repo; do
+        [ "$verdict" = unrecognized ] || continue
+        f="{{ root }}/$repo/flake.nix"
+        if grep -qE '//[[:space:]]*($|.*eachDefaultSystem)' "$f"; then
+            why="hybrid-// (conformist#65, out of roster)"
+        elif grep -q 'flake-parts' "$f"; then
+            why="flake-parts (out of roster)"
+        elif grep -qE 'forAllSystems|genAttrs' "$f"; then
+            why="raw forAllSystems/genAttrs (out of roster)"
+        elif grep -qE '^[[:space:]]*\([[:space:]]*[A-Za-z_][A-Za-z0-9_.'"'"'-]*\.eachDefaultSystem' "$f"; then
+            why="paren-wrapped eachDefaultSystem — IN roster shape, refused"
+        elif grep -q 'eachDefaultSystem' "$f"; then
+            why="PLAIN eachDefaultSystem — IN roster, other parser defect"
+        else
+            why="no eachDefaultSystem (out of roster)"
+        fi
+        printf '  %-16s %s\n' "$repo" "$why"
+    done < <(sort "$tmp/log")
+
+    # The sweep is TWO passes and the order matters: `conform` adds the just-us
+    # input and the justPkg let binding (additive), THEN flakeclobber swaps the
+    # list element (destructive). Run destructive-first and the rewrite names an
+    # identifier nothing binds — which --parse cannot catch. This second pass
+    # measures the migration as it will actually be run, in throwaway temp dirs.
+    conformbin="$tmp/conformist"
+    nix develop --command go build -o "$conformbin" . || exit 2
+    : > "$tmp/log2"; : > "$tmp/raw2"
+    for f in "{{ root }}"/*/flake.nix; do
+        [ -e "$f" ] || continue
+        repo=$(basename "$(dirname "$f")")
+        d="$tmp/sweep/$repo"; mkdir -p "$d"
+        cp "$f" "$d/flake.nix"
+        ( cd "$d" && "$conformbin" conform ) >/dev/null 2>&1 || true
+        out=$("$bin" --old pkgs.just --new justPkg "$d/flake.nix" 2>&1)
+        case "$out" in
+            *"not the recognized eachDefaultSystem shape"*) verdict=unrecognized ;;
+            *"no devShells.default packages list"*)         verdict=no-devshell ;;
+            *"is neither a let binding nor an outputs argument"*) verdict=unbound-justPkg ;;
+            *"[dry-run] replaced"*)                         verdict=would-migrate ;;
+            *"already replaced"*)                           verdict=already-migrated ;;
+            *"migration does not apply"*)                   verdict=not-applicable ;;
+            "")                                             verdict=SILENT ;;
+            *)                                              verdict=other ;;
+        esac
+        printf '%s\t%s\n' "$verdict" "$repo" >> "$tmp/log2"
+        # Surface anything the classifier does not recognize verbatim, so an
+        # unexpected outcome is never silently bucketed into "other".
+        if [ "$verdict" = other ] || [ "$verdict" = SILENT ]; then
+            printf '%s\t%s\n' "$repo" "$(echo "$out" | head -2 | tr '\n' ' ')" >> "$tmp/raw2"
+        fi
+    done
+    echo
+    if [ -s "$tmp/raw2" ]; then
+        echo "=== raw messages for unclassified post-conform outcomes ==="
+        sed 's/^/  /' "$tmp/raw2"
+        echo
+    fi
+    echo "=== after conform (additive) THEN flakeclobber --new justPkg ==="
+    sort "$tmp/log2" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
+    echo
+    sort "$tmp/log2" | sed 's/^/  /'
+
+    # conform MERGES justPkg into the devShell packages list while pkgs.just is
+    # still there, so a following `--new justPkg` sees both and refuses as
+    # ambiguous. Post-conform the correct destructive op is therefore a DELETE
+    # of the now-redundant pkgs.just, not a replace. This pass measures that —
+    # it is the sweep path that actually completes.
+    : > "$tmp/log3"
+    for d in "$tmp/sweep"/*; do
+        [ -d "$d" ] || continue
+        repo=$(basename "$d")
+        out=$("$bin" --old pkgs.just --new "" "$d/flake.nix" 2>&1)
+        case "$out" in
+            *"not the recognized eachDefaultSystem shape"*) verdict=unrecognized ;;
+            *"no devShells.default packages list"*)         verdict=no-devshell ;;
+            *"[dry-run] removed"*)                          verdict=would-migrate ;;
+            *"already removed"*)                            verdict=already-migrated ;;
+            *"migration does not apply"*)                   verdict=not-applicable ;;
+            "")                                             verdict=SILENT ;;
+            *)                                              verdict=other ;;
+        esac
+        printf '%s\t%s\n' "$verdict" "$repo" >> "$tmp/log3"
+    done
+    echo
+    echo '=== after conform THEN flakeclobber --new "" (delete) — the completing path ==='
+    sort "$tmp/log3" | awk -F'\t' '{c[$1]++} END{for (k in c) printf "  %-18s %d\n", k, c[k]}' | sort -k2 -rn
 
 # --- test ---
 

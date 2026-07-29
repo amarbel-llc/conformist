@@ -142,7 +142,15 @@ under fail-on-change.
   on amarbel-llc/doppelgang's `nixedit`); flakeedit imports it for its
   wiring-specific logic. flakeedit splices by byte offset so the rest of the
   file is preserved verbatim; it is per-target
-  idempotent and never clobbers an output attr it did not write. An existing
+  idempotent and never clobbers an output attr it did not write. A flake
+  carrying only SOME of the `conformistPkg`/`justPkg`/`eval`/`impureEval` let
+  bindings is discriminated rather than refused outright (conformist#100): when
+  every binding conformist has always written (`conformistPkg`, `eval`,
+  `impureEval`) is present, it is conformist's own **outdated wiring** and the
+  missing bindings are spliced in individually — that is exactly the fleet
+  migration population, which the old blanket refusal blocked. Any other partial
+  state is still a foreign name collision → print-only. The pre-existing `eval`
+  body is opaque to this parser and so is left alone, reported as a conflict. An existing
   `devShells.default` is merged into (conformist's tools spliced into its
   `packages` list) and an existing `formatter` is replaced only under
   `--force-formatter`; otherwise a pre-existing attr is reported as a conflict
@@ -181,10 +189,31 @@ under fail-on-change.
   `devShells.default.packages` across a fleet of repos (e.g. `pkgs.just` →
   `justPkg`). Shares the PEG infrastructure from `cmd/conform/flakeparse/`.
   Dry-run by default (`--apply` to write); verifies each rewrite with
-  `nix-instantiate --parse` before writing to disk. Exit codes: 0 = success
-  (including already-migrated), 1 = one or more files had migration errors, 2 =
-  operational error (bad flags, I/O failure). Do NOT wire into `conform` — it is
-  an intentionally separate one-shot sweep tool.
+  `nix-instantiate --parse` before writing to disk — passing `-` (NOT
+  `/dev/stdin`, which Go's os.Pipe-backed stdin makes nix reject as a
+  nonexistent path, silently reducing every `--apply` to a no-op).
+  `--old`/`--new` must be paired one-for-one; deleting takes an explicit
+  `--new ""` so a missing flag can never become an implicit deletion. Writes are
+  **two-phase**: all rewrites are computed and parse-gated first, and a
+  parse-gate failure writes nothing at all (a per-file shape refusal fails only
+  that file). Refuses (leaving `src` untouched) on: unrecognized shape, no
+  devShell, partial state, an element appearing twice (a single-span splice
+  would half-apply), and a replacement identifier that is **not bound** in the
+  flake — the conformist#100 guard, since `--parse` is syntax-only and will
+  happily accept a flake referencing an undefined variable. Exit codes: 0 =
+  success (including already-migrated and not-applicable), 1 = migration or
+  parse-gate failure, 2 = operational error. Do NOT wire into `conform` — it is
+  an intentionally separate one-shot sweep tool. Built by the bga package
+  (`subPackages`) so it cannot rot unbuilt again, and gated end-to-end by
+  `just verify-flakeclobber-parse` over `test/flakeclobber/` fixtures.
+
+  **Sweep order matters.** The additive half is `conform`'s job (the `just-us`
+  input, the `justPkg` let binding); the destructive half is flakeclobber's.
+  Run destructive-first and the result references an unbound `justPkg` — hence
+  the binding guard. Because `conform` merges `justPkg` into the devShell list
+  while `pkgs.just` is still present, the correct post-`conform` operation is a
+  **deletion** (`--old pkgs.just --new ""`), not a replacement; a replacement
+  then sees both and refuses as ambiguous.
 - `config/` — viper + TOML config loading. Config discovery searches upward for
   `conformist.toml`/`.conformist.toml`, with `treelint.toml` as a legacy
   fallback from the pre-rename `treelint` name (env: `CONFORMIST_CONFIG`).

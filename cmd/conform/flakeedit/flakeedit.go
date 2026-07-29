@@ -68,6 +68,11 @@ type Options struct {
 const (
 	conformistInput = "conformist"
 	justUsInput     = "just-us"
+
+	// conformistPkgName is the let binding every conformist-wired flake has
+	// carried since the first version — the sentinel that distinguishes
+	// conformist's own wiring from a foreign name collision.
+	conformistPkgName = "conformistPkg"
 )
 
 // conformistDeps are conformist's own flake inputs, in the order their
@@ -83,9 +88,35 @@ var justUsFollows = []struct{ dep, target string }{
 	{conformistInput, conformistInput},
 }
 
+// letBinding is one per-system `let` binding conform wires in. The bindings
+// are rendered INDIVIDUALLY rather than as one opaque block so Apply can
+// splice in just the ones a flake is missing — which is what lets it upgrade
+// a repo wired by an older conformist (conformist#100).
+type letBinding struct {
+	name string
+	text func(indent string) string
+}
+
+// legacyLetNames is the binding set EVERY conformist has written, back to the
+// first version that wired flakes at all. A flake carrying all of these but
+// not the full roster is not a foreign name collision — it is conformist's own
+// outdated wiring, and Apply upgrades it in place instead of refusing
+// (conformist#100). A flake missing any of these while binding some of the
+// rest is a genuine collision and still falls back to print-only.
+var legacyLetNames = []string{conformistPkgName, "eval", "impureEval"}
+
 // conformistLetNames are the let bindings conform wires in, keyed by name
 // for idempotency.
-var conformistLetNames = []string{"conformistPkg", "justPkg", "eval", "impureEval"}
+var conformistLetNames = func() []string {
+	bindings := conformistLetBindings()
+	names := make([]string, 0, len(bindings))
+
+	for _, b := range bindings {
+		names = append(names, b.name)
+	}
+
+	return names
+}()
 
 // Apply splices conformist's wiring into src and returns the rewritten
 // source plus a report of what changed. It returns ErrUnrecognized (and
@@ -101,25 +132,37 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		return src, EditReport{}, fmt.Errorf("flakeedit: %w", err)
 	}
 
-	// Idempotency sentinel: a fully-wired flake has every let binding; a
-	// flake that binds some of conformist's names but not all is either a
-	// foreign collision or a half-edit we must not deepen, so fall back to
-	// print-only.
+	// Idempotency sentinel. A fully-wired flake has every let binding; a
+	// clean flake has none. Partial presence used to be refused outright as a
+	// foreign collision — but that refused exactly the repos the fleet
+	// migration targets: those wired by a PREVIOUS conformist, before
+	// `justPkg` joined the roster (conformist#100). Discriminate instead:
+	// when every binding conformist has ALWAYS written is present, the file
+	// is conformist's own outdated wiring and is safe to upgrade in place.
+	// Any other partial state is still a foreign collision → print-only.
 	have := 0
 	for _, n := range conformistLetNames {
 		if outs.LetExisting[n] {
 			have++
 		}
 	}
-	switch have {
-	case len(conformistLetNames):
-		// already wired; re-run adds only any missing output attrs.
-	case 0:
-		// clean; full wiring.
-	default:
-		return src, EditReport{}, ErrUnrecognized
-	}
+
 	alreadyWired := have == len(conformistLetNames)
+	outdatedWiring := false
+
+	if !alreadyWired && have > 0 {
+		for _, n := range legacyLetNames {
+			if !outs.LetExisting[n] {
+				return src, EditReport{}, ErrUnrecognized
+			}
+		}
+
+		outdatedWiring = true
+	}
+
+	// Both states mean the existing output attrs are conformist's own, so
+	// they are not reported as conflicts to reconcile.
+	conformistWired := alreadyWired || outdatedWiring
 
 	var (
 		report  EditReport
@@ -138,14 +181,27 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		report.Added = append(report.Added, labels...)
 	}
 
-	// 3. let bindings (only when not already wired)
-	if !alreadyWired {
-		splices = append(splices, letSplice(src, outs))
-		report.Added = append(report.Added, "let bindings (conformistPkg, justPkg, eval, impureEval)")
+	// 3. let bindings — only the ones missing, so an outdated-wiring flake
+	// gains just `justPkg` rather than a duplicate block.
+	if s, names, ok := letSplice(src, outs); ok {
+		splices = append(splices, s)
+		report.Added = append(report.Added, "let bindings ("+strings.Join(names, ", ")+")")
+	}
+
+	// An existing `eval` binding is an opaque value this shallow parser will
+	// not rewrite, so a repo upgraded from older wiring keeps its old eval
+	// body — which predates the justfile-orphan-summary linter. Adding
+	// `justPkg` alone does not wire that linter up, so say so rather than
+	// let the operator assume the upgrade was complete.
+	if outdatedWiring {
+		report.Conflicts = append(report.Conflicts,
+			"eval (existing binding left as-is; add the "+
+				"justfile-orphan-summary import + linters.justfile-orphan-summary "+
+				"settings by hand)")
 	}
 
 	// 4. return attributes
-	retS, added, conflicts := returnSplice(src, outs, alreadyWired, opts.ForceFormatter)
+	retS, added, conflicts := returnSplice(src, outs, conformistWired, opts.ForceFormatter)
 	if retS.Text != "" {
 		splices = append(splices, retS)
 	}
@@ -295,34 +351,66 @@ func argSplice(outs flakeparse.ParsedOutputs) (flakeparse.Splice, []string, bool
 	return flakeparse.Splice{Offset: outs.ArgInsertOff, Text: b.String()}, labels, true
 }
 
-// letSplice builds the insertion for the conformistPkg/justPkg/eval/impureEval
-// let bindings, placed just before `in`.
-func letSplice(src []byte, outs flakeparse.ParsedOutputs) flakeparse.Splice {
-	i := outs.LetIndent
-	body := "" +
-		i + "conformistPkg = conformist.packages.${system}.default;\n" +
-		"\n" +
-		i + "justPkg = just-us.packages.${system}.default;\n" +
-		"\n" +
-		i + "eval = conformist.lib.evalModule pkgs {\n" +
-		i + "  imports = [\n" +
-		i + "    conformist.lib.presets.eng\n" +
-		i + "    just-us.lib.conformistLinters.justfile-orphan-summary\n" +
-		i + "    ./conformist.nix\n" +
-		i + "  ];\n" +
-		i + "  package = conformistPkg;\n" +
-		"\n" +
-		i + "  linters.justfile-orphan-summary.enable = true;\n" +
-		i + "  linters.justfile-orphan-summary.justPackage = justPkg;\n" +
-		i + "};\n" +
-		"\n" +
-		i + "impureEval = conformist.lib.evalModule pkgs {\n" +
-		i + "  imports = [ conformist.lib.presets.eng-impure ];\n" +
-		i + "  package = conformistPkg;\n" +
-		i + "  projectRootFile = \"flake.nix\";\n" +
-		i + "};\n"
+// conformistLetBindings returns the per-system `let` bindings conform wires
+// in, in render order.
+func conformistLetBindings() []letBinding {
+	return []letBinding{
+		{conformistPkgName, func(i string) string {
+			return i + conformistPkgName + " = conformist.packages.${system}.default;\n"
+		}},
+		{"justPkg", func(i string) string {
+			return i + "justPkg = just-us.packages.${system}.default;\n"
+		}},
+		{"eval", func(i string) string {
+			return "" +
+				i + "eval = conformist.lib.evalModule pkgs {\n" +
+				i + "  imports = [\n" +
+				i + "    conformist.lib.presets.eng\n" +
+				i + "    just-us.lib.conformistLinters.justfile-orphan-summary\n" +
+				i + "    ./conformist.nix\n" +
+				i + "  ];\n" +
+				i + "  package = conformistPkg;\n" +
+				"\n" +
+				i + "  linters.justfile-orphan-summary.enable = true;\n" +
+				i + "  linters.justfile-orphan-summary.justPackage = justPkg;\n" +
+				i + "};\n"
+		}},
+		{"impureEval", func(i string) string {
+			return "" +
+				i + "impureEval = conformist.lib.evalModule pkgs {\n" +
+				i + "  imports = [ conformist.lib.presets.eng-impure ];\n" +
+				i + "  package = conformistPkg;\n" +
+				i + "  projectRootFile = \"flake.nix\";\n" +
+				i + "};\n"
+		}},
+	}
+}
 
-	return beforeCloser(src, outs.LetCloseOff, "\n"+body)
+// letSplice builds the insertion for whichever conformist let bindings are
+// NOT already present, placed just before `in`, and names the ones it added.
+// On a clean flake that is all four; on a flake carrying an older
+// conformist's wiring it is only the ones added since (conformist#100).
+func letSplice(src []byte, outs flakeparse.ParsedOutputs) (flakeparse.Splice, []string, bool) {
+	i := outs.LetIndent
+
+	var parts, names []string
+
+	for _, b := range conformistLetBindings() {
+		if outs.LetExisting[b.name] {
+			continue
+		}
+
+		parts = append(parts, b.text(i))
+		names = append(names, b.name)
+	}
+
+	if len(parts) == 0 {
+		return flakeparse.Splice{}, nil, false
+	}
+
+	// Each part already ends in "\n"; joining on "\n" reproduces the blank
+	// line between bindings.
+	return beforeCloser(src, outs.LetCloseOff, "\n"+strings.Join(parts, "\n")), names, true
 }
 
 // returnAttr is one output attribute conform wires in.
@@ -423,7 +511,7 @@ func dottedParent(path string) (string, bool) {
 // devShellPackages are the tools conform merges into an existing
 // devShells.default packages list (#63), in order.
 var devShellPackages = []string{
-	"conformistPkg",
+	conformistPkgName,
 	"eval.config.build.preCommit",
 	"eval.config.build.repair",
 	"justPkg",

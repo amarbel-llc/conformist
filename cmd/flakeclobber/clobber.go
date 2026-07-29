@@ -22,6 +22,32 @@ var ErrPartialState = errors.New("flakeclobber: partial migration state (some en
 // devShells.default packages list.
 var ErrNoDevShell = errors.New("flakeclobber: no devShells.default packages list found")
 
+// ErrDuplicateElement is returned when Old occurs more than once in the
+// packages list. The splice machinery addresses a single byte span, so
+// migrating such a list would rewrite the first occurrence and leave the
+// rest — a half-applied destructive edit. Refusing keeps the tool's
+// all-or-nothing contract; the operator dedupes by hand.
+var ErrDuplicateElement = errors.New("flakeclobber: element occurs more than once in packages list")
+
+// ErrUnboundElement is returned when New is a bare identifier that nothing in
+// the flake binds — neither a per-system `let` binding nor an outputs
+// argument.
+//
+// This is the conformist#100 hazard made non-silent. The fleet migration has
+// an additive half (the `just-us` input + the `justPkg` let binding, conform's
+// job) and a destructive half (this tool). Run destructive-first and the
+// rewrite yields a flake referencing an UNDEFINED variable — and
+// `nix-instantiate --parse` cannot catch it, because --parse is syntax-only
+// and accepts a clobbered flake with no `just-us` and no `justPkg` binding.
+//
+// Checking the binding statically against the parse tree is exact for this
+// failure mode and costs nothing: no network, no flake lock, no toolchain,
+// microseconds per file. An eval-level `nix eval` gate would also catch it,
+// but across ~34 repos it needs every input fetched and would conflate
+// unrelated eval errors with the migration — so it is the wrong instrument
+// for a precondition this cheap to prove.
+var ErrUnboundElement = errors.New("flakeclobber: replacement identifier is not bound in the flake")
+
 // ListElementMigration describes one list-element substitution within the
 // devShells.default packages list.
 type ListElementMigration struct {
@@ -37,6 +63,12 @@ type ClobberReport struct {
 	Applied []string
 	// Satisfied lists each migration that was already done.
 	Satisfied []string
+	// NotApplicable lists each migration whose Old and New are both absent,
+	// so it does not apply to this file. Recorded explicitly so a sweep over
+	// ~34 repos reports "did not apply" instead of printing nothing, which in
+	// a run log is indistinguishable from a successful migration
+	//.
+	NotApplicable []string
 }
 
 // Changed reports whether Clobber produced a rewritten source.
@@ -128,7 +160,12 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 			}
 		case elementUnknown:
 			// N/A: neither Old nor New found; migration doesn't apply to this
-			// file. Do not count toward partial-state detection.
+			// file. Do not count toward partial-state detection, but do record
+			// it so the sweep log says so rather than staying silent.
+			report.NotApplicable = append(
+				report.NotApplicable,
+				fmt.Sprintf("%q not present — migration does not apply", e.m.Old),
+			)
 		case elementConflict:
 			return src, ClobberReport{}, fmt.Errorf(
 				"flakeclobber: both %q and %q present in packages list — ambiguous state",
@@ -145,6 +182,26 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 	// Mixed satisfied + pending → partial state, refuse all edits.
 	if satisfied > 0 {
 		return src, ClobberReport{}, ErrPartialState
+	}
+
+	// Preconditions checked BEFORE any splice is built, so a refusal leaves
+	// src untouched.
+	for _, e := range entries {
+		if e.status != elementPending {
+			continue
+		}
+
+		// A duplicated element cannot be migrated by a single-span splice:
+		// rewriting the first occurrence would strand the rest.
+		if n := len(flakeparse.TokenIndices(ls.Inner, e.m.Old)); n > 1 {
+			return src, ClobberReport{}, fmt.Errorf(
+				"%w: %q appears %d times", ErrDuplicateElement, e.m.Old, n,
+			)
+		}
+
+		if err := checkBound(outs, e.m.New); err != nil {
+			return src, ClobberReport{}, err
+		}
 	}
 
 	// All pending → build splices and apply highest-offset first so earlier
@@ -177,6 +234,33 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 	}
 
 	return out, report, nil
+}
+
+// checkBound verifies that a replacement which is a BARE identifier is
+// actually bound in the flake being edited — as a per-system `let` binding or
+// as an outputs argument. A dotted path (`pkgs.just`, `inputs.foo.bar`) is not
+// checked: its root resolves through machinery this shallow parser does not
+// model, and guessing there would produce false refusals. An empty New is a
+// deletion and binds nothing.
+//
+// This is the guard that stops the destructive half of the fleet migration
+// from writing a dangling reference when it runs before the additive half.
+func checkBound(outs flakeparse.ParsedOutputs, replacement string) error {
+	if replacement == "" || strings.Contains(replacement, ".") {
+		return nil
+	}
+
+	if outs.LetExisting[replacement] || outs.ArgNames[replacement] {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"%w: %q is neither a let binding nor an outputs argument — "+
+			"run `conformist conform` first to add the binding, or the rewritten "+
+			"flake will reference an undefined variable (nix-instantiate --parse "+
+			"is syntax-only and will NOT catch it)",
+		ErrUnboundElement, replacement,
+	)
 }
 
 // listElementSplice locates Old as a complete token within ls.Inner and

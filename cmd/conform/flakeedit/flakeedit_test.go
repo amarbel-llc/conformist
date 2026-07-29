@@ -188,6 +188,114 @@ func TestApplyUnrecognized(t *testing.T) {
 	}
 }
 
+// outdatedWiring is a flake wired by a PREVIOUS conformist: it has
+// conformistPkg/eval/impureEval but NOT justPkg, and still lists pkgs.just in
+// its devShell. This is the fleet-migration population — conformist#100 — which
+// Apply used to refuse outright as a foreign name collision.
+const outdatedWiring = `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+  };
+
+  outputs =
+    {
+      self,
+      nixpkgs,
+      utils,
+      conformist,
+    }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        conformistPkg = conformist.packages.${system}.default;
+        eval = conformist.lib.evalModule pkgs { package = conformistPkg; };
+        impureEval = conformist.lib.evalModule pkgs { package = conformistPkg; };
+      in
+      {
+        formatter = eval.config.build.wrapper;
+        devShells.default = pkgs.mkShell {
+          packages = [
+            conformistPkg
+            pkgs.just
+          ];
+        };
+      }
+    );
+}
+`
+
+// TestApplyUpgradesOutdatedWiring pins conformist#100: a flake carrying an
+// older conformist's let bindings is OUTDATED WIRING, not a foreign collision.
+// Apply must add the missing binding (and the just-us input/arg it needs)
+// rather than refusing — refusing is what blocked the fleet sweep, because the
+// repos needing migration are exactly the ones scoring 3-of-4.
+func TestApplyUpgradesOutdatedWiring(t *testing.T) {
+	out, report, err := flakeedit.Apply([]byte(outdatedWiring), flakeedit.Options{})
+	require.NoError(t, err)
+	require.NotEqual(t, outdatedWiring, string(out), "outdated wiring must be upgraded, not refused")
+
+	got := string(out)
+	require.Contains(t, got, "justPkg = just-us.packages.${system}.default;")
+	require.Contains(t, got, `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`)
+
+	// Only the MISSING binding is spliced; the existing three are untouched,
+	// so nothing is duplicated.
+	for _, name := range []string{"conformistPkg", "eval", "impureEval"} {
+		require.Equal(t, 1, strings.Count(got, "\n        "+name+" = "),
+			"existing let binding %q must not be duplicated", name)
+	}
+
+	require.Contains(t, strings.Join(report.Added, "|"), "justPkg")
+
+	// The old `eval` body predates the justfile-orphan-summary linter and this
+	// shallow parser will not rewrite an opaque value, so the incompleteness
+	// must be reported rather than silently left for the operator to discover.
+	require.Contains(t, strings.Join(report.Conflicts, "|"), "eval")
+}
+
+// TestApplyOutdatedWiringIdempotent: re-running over an upgraded flake adds no
+// second copy of anything.
+func TestApplyOutdatedWiringIdempotent(t *testing.T) {
+	once, _, err := flakeedit.Apply([]byte(outdatedWiring), flakeedit.Options{})
+	require.NoError(t, err)
+
+	twice, _, err := flakeedit.Apply(once, flakeedit.Options{})
+	require.NoError(t, err)
+	require.Equal(t, string(once), string(twice), "second Apply must be a no-op")
+}
+
+// TestApplyForeignCollisionStillRefused guards the other side of the
+// conformist#100 change: relaxing 3-of-4 must NOT relax a genuine collision.
+// A flake binding eval/impureEval to something unrelated — without the
+// conformistPkg sentinel — is still print-only.
+func TestApplyForeignCollisionStillRefused(t *testing.T) {
+	src := `{
+  inputs = {
+    utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs =
+    { self, utils }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        eval = x: x * 2;
+        impureEval = x: x + 1;
+      in
+      {
+        packages.default = eval 21;
+      }
+    );
+}
+`
+	out, _, err := flakeedit.Apply([]byte(src), flakeedit.Options{})
+	require.ErrorIs(t, err, flakeedit.ErrUnrecognized)
+	require.Equal(t, src, string(out), "a foreign collision must leave src unchanged")
+}
+
 // TestApplyForceFormatter pins #63's --force-formatter: the existing formatter
 // value is replaced with conformist's wrapper instead of being a conflict.
 func TestApplyForceFormatter(t *testing.T) {
