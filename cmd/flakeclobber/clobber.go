@@ -29,6 +29,19 @@ var ErrNoDevShell = errors.New("flakeclobber: no devShells.default packages list
 // all-or-nothing contract; the operator dedupes by hand.
 var ErrDuplicateElement = errors.New("flakeclobber: element occurs more than once in packages list")
 
+// ErrAmbiguousState is returned when BOTH Old and New are present in the
+// packages list, so a replacement cannot proceed.
+//
+// This is the EXPECTED result of running the additive half of the migration
+// first: `conformist conform` merges its tool roster (which includes the New
+// spelling) into the list without removing the Old one, because its merge has
+// no notion that two different strings name the same tool (conformist#102).
+// Replacing here would leave New listed twice, so the operation that completes
+// the migration is a DELETION of the leftover Old — which is what the message
+// tells the operator to run. Refusing without naming that next step is what
+// made this a deadlock rather than a detour.
+var ErrAmbiguousState = errors.New("flakeclobber: both the old and new elements are present in the packages list")
+
 // ErrShadowedTarget is returned when the flake is an eng-hybrid whose trailing
 // `//` merge redefines devShells. `//` gives its right operand precedence, so
 // the per-system packages list this tool edits is not the one the flake
@@ -175,8 +188,11 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 			)
 		case elementConflict:
 			return src, ClobberReport{}, fmt.Errorf(
-				"flakeclobber: both %q and %q present in packages list — ambiguous state",
-				m.Old, m.New,
+				"%w: %q and %q. This is the normal result of running "+
+					"`conformist conform` first — it adds %q without removing %q. "+
+					"Finish the migration by DELETING the leftover rather than "+
+					"replacing it: --old %s --new \"\"",
+				ErrAmbiguousState, m.Old, m.New, m.New, m.Old, m.Old,
 			)
 		}
 	}

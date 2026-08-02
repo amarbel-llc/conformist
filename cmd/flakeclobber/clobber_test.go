@@ -39,6 +39,37 @@ const minimalFlake = `{
 }
 `
 
+// postConformFlake is minimalFlake as it looks AFTER `conformist conform` has
+// run: conform merged justPkg into the packages list but left pkgs.just in
+// place, so both spellings of the same tool are listed (conformist#102).
+const postConformFlake = `{
+  inputs = {
+    utils.url = "github:numtide/flake-utils";
+    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
+    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
+  };
+
+  outputs = { self, utils, conformist, just-us }:
+    utils.lib.eachDefaultSystem (system: let
+      pkgs = import <nixpkgs> { inherit system; };
+      conformistPkg = conformist.packages.${system}.default;
+      justPkg = just-us.packages.${system}.default;
+      eval = conformist.lib.evalModule pkgs { package = conformistPkg; };
+      impureEval = conformist.lib.evalModule pkgs { package = conformistPkg; };
+    in {
+      devShells.default = pkgs.mkShell {
+        packages = [
+          conformistPkg
+          eval.config.build.preCommit
+          eval.config.build.repair
+          justPkg
+          pkgs.just
+        ];
+      };
+    });
+}
+`
+
 // noDevShellFlake has an eachDefaultSystem shape but no devShells.default.
 const noDevShellFlake = `{
   inputs = {
@@ -87,6 +118,51 @@ func TestClobber_DeleteElement(t *testing.T) {
 
 	outStr := string(out)
 	assert.NotContains(t, outStr, "pkgs.just")
+}
+
+// TestClobber_AmbiguousStateNamesTheCompletingCommand pins conformist#102.
+// The refusal itself is correct and deliberate — both spellings present is
+// genuinely ambiguous — but a refusal that does not name the next step reads
+// as a dead end. The operator must be told that the completing operation is a
+// DELETE, not a replace, so assert the remediation is actually in the message
+// rather than just asserting that some error occurred.
+func TestClobber_AmbiguousStateNamesTheCompletingCommand(t *testing.T) {
+	migrations := []ListElementMigration{
+		{Old: "pkgs.just", New: "justPkg"},
+	}
+
+	out, report, err := Clobber([]byte(postConformFlake), migrations)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrAmbiguousState)
+
+	msg := err.Error()
+	assert.Contains(t, msg, `--old pkgs.just --new ""`,
+		"the refusal must name the exact completing command, not just diagnose the state")
+	assert.Contains(t, msg, "conformist conform",
+		"the refusal should explain how the tree got into this state")
+
+	assert.Equal(t, []byte(postConformFlake), out, "src must be untouched on refusal")
+	assert.Empty(t, report.Applied)
+	assert.Empty(t, report.Satisfied)
+}
+
+// TestClobber_DeleteCompletesAfterConform verifies the command the message
+// above recommends actually works on that same input — otherwise the advice
+// would be untested prose.
+func TestClobber_DeleteCompletesAfterConform(t *testing.T) {
+	migrations := []ListElementMigration{
+		{Old: "pkgs.just", New: ""},
+	}
+
+	out, report, err := Clobber([]byte(postConformFlake), migrations)
+	require.NoError(t, err)
+	assert.True(t, report.Changed())
+	assert.Equal(t, []string{`removed "pkgs.just"`}, report.Applied)
+
+	outStr := string(out)
+	assert.NotContains(t, outStr, "pkgs.just")
+	assert.Contains(t, outStr, "justPkg", "the surviving spelling must remain")
 }
 
 func TestClobber_NotFound(t *testing.T) {
