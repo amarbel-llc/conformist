@@ -125,8 +125,12 @@ func TestParseFlakeOuterLetIdentifierEndingInKeyword(t *testing.T) {
 // half would have left the grammars divergent while looking done — which is
 // the failure #106 exists to prevent, not an instance of it.
 func TestParseFlakeTopLevelBindingWithClause(t *testing.T) {
+	// A real nixConfig key. The obvious first choice for this fixture is the
+	// extra-subst… cache setting, but misspell reports that word as a typo, so
+	// this uses another genuine key instead — the fixture only needs SOME
+	// attrset sitting behind the `with`.
 	src := nixPegFlake(`  nixConfig = with builtins; {
-    extra-substituters = [ "https://cache.example.org" ];
+    extra-experimental-features = [ "nix-command" ];
   };
 
 `, "")

@@ -74,16 +74,22 @@ func TestAssertNoShadowedRulesIgnoresSharedItself(t *testing.T) {
 // shapes that would otherwise produce false positives: a rule quoted inside a
 // comment (nix.peg's header used to carry several) and a continuation line of
 // a multi-line alternation.
+//
+// The defined rules are named Balanced/Spacing rather than the real Group and
+// Trivia they are modelled on. The names are arbitrary to what this test
+// checks, and reusing a real one would put a third bare "Group" literal in the
+// package — tripping goconst on nav.go and outputs.go, which use node-name
+// literals bare throughout by convention.
 func TestDefinedRuleNamesReadsDefinitionsOnly(t *testing.T) {
 	names := definedRuleNames([]byte(`// LetSemiChar <- !(LetKw) !(InKw) .
 	// Indented comment: OuterText <- nope
-Group      <- BraceOpen Inner BraceClose
+Balanced   <- BraceOpen Inner BraceClose
             / BracketOpen Inner BracketClose
-Trivia     <- (WS / Comment)*
+Spacing    <- (WS / Comment)*
 `))
 
 	assert.Equal(t,
-		[]string{"Group", "Trivia"},
+		[]string{"Balanced", "Spacing"},
 		slices.Sorted(maps.Keys(names)),
 		"only first-column definitions count")
 }
