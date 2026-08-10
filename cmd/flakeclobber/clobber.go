@@ -30,16 +30,13 @@ var ErrNoDevShell = errors.New("flakeclobber: no devShells.default packages list
 var ErrDuplicateElement = errors.New("flakeclobber: element occurs more than once in packages list")
 
 // ErrAmbiguousState is returned when BOTH Old and New are present in the
-// packages list, so a replacement cannot proceed.
+// packages list: replacing would leave New listed twice.
 //
-// This is the EXPECTED result of running the additive half of the migration
-// first: `conformist conform` merges its tool roster (which includes the New
-// spelling) into the list without removing the Old one, because its merge has
-// no notion that two different strings name the same tool (conformist#102).
-// Replacing here would leave New listed twice, so the operation that completes
-// the migration is a DELETION of the leftover Old — which is what the message
-// tells the operator to run. Refusing without naming that next step is what
-// made this a deadlock rather than a detour.
+// This is the EXPECTED state between the two halves of the sweep. `conformist
+// conform` merges its tool roster in without removing the old spelling, having
+// no notion that two different strings name the same tool — so the operation
+// that COMPLETES the migration is a deletion, not a replacement. The error
+// text names that command; see RFC 0004 on sweep order (conformist#102).
 var ErrAmbiguousState = errors.New("flakeclobber: both the old and new elements are present in the packages list")
 
 // ErrShadowedTarget is returned when the flake is an eng-hybrid whose trailing
@@ -187,12 +184,15 @@ func Clobber(src []byte, migrations []ListElementMigration) ([]byte, ClobberRepo
 				fmt.Sprintf("%q not present — migration does not apply", m.Old),
 			)
 		case elementConflict:
+			// Indexed verbs: Old and New each appear three and two times
+			// respectively, and a positional list repeating them was easy to
+			// mis-order on edit.
 			return src, ClobberReport{}, fmt.Errorf(
-				"%w: %q and %q. This is the normal result of running "+
-					"`conformist conform` first — it adds %q without removing %q. "+
+				"%[1]w: %[2]q and %[3]q. This is the normal result of running "+
+					"`conformist conform` first — it adds %[3]q without removing %[2]q. "+
 					"Finish the migration by DELETING the leftover rather than "+
-					"replacing it: --old %s --new \"\"",
-				ErrAmbiguousState, m.Old, m.New, m.New, m.Old, m.Old,
+					"replacing it: --old %[2]s --new \"\"",
+				ErrAmbiguousState, m.Old, m.New,
 			)
 		}
 	}

@@ -12,12 +12,11 @@
 // back to print-only rather than corrupting the file.
 //
 // Everything lexical — bindings, values, strings, comments, trivia, tokens —
-// lives in shared.peg and is imported below. Those rules used to be copied
-// into both grammars and silently diverged; see shared.peg's header for what
-// that cost (conformist#106). Being the FIRST pass, this file is upstream of
-// outputs.peg: a disagreement between the two about where a value ENDS is the
-// highest-consequence bug class in a tool that rewrites flake.nix in place,
-// which is why the rules are now defined exactly once.
+// lives in shared.peg and is imported below; see its header for why those
+// rules are defined exactly once (conformist#106). Being the FIRST pass, this
+// file is upstream of outputs.peg: a disagreement between the two about where
+// a value ENDS is the highest-consequence bug class in a tool that rewrites
+// flake.nix in place.
 //
 // Ported from amarbel-llc/doppelgang internal/0/nixedit/nix.peg, which is
 // itself modelled on amarbel-llc/langlang grammars/toml.peg.

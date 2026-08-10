@@ -10,63 +10,66 @@ import (
 	flakeparse "code.linenisgreat.com/conformist/cmd/conform/flakeparse"
 )
 
-// wrap builds a recognized-shape flake around a per-system let block and
-// return attrset, so a test can vary just the part it cares about.
-func wrap(letBindings, returnAttrs string) string {
+// flakeSource emits the preamble every fixture in this file shares: the inputs
+// attrset, optional top-level bindings BEFORE `outputs =`, and the outputs
+// value itself.
+//
+// The inputs block is not decoration. ParseFlake requires FindInputsAttrSet to
+// succeed, so a fixture without one refuses no matter what its outputs look
+// like — a case written without it passes vacuously and never exercises the
+// shape it claims to pin. An earlier version of this file had exactly that bug
+// across every refusal case.
+func flakeSource(topLevel, outputs string) string {
 	return `{
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
   };
 
-  outputs =
-    { self, nixpkgs, utils }:
-    utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-` + letBindings + `      in
-      {
-` + returnAttrs + `      }
-    );
-}
+` + topLevel + `  outputs =
+` + outputs + `}
 `
 }
 
-// nixPegFlake builds a flake whose distinguishing feature sits OUTSIDE the
-// eachDefaultSystem call, so it is parsed by nix.peg (the first pass) rather
-// than outputs.peg. wrap cannot reach that region: it only varies the
-// per-system let block and return attrset, both of which live inside the call
-// and are therefore consumed by nix.peg as opaque group content.
+// recognizedShape builds a flake in the shape conform edits in place, with a
+// knob for each region a test might vary. Which knob a test reaches for decides
+// which PASS it exercises: topLevel and outerLet sit OUTSIDE the
+// eachDefaultSystem call and so are parsed by nix.peg, while letBindings and
+// returnAttrs sit inside it and reach outputs.peg — nix.peg consumes the whole
+// call as opaque group content.
+func recognizedShape(topLevel, outerLet, letBindings, returnAttrs string) string {
+	return flakeSource(topLevel, `    { self, nixpkgs, utils }:
+`+outerLet+`    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+`+letBindings+`      in
+      {
+`+returnAttrs+`      }
+    );
+`)
+}
+
+// wrap varies just the per-system let block and return attrset — the second
+// pass's territory.
+func wrap(letBindings, returnAttrs string) string {
+	return recognizedShape("", "", letBindings, returnAttrs)
+}
+
+// nixPegFlake varies the two regions wrap cannot reach, so the distinguishing
+// feature lands in nix.peg's territory rather than outputs.peg's.
 //
-// This distinction is the whole point of the conformist#106 tests below. The
+// That distinction is the whole point of the conformist#106 tests below. The
 // fleet corpus proves nothing about them — `just debug-flakeclobber-regression`
 // reports newly-accepted=0, because no repo currently combines an outer `let`
 // with a keyword-suffixed identifier. Latent is not fixed, and a green sweep
 // over a corpus that never exercises the defect is precisely the kind of
 // check that passes for an incidental reason.
 func nixPegFlake(topLevelExtra, outerLet string) string {
-	return `{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    utils.url = "github:numtide/flake-utils";
-  };
-
-` + topLevelExtra + `  outputs =
-    { self, nixpkgs, utils }:
-` + outerLet + `    utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in
-      {
-        devShells.default = pkgs.mkShell {
+	return recognizedShape(topLevelExtra, outerLet, "", `        devShells.default = pkgs.mkShell {
           packages = [ pkgs.just ];
         };
-      }
-    );
-}
-`
+`)
 }
 
 // TestParseFlakeOuterLetIdentifierEndingInKeyword pins the first half of
@@ -386,23 +389,11 @@ func TestParseFlakeHybridMergeSideAttrsRecorded(t *testing.T) {
 		"absent merge-side attrs must not be reported")
 }
 
-// withInputs wraps an outputs value in a flake that HAS an inputs attrset.
-//
-// This matters more than it looks. ParseFlake requires FindInputsAttrSet to
-// succeed, so a fixture with no `inputs` block refuses no matter what its
-// outputs look like — a refusal-roster case written without one passes
-// vacuously and never exercises the shape it claims to pin. An earlier version
-// of this test had exactly that bug across every case.
+// withInputs wraps a raw outputs value in a flake that HAS an inputs attrset.
+// Used by the refusal roster, whose cases vary the outputs value wholesale
+// rather than filling in the recognized shape's slots.
 func withInputs(outputs string) string {
-	return `{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    utils.url = "github:numtide/flake-utils";
-  };
-
-  outputs =
-` + outputs + `}
-`
+	return flakeSource("", outputs)
 }
 
 // TestParseFlakeAtPattern is conformist#104: an at-pattern binding the whole

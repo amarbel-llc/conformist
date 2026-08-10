@@ -42,33 +42,17 @@ const minimalFlake = `{
 // postConformFlake is minimalFlake as it looks AFTER `conformist conform` has
 // run: conform merged justPkg into the packages list but left pkgs.just in
 // place, so both spellings of the same tool are listed (conformist#102).
-const postConformFlake = `{
-  inputs = {
-    utils.url = "github:numtide/flake-utils";
-    conformist.url = "git+https://code.linenisgreat.com/conformist.git";
-    just-us.url = "git+https://code.linenisgreat.com/just-us.git";
-  };
-
-  outputs = { self, utils, conformist, just-us }:
-    utils.lib.eachDefaultSystem (system: let
-      pkgs = import <nixpkgs> { inherit system; };
-      conformistPkg = conformist.packages.${system}.default;
-      justPkg = just-us.packages.${system}.default;
-      eval = conformist.lib.evalModule pkgs { package = conformistPkg; };
-      impureEval = conformist.lib.evalModule pkgs { package = conformistPkg; };
-    in {
-      devShells.default = pkgs.mkShell {
-        packages = [
-          conformistPkg
-          eval.config.build.preCommit
-          eval.config.build.repair
-          justPkg
-          pkgs.just
-        ];
-      };
-    });
-}
-`
+//
+// DERIVED from minimalFlake rather than copied, so the two cannot drift apart.
+// A copy would keep passing after minimalFlake's shape changed — these tests
+// assert only NotContains "pkgs.just" / Contains "justPkg", which a stale
+// fixture still satisfies while no longer exercising the shape it claims to.
+var postConformFlake = strings.Replace(
+	minimalFlake,
+	"          pkgs.just\n",
+	"          justPkg\n          pkgs.just\n",
+	1,
+)
 
 // noDevShellFlake has an eachDefaultSystem shape but no devShells.default.
 const noDevShellFlake = `{
@@ -127,6 +111,13 @@ func TestClobber_DeleteElement(t *testing.T) {
 // DELETE, not a replace, so assert the remediation is actually in the message
 // rather than just asserting that some error occurred.
 func TestClobber_AmbiguousStateNamesTheCompletingCommand(t *testing.T) {
+	// strings.Replace returns the input unchanged when the pattern misses, so
+	// without this the fixture could silently degrade to minimalFlake — which
+	// has only pkgs.just, is not ambiguous at all, and would fail this test
+	// for the wrong reason.
+	require.Contains(t, postConformFlake, "          justPkg\n          pkgs.just\n",
+		"postConformFlake's derivation from minimalFlake must have applied")
+
 	migrations := []ListElementMigration{
 		{Old: "pkgs.just", New: "justPkg"},
 	}

@@ -56,6 +56,12 @@ KeyVal     <- AttrPath Trivia Equals Trivia Value Semi
 // segment is an identifier or a quoted string (Nix allows `"foo".bar`).
 // String interpolation in attr NAMES (`${e}`) is not supported; such a file
 // makes Match fail and the caller falls back to print-only.
+//
+// Identifier's character class is mirrored by outputs.peg's AtName, which
+// cannot simply forward to this rule: a rule that only forwards yields no CST
+// node of its own, and the caller looks AtName up by name. That is the one
+// character-identical pair this file does not eliminate — change the class
+// here and AtName needs the same edit.
 AttrPath   <- AttrName (Trivia Dot Trivia AttrName)*
 AttrName   <- Identifier / String
 Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
