@@ -146,6 +146,11 @@ func TestClobber_DeleteCompletesAfterConform(t *testing.T) {
 		{Old: "pkgs.just", New: ""},
 	}
 
+	// Same derivation guard as the sibling test above: without it a missed
+	// Replace degrades this into a duplicate of TestClobber_DeleteElement.
+	require.Contains(t, postConformFlake, "          justPkg\n          pkgs.just\n",
+		"postConformFlake's derivation from minimalFlake must have applied")
+
 	out, report, err := Clobber([]byte(postConformFlake), migrations)
 	require.NoError(t, err)
 	assert.True(t, report.Changed())
@@ -153,7 +158,17 @@ func TestClobber_DeleteCompletesAfterConform(t *testing.T) {
 
 	outStr := string(out)
 	assert.NotContains(t, outStr, "pkgs.just")
-	assert.Contains(t, outStr, "justPkg", "the surviving spelling must remain")
+
+	// Count and position, not a bare Contains. justPkg appears TWICE in the
+	// fixture — once as a let binding, once as the list element this migration
+	// must preserve — so `Contains(outStr, "justPkg")` is satisfied by the let
+	// binding alone and cannot fail for the reason it claims. A deletion whose
+	// byte range widened to swallow the preceding list line would leave the
+	// packages list with neither spelling and still pass it.
+	assert.Equal(t, 2, strings.Count(outStr, "justPkg"),
+		"both the let binding and the surviving list element must remain")
+	assert.Contains(t, outStr, "          justPkg\n",
+		"the survivor must still be IN the packages list, at element indentation")
 }
 
 func TestClobber_NotFound(t *testing.T) {
