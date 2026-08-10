@@ -1,136 +1,35 @@
 // Shallow Nix grammar for flake.nix surgery (CST mode, -disable-spaces).
 //
-// This grammar deliberately does NOT parse all of Nix. It parses just
-// enough structure to navigate a flake.nix to its top-level `inputs`
-// attrset and `outputs` binding, so conformist can splice new bindings
-// in by byte offset while preserving the rest of the file verbatim. The
-// `outputs` value is parsed opaquely here; the recognized
-// eachDefaultSystem shape is parsed in a second pass (outputs.peg) over
-// the located value's byte range.
+// FIRST of two passes. This grammar deliberately does NOT parse all of Nix.
+// It parses just enough structure to navigate a flake.nix to its top-level
+// `inputs` attrset and `outputs` binding, so conformist can splice new
+// bindings in by byte offset while preserving the rest of the file verbatim.
+// The `outputs` value is parsed opaquely here; the recognized
+// eachDefaultSystem shape is parsed in a SECOND pass (outputs.peg) over the
+// located value's byte range.
 //
-// The value side of a binding is skipped opaquely as a trivia-,
-// string-, and comment-aware balanced run (Value/Balanced), rather
-// than parsed as a real Nix expression. That keeps the grammar small
-// while still finding the correct end of each binding's value — even
-// when a sibling binding is `outputs = { self, ... }: <large expr>`
-// containing nested braces, strings with `${}` interpolation, and
-// comments. Anything the grammar cannot parse makes Match fail, and
-// the caller falls back to print-only rather than corrupting the file.
+// Anything this grammar cannot parse makes Match fail, and the caller falls
+// back to print-only rather than corrupting the file.
 //
-// Ported from amarbel-llc/doppelgang internal/0/nixedit/nix.peg, which
-// is itself modelled on amarbel-llc/langlang grammars/toml.peg.
+// Everything lexical — bindings, values, strings, comments, trivia, tokens —
+// lives in shared.peg and is imported below. Those rules used to be copied
+// into both grammars and silently diverged; see shared.peg's header for what
+// that cost (conformist#106). Being the FIRST pass, this file is upstream of
+// outputs.peg: a disagreement between the two about where a value ENDS is the
+// highest-consequence bug class in a tool that rewrites flake.nix in place,
+// which is why the rules are now defined exactly once.
+//
+// Ported from amarbel-llc/doppelgang internal/0/nixedit/nix.peg, which is
+// itself modelled on amarbel-llc/langlang grammars/toml.peg.
+
+@import Trivia, Binding, BraceOpen, BraceClose, EOF from "./shared.peg"
 
 // ── Top-level ────────────────────────────────────────────────
-// First rule is the PEG entry point. A flake.nix is a single
-// attribute set (with optional surrounding trivia). We parse its
-// bindings; each binding's key path is structured, its value opaque.
+// First rule is the PEG entry point (this file is the QueryMatcher
+// entrypoint; imports do not displace it). A flake.nix is a single attribute
+// set with optional surrounding trivia. We parse its bindings; each binding's
+// key path is structured, its value opaque.
 
 File       <- Trivia AttrSet Trivia EOF
 
 AttrSet    <- BraceOpen Trivia Binding* BraceClose
-
-// A binding is either `inherit ...;` or `attrpath = value;`.
-Binding    <- (Inherit / KeyVal) Trivia
-
-Inherit    <- InheritKw Value Semi
-
-KeyVal     <- AttrPath Trivia Equals Trivia Value Semi
-
-// ── Attribute paths ──────────────────────────────────────────
-// Dotted path of attr names: `inputs.utils.inputs.systems.follows`.
-// Each segment is an identifier or a quoted string (Nix allows
-// `"foo".bar`). String interpolation in attr names (`${e}`) is not
-// supported here; such a file makes Match fail → print-only fallback.
-
-AttrPath   <- AttrName (Trivia Dot Trivia AttrName)*
-AttrName   <- Identifier / String
-Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
-
-// ── Values (opaque) ──────────────────────────────────────────
-// A value is skipped opaquely up to the binding's terminating
-// semicolon. The outer run (Value) stops at a top-level `;`; the inner
-// run (Inner), used inside groups and `${…}`, consumes `;` because a
-// semicolon nested in an attrset/list/paren/interpolation is content,
-// not the binding terminator.
-//
-// `let … in` expressions require special handling: their inner `;`
-// characters are let-binding separators, not the outer binding
-// terminator. LetGroup treats `let … in` as a balanced construct so
-// those semicolons are not confused with the terminating one
-// (conformist#81). LetGroup is tried before Group and OuterText in
-// Value so a `let` at the top level of an outputs value is recognized.
-
-Value      <- (LetGroup / Group / String / Comment / OuterText)*
-Inner      <- (Group / String / Comment / InnerText)*
-Group      <- BraceOpen Inner BraceClose
-            / BracketOpen Inner BracketClose
-            / ParenOpen Inner ParenClose
-// LetGroup: a `let … in` block. Nested let-in constructs are handled
-// recursively. LetSemiText stops at `let`/`in` keywords and structural
-// delimiters; `;` is allowed inside (it is let-binding content).
-LetGroup      <- LetKw LetInner InKw
-LetInner      <- (LetGroup / Group / String / Comment / LetSemiText)*
-LetKw         <- 'let' ![a-zA-Z0-9_'\-]
-InKw          <- 'in' ![a-zA-Z0-9_'\-]
-// LetSemiText: a run of one or more characters that are not let/in keywords,
-// structural delimiters, string openers, or comment openers. Split into
-// LetSemiChar so that the named-rule lookaheads (LetKw, InKw) stay outside
-// #(…) — langlang v0.0.12 does not support named rule refs inside #(…).
-LetSemiText   <- LetSemiChar+
-LetSemiChar   <- !(LetKw) !(InKw) !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
-// OuterText: a run of chars that are not structural delimiters, string
-// or comment openers, the terminating `;`, or a `let` keyword. The LetKw
-// exclusion matters even though LetGroup is tried first in Value's
-// alternation: without it, OuterText's greedy `+` swallows straight
-// through a `let` that appears after other Value content (e.g. `{ self
-// }: let … in …`), never handing control back to LetGroup
-// (conformist#81).
-OuterText  <- (!(LetKw) OuterChar)+
-OuterChar  <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
-// InnerText: like OuterText but `;` is allowed (it is group content).
-InnerText  <- #((!('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
-
-// ── Strings ──────────────────────────────────────────────────
-// Double-quoted and indented (''…'') strings, interpolation-aware so
-// a `}` or `;` inside a string or `${…}` does not break balancing.
-
-String        <- DString / IString
-DString       <- '"' #(DStringPart* '"')
-DStringPart   <- Interp / DEscape / DPlain
-DPlain        <- #((!('"' / '\\' / '${') .)+)
-DEscape       <- #('\\' .)
-IString       <- '\'\'' #(IStringPart* '\'\'')
-IStringPart   <- Interp / IEscape / IPlain
-// `''` is the closer; `'''` and `''$`/`''\` are escapes inside it.
-IEscape       <- #('\'\'' ('$' / '\\' / '\'') )
-IPlain        <- #((!('\'\'' / '${') .)+)
-Interp        <- '${' Inner '}'
-
-// ── Comments ─────────────────────────────────────────────────
-
-Comment    <- LineComment / BlockComment
-LineComment <- #('#' (!Newline .)*)
-BlockComment <- #('/*' (!'*/' .)* '*/')
-
-// ── Trivia ───────────────────────────────────────────────────
-
-WS         <- #([ \t\r\n]+)
-Newline    <- #('\r\n' / '\n')
-Trivia     <- (WS / Comment)*
-
-// ── Structural tokens ────────────────────────────────────────
-
-InheritKw    <- 'inherit' ![a-zA-Z0-9_]
-Equals       <- '='
-Dot          <- '.'
-Semi         <- ';'
-BraceOpen    <- '{'
-BraceClose   <- '}'
-BracketOpen  <- '['
-BracketClose <- ']'
-ParenOpen    <- '('
-ParenClose   <- ')'
-
-// ── Sentinel ─────────────────────────────────────────────────
-
-EOF        <- !.

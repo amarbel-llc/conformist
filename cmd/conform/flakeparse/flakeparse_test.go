@@ -33,6 +33,110 @@ func wrap(letBindings, returnAttrs string) string {
 `
 }
 
+// nixPegFlake builds a flake whose distinguishing feature sits OUTSIDE the
+// eachDefaultSystem call, so it is parsed by nix.peg (the first pass) rather
+// than outputs.peg. wrap cannot reach that region: it only varies the
+// per-system let block and return attrset, both of which live inside the call
+// and are therefore consumed by nix.peg as opaque group content.
+//
+// This distinction is the whole point of the conformist#106 tests below. The
+// fleet corpus proves nothing about them — `just debug-flakeclobber-regression`
+// reports newly-accepted=0, because no repo currently combines an outer `let`
+// with a keyword-suffixed identifier. Latent is not fixed, and a green sweep
+// over a corpus that never exercises the defect is precisely the kind of
+// check that passes for an incidental reason.
+func nixPegFlake(topLevelExtra, outerLet string) string {
+	return `{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    utils.url = "github:numtide/flake-utils";
+  };
+
+` + topLevelExtra + `  outputs =
+    { self, nixpkgs, utils }:
+` + outerLet + `    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          packages = [ pkgs.just ];
+        };
+      }
+    );
+}
+`
+}
+
+// TestParseFlakeOuterLetIdentifierEndingInKeyword pins the first half of
+// conformist#106 against nix.peg specifically.
+//
+// nix.peg's LetSemiChar used to test the InKw lookahead at EVERY byte:
+//
+//	LetSemiChar <- !(LetKw) !(InKw) !('{' / … ) .
+//
+// `InKw` is `'in' ![a-zA-Z0-9_'\-]`, so in the identifier `bin` the lookahead
+// succeeds at index 1 — "in" followed by a space is a complete token as far as
+// that rule can tell. LetSemiChar then fails mid-word, every other LetInner
+// alternative fails at the same byte, and LetGroup's required InKw happily
+// consumes the `in` inside `bin`. The outer let closes early and the file is
+// refused.
+//
+// The fix is structural rather than a ported patch: nix.peg imports Binding
+// from shared.peg, so it gets the one definition of LetSemiText — which
+// consumes words atomically via OuterWord, meaning the lookahead is only ever
+// tested at a token boundary.
+//
+// `bin` is not a contrived name. It is the single most common identifier of
+// this shape in real flakes, alongside plugin, origin, main and
+// writeShellScriptBin.
+func TestParseFlakeOuterLetIdentifierEndingInKeyword(t *testing.T) {
+	src := nixPegFlake("", `    let
+      bin = "conformist";
+      plugin = "dewey";
+      origin = "forge";
+    in
+`)
+
+	_, outs, err := flakeparse.ParseFlake([]byte(src))
+	require.NoError(t, err,
+		"an outer-let identifier ending in a keyword must not close the let early")
+
+	require.NotNil(t, outs.DevShellPackages,
+		"the second pass must still locate the devShell list")
+	assert.Contains(t, outs.DevShellPackages.Inner, "pkgs.just")
+}
+
+// TestParseFlakeTopLevelBindingWithClause pins the second half of
+// conformist#106 — the divergence the issue does NOT mention.
+//
+// nix.peg's Value had no WithGroup alternative, so `with <expr>;` in a
+// top-level flake binding ended the binding at the `with`'s own semicolon:
+// OuterText consumed `with builtins`, stopped at `;`, Value's `*` ended and
+// Semi matched. The leftover `{ … };` is not an `AttrPath = Value ;`, so the
+// enclosing AttrSet's Binding* stopped, BraceClose found `{`, and File failed.
+//
+// This is the same defect class as conformist#103, which fixed it one level
+// down in outputs.peg and was never ported up. Fixing only the atomic-word
+// half would have left the grammars divergent while looking done — which is
+// the failure #106 exists to prevent, not an instance of it.
+func TestParseFlakeTopLevelBindingWithClause(t *testing.T) {
+	src := nixPegFlake(`  nixConfig = with builtins; {
+    extra-substituters = [ "https://cache.example.org" ];
+  };
+
+`, "")
+
+	_, outs, err := flakeparse.ParseFlake([]byte(src))
+	require.NoError(t, err,
+		"a top-level `with <expr>;` binding must not terminate at the with's semicolon")
+
+	require.NotNil(t, outs.DevShellPackages,
+		"the outputs binding after the with-clause must still be located")
+	assert.Contains(t, outs.DevShellPackages.Inner, "pkgs.just")
+}
+
 // TestParseFlakeNestedLetIn is the nested-let regression: a binding whose
 // VALUE is itself a `let … in …` expression. Its inner `;` are let-binding
 // separators, not the outer binding's terminator — before the fix the grammar

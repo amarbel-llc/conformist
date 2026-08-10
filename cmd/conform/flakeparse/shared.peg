@@ -1,0 +1,191 @@
+// Lexical layer shared by nix.peg (first pass: locate the `outputs` value)
+// and outputs.peg (second pass: recognize the eachDefaultSystem shape).
+//
+// Both passes need the same notion of what a Nix token, string, comment and
+// balanced group are; only their top-level structure differs. Before this
+// file existed those rules were COPIED into both grammars, under a policy
+// outputs.peg stated in its own header: "shared rules are duplicated from
+// nix.peg so this grammar is self-contained". That policy defended the copy,
+// but nothing enforced that the copies stayed equal — and they silently
+// diverged. Two fixes landed in outputs.peg and neither was ported back to
+// nix.peg, the FIRST pass and therefore upstream of everything:
+//
+//   1. atomic words (OuterWord) — without them the keyword lookaheads are
+//      tested at every byte, so `bin`, `plugin`, `origin` and
+//      `writeShellScriptBin` end a run mid-word.
+//   2. WithGroup — `with <expr>;` puts a semicolon before the value proper,
+//      so a binding using it ended at the wrong `;`.
+//
+// Factoring the rules here removes the divergence CLASS rather than those two
+// instances: there is now exactly one definition of each (conformist#106).
+//
+// Imported BY NAME, e.g.
+//
+//	@import Trivia, Binding, BraceOpen, BraceClose, EOF from "./shared.peg"
+//
+// langlang resolves a name's dependencies transitively within this file, so an
+// importer lists only the rules it references DIRECTLY. This file is never a
+// QueryMatcher entrypoint and deliberately defines no File rule.
+//
+// CST mode, -disable-spaces: whitespace is managed explicitly via Trivia, so
+// langlang's automatic Spacing injection is off (see compileMatcher).
+
+// ── Keywords ─────────────────────────────────────────────────
+//
+// Every keyword carries a trailing negative lookahead so it matches only a
+// COMPLETE token. That is necessary but NOT sufficient: it stops `let` from
+// matching the start of `letter`, but not from matching the tail of `outlet`.
+// Preventing the tail case needs the callers to consume words atomically —
+// see OuterWord.
+
+LetKw      <- 'let' ![a-zA-Z0-9_'\-]
+InKw       <- 'in' ![a-zA-Z0-9_'\-]
+WithKw     <- 'with' ![a-zA-Z0-9_'\-]
+InheritKw  <- 'inherit' ![a-zA-Z0-9_]
+
+// ── Bindings ─────────────────────────────────────────────────
+//
+// A binding is either `inherit …;` or `attrpath = value;`. The key path is
+// structured (callers read it); the value is skipped opaquely.
+
+Binding    <- (Inherit / KeyVal) Trivia
+Inherit    <- InheritKw Value Semi
+KeyVal     <- AttrPath Trivia Equals Trivia Value Semi
+
+// Dotted path of attr names: `inputs.utils.inputs.systems.follows`. Each
+// segment is an identifier or a quoted string (Nix allows `"foo".bar`).
+// String interpolation in attr NAMES (`${e}`) is not supported; such a file
+// makes Match fail and the caller falls back to print-only.
+AttrPath   <- AttrName (Trivia Dot Trivia AttrName)*
+AttrName   <- Identifier / String
+Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
+
+// ── Values (opaque) ──────────────────────────────────────────
+//
+// A value is skipped opaquely up to the binding's terminating semicolon,
+// rather than parsed as a real Nix expression. That keeps the grammar small
+// while still finding the correct END of each binding — even when a sibling
+// binding is `outputs = { self, ... }: <large expr>` containing nested
+// braces, interpolated strings and comments.
+//
+// The outer run (Value) stops at a top-level `;`. The inner run (Inner), used
+// inside groups and `${…}`, CONSUMES `;` because a semicolon nested in an
+// attrset, list, paren or interpolation is content, not the terminator.
+//
+// Two constructs put a `;` in the middle of a value, and each needs its own
+// balanced rule or the binding ends early:
+//
+//   LetGroup   `let a = 1; in a`      — the `;` separates let bindings
+//   WithGroup  `with pkgs; [ just ]`  — the `;` terminates the `with` scope
+//
+// Both are tried BEFORE Group/String/Comment/OuterText in Value.
+
+Value      <- (LetGroup / WithGroup / Group / String / Comment / OuterText)*
+Inner      <- (Group / String / Comment / InnerText)*
+Group      <- BraceOpen Inner BraceClose
+            / BracketOpen Inner BracketClose
+            / ParenOpen Inner ParenClose
+
+// LetGroup: a `let … in` block, treated as balanced so its inner `;` are not
+// mistaken for the enclosing binding's terminator (conformist#81 for the
+// OUTER case, and the nested-in-a-value case for the second pass). Nested
+// let-in constructs recurse.
+LetGroup      <- LetKw LetInner InKw
+LetInner      <- (LetGroup / Group / String / Comment / LetSemiText)*
+
+// LetSemiText runs up to the `in` that closes the let. `;` is content here.
+// The LetKw/InKw lookaheads stay OUTSIDE #(…): langlang v0.0.12 does not
+// support named rule refs inside #(…).
+LetSemiText   <- (!(LetKw) !(InKw) LetSemiChunk)+
+LetSemiChunk  <- OuterWord / LetSemiChar
+LetSemiChar   <- !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
+
+// WithGroup consumes the scope expression AND its terminating semicolon, so
+// the `*` loop in Value then reads the real value normally (conformist#103).
+// Nested inside a group this never bit, because Inner treats `;` as content —
+// which is exactly why it went unnoticed until posh.
+//
+// WithScope reuses OuterText: it needs precisely OuterText's behaviour — stop
+// at `;` (here the `with`'s own terminator rather than the binding's), stop at
+// a let/with keyword, consume words atomically. A private WithText/WithChunk/
+// WithChar triple was character-identical to the Outer* rules and meant the
+// keyword-exclusion set had to be hand-synced in two places.
+//
+// LetGroup and WithGroup are deliberately NOT merged into one parameterized
+// rule despite their shape: their semicolon discipline is INVERTED. LetGroup
+// is keyword-terminated and treats `;` as content; WithGroup is
+// semicolon-terminated and treats `;` as the delimiter. langlang has no rule
+// parameters, so generalizing would yield one laxer rule that gets both wrong.
+WithGroup     <- WithKw WithScope Semi
+WithScope     <- (Group / String / Comment / OuterText)*
+
+// OuterText stops at a `let` or `with` keyword. The exclusions are required
+// even though LetGroup/WithGroup are tried first in Value's alternation:
+// without them the greedy `+` swallows straight through a keyword that
+// appears AFTER other value content (e.g. `{ self }: let … in …`), never
+// handing control back.
+//
+// Words are consumed ATOMICALLY via OuterWord so the lookaheads are only ever
+// tested at a token boundary. Without that, an identifier merely ENDING in a
+// keyword falsely stops the run: `outlet`/`applet` for `let`,
+// `runCommandWith` for `with`, and — via LetSemiText's InKw exclusion — the
+// far more common `bin` (as in `"${pkg}/bin/foo"`), `writeShellScriptBin`,
+// `plugin`, `origin`, `main`.
+//
+// `'` is deliberately excluded from OuterWord so the `''` indented-string
+// opener still reaches the String alternative.
+OuterText  <- (!(LetKw) !(WithKw) OuterChunk)+
+OuterChunk <- OuterWord / OuterChar
+OuterWord  <- #([a-zA-Z_] [a-zA-Z0-9_\-]*)
+OuterChar  <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
+
+// InnerText: like OuterText but `;` is allowed (it is group content), and no
+// keyword exclusion is needed because Inner never has to hand control back to
+// LetGroup/WithGroup.
+InnerText  <- #((!('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
+
+// ── Strings ──────────────────────────────────────────────────
+//
+// Double-quoted and indented (''…'') strings, interpolation-aware so a `}` or
+// `;` inside a string or `${…}` does not break balancing.
+
+String        <- DString / IString
+DString       <- '"' #(DStringPart* '"')
+DStringPart   <- Interp / DEscape / DPlain
+DPlain        <- #((!('"' / '\\' / '${') .)+)
+DEscape       <- #('\\' .)
+IString       <- '\'\'' #(IStringPart* '\'\'')
+IStringPart   <- Interp / IEscape / IPlain
+// `''` is the closer; `'''` and `''$`/`''\` are escapes inside it.
+IEscape       <- #('\'\'' ('$' / '\\' / '\'') )
+IPlain        <- #((!('\'\'' / '${') .)+)
+Interp        <- '${' Inner '}'
+
+// ── Comments ─────────────────────────────────────────────────
+
+Comment      <- LineComment / BlockComment
+LineComment  <- #('#' (!Newline .)*)
+BlockComment <- #('/*' (!'*/' .)* '*/')
+
+// ── Trivia ───────────────────────────────────────────────────
+
+WS         <- #([ \t\r\n]+)
+Newline    <- #('\r\n' / '\n')
+Trivia     <- (WS / Comment)*
+
+// ── Structural tokens ────────────────────────────────────────
+
+Equals       <- '='
+Colon        <- ':'
+Dot          <- '.'
+Semi         <- ';'
+BraceOpen    <- '{'
+BraceClose   <- '}'
+BracketOpen  <- '['
+BracketClose <- ']'
+ParenOpen    <- '('
+ParenClose   <- ')'
+
+// ── Sentinel ─────────────────────────────────────────────────
+
+EOF        <- !.

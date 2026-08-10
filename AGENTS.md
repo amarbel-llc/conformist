@@ -145,10 +145,26 @@ under fail-on-change.
   (`cmd/conform/flakeedit/`, #61); any other shape (or
   `--no-edit`) falls back to printing the wiring to paste, and an existing
   justfile is never edited (its recipes are printed). The shared PEG
-  infrastructure — grammars (`nix.peg`, `outputs.peg`), navigation helpers,
+  infrastructure — **three** grammars, navigation helpers,
   splice types, and `ParseFlake` — lives in `cmd/conform/flakeparse/` (modelled
   on amarbel-llc/doppelgang's `nixedit`); flakeedit imports it for its
-  wiring-specific logic. The recognized shape tolerates a redundant paren
+  wiring-specific logic. `nix.peg` is the FIRST pass (locates the `outputs`
+  value's byte span, everything else opaque); `outputs.peg` is the SECOND
+  (parses the recognized shape within that span); `shared.peg` holds the
+  lexical layer both of them pull in by name via langlang's
+  `@import <names> from "./shared.peg"` — dependencies resolve transitively, so
+  an importer lists only what it references directly, and `compileMatcher`
+  registers it with the loader alongside the entrypoint. shared.peg is never an
+  entrypoint and defines no `File` rule. Those rules were previously COPIED
+  into both grammars under a "self-contained" policy that nothing enforced, and
+  they silently diverged: the atomic-word fix (consume identifiers whole so
+  keyword lookaheads are only tested at token boundaries — without it `bin`,
+  `plugin`, `origin`, `writeShellScriptBin` end a `let` run mid-word) and the
+  `with <expr>;` construct both landed in `outputs.peg` only, leaving the FIRST
+  pass carrying both defects (conformist#106). Because a disagreement between
+  the passes about where a value ENDS is the worst bug class in a tool that
+  rewrites `flake.nix` in place, prefer adding to `shared.peg` over
+  reintroducing a local copy. The recognized shape tolerates a redundant paren
   wrapping the whole `eachDefaultSystem` application (`(utils.lib.eachDefaultSystem
   (…))`) — in Nix that paren is identity, so refusing it was a parser limitation
   rather than a roster choice (conformist#101) — a top-level `with <expr>;` in a

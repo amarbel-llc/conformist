@@ -1,22 +1,26 @@
 // Recognizer grammar for the one flake `outputs` shape conform edits in
 // place: an `eachDefaultSystem` call wrapping a `system: let … in { … }`
-// lambda. It is run as a second pass over the byte range of the
-// `outputs` value located by nix.peg.
+// lambda. SECOND of two passes, run over the byte range of the `outputs`
+// value located by nix.peg.
 //
 // The grammar IS the shape gate: an outputs value that does not match
-// (flake-parts, a raw forAllSystems/genAttrs flake, a hybrid
-// `<modules> // eachDefaultSystem (…)`, an `eachSystem` variant, an
-// inline lambda with no `let … in`) makes Match fail, and the caller
-// falls back to print-only rather than editing.
+// (flake-parts, a raw forAllSystems/genAttrs flake, an `eachSystem` variant,
+// an inline lambda with no `let … in`) makes Match fail, and the caller falls
+// back to print-only rather than editing.
 //
 // Structured nodes are exposed for the splice passes: ArgSet (inject the
 // `conformist` argument), LetBlock (inject conformistPkg/eval/impureEval
 // before `in`), and ReturnAttrSet (inject formatter/checks/packages/
-// devShells before the closing brace). Binding values stay opaque
-// (balanced runs), as in nix.peg.
+// devShells before the closing brace). Binding values stay opaque.
 //
-// CST mode, -disable-spaces; shared rules are duplicated from nix.peg so
-// this grammar is self-contained.
+// The lexical layer lives in shared.peg and is imported below — it used to be
+// copied here under a "self-contained" policy that let the two grammars
+// silently diverge (conformist#106).
+//
+// CST mode, -disable-spaces.
+
+@import Trivia, EOF, Binding, Identifier, Inner, Colon, Dot, LetKw, InKw,
+        BraceOpen, BraceClose, ParenOpen, ParenClose from "./shared.peg"
 
 // ── Entry: the outputs value ─────────────────────────────────
 // `{ args }: [let <bindings> in] <head> ( system: let <bindings> in { <attrs> } )`
@@ -27,10 +31,16 @@
 File         <- Trivia Outputs Trivia EOF
 
 // ONE sequence with optional parts, rather than an alternative per shape:
-// the eng-hybrid `//` merge (conformist#65) and the redundant wrapping paren
-// (conformist#101) combine freely, and spelling them out would need eight
-// branches.
+// the eng-hybrid `//` merge (conformist#65), the redundant wrapping paren
+// (conformist#101) and the at-pattern (conformist#104) combine freely, and
+// spelling them out would need many branches.
 //
+//   AtLead?/AtTrail?        — an at-pattern binding the whole argument
+//                             attrset to a name, in either spelling:
+//                             `inputs@{ … }:` or `{ … }@inputs:` (just-us).
+//                             A pure spelling difference: the call, the
+//                             per-system body and every splice target are
+//                             identical (conformist#104).
 //   OpenParen?/CloseParen?  — a redundant paren around the whole application.
 //                             In Nix it is identity, so refusing it was a
 //                             parser limitation (conformist#101).
@@ -48,12 +58,6 @@ File         <- Trivia Outputs Trivia EOF
 //
 // An unbalanced OpenParen? without its CloseParen? cannot slip through: the
 // leftover `)` would then be unconsumed and `File <- … Trivia EOF` fails.
-//   AtLead?/AtTrail?        — an at-pattern binding the whole argument
-//                             attrset to a name, in either spelling:
-//                             `inputs@{ … }:` or `{ … }@inputs:` (just-us).
-//                             Another pure spelling difference: the call, the
-//                             per-system body and every splice target are
-//                             identical (conformist#104).
 Outputs      <- AtLead? ArgSet AtTrail? Trivia Colon Trivia OuterLet? LeadMerge? OpenParen? AppHead Trivia ParenOpen Trivia SystemLambda Trivia ParenClose CloseParen? TrailMerge? Trivia
 OuterLet     <- LetKw LetBlock InKw Trivia
 
@@ -92,12 +96,14 @@ ArgSet       <- BraceOpen Inner BraceClose
 AppHead      <- (Identifier Trivia Dot Trivia)* EachFn
 EachFn       <- 'eachDefaultSystem' ![a-zA-Z0-9_]
 
-// `system: let <bindings> in { <attrs> }`. The lambda parameter is a
-// bare identifier (eachDefaultSystem passes the system string).
+// `system: let <bindings> in { <attrs> }`. The lambda parameter is a bare
+// identifier (eachDefaultSystem passes the system string).
+//
 // The per-system body may open SEVERAL sibling `let … in` blocks before the
 // returned attrset — a normal way to stage bindings that depend on an earlier
 // block (clown). Distinct from a NESTED let, which sits inside a binding value
-// and is handled by LetGroup; these are siblings (conformist#105).
+// and is handled by shared.peg's LetGroup; these are siblings
+// (conformist#105).
 //
 // Written as an inline group repetition rather than a named LetChain rule on
 // purpose: a named wrapper would hide LetBlock and InKw from the navigation
@@ -107,111 +113,5 @@ EachFn       <- 'eachDefaultSystem' ![a-zA-Z0-9_]
 // idempotency sentinel cannot misfire on a flake whose conformist bindings
 // live in an earlier block).
 SystemLambda <- Identifier Trivia Colon Trivia (LetKw LetBlock InKw Trivia)+ ReturnAttrSet
-LetKw        <- 'let' ![a-zA-Z0-9_'\-]
-InKw         <- 'in' ![a-zA-Z0-9_'\-]
-WithKw       <- 'with' ![a-zA-Z0-9_'\-]
 LetBlock     <- Trivia Binding*
 ReturnAttrSet <- BraceOpen Trivia Binding* BraceClose
-
-// ── Shared rules (duplicated from nix.peg) ───────────────────
-
-Binding    <- (Inherit / KeyVal) Trivia
-Inherit    <- InheritKw Value Semi
-KeyVal     <- AttrPath Trivia Equals Trivia Value Semi
-
-AttrPath   <- AttrName (Trivia Dot Trivia AttrName)*
-AttrName   <- Identifier / String
-Identifier <- #([a-zA-Z_] [a-zA-Z0-9_'\-]*)
-
-// A binding value inside the per-system let block may itself be a
-// `let … in …` expression (e.g. `version = let raw = builtins.readFile
-// ./version.env; in lib.removePrefix "V=" raw;`). Its inner `;` are
-// let-binding separators, not this binding's terminator, so Value must
-// treat `let … in` as a balanced construct or it ends the binding at the
-// first nested `;` and the whole shape match fails.
-// This mirrors nix.peg's LetGroup, which fixed the same defect one level
-// up for an OUTER `let … in` before eachDefaultSystem (conformist#81);
-// the nested case was never ported into this second-pass grammar.
-LetGroup      <- LetKw LetInner InKw
-LetInner      <- (LetGroup / Group / String / Comment / LetSemiText)*
-// LetSemiText runs up to the `in` that closes the let. `;` is content
-// here (it separates let bindings). Like OuterText below, words are
-// consumed ATOMICALLY so the LetKw/InKw lookaheads are only tested at a
-// token boundary — without that, any identifier ending in "in" would end
-// the run mid-word, and `bin` / `writeShellScriptBin` / `plugin` are
-// everywhere in real flakes. The lookaheads stay OUTSIDE #(…) because
-// langlang v0.0.12 does not support named rule refs inside #(…).
-LetSemiText   <- (!(LetKw) !(InKw) LetSemiChunk)+
-LetSemiChunk  <- OuterWord / LetSemiChar
-LetSemiChar   <- !('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
-
-// `with <expr>;` is the OTHER construct whose `;` is not the binding
-// terminator (conformist#103). `buildInputs = with pkgs; [ openssl ];` put a
-// semicolon before the value proper, so Value ended the binding at
-// `with pkgs;` and the leftover `[ … ];` failed the shape match. WithGroup
-// consumes the scope expression AND its terminating semicolon, so the `*`
-// loop in Value then reads the real value normally.
-//
-// Nested inside a group this never bit, because Inner treats `;` as content —
-// which is exactly why it went unnoticed until posh.
-// The scope expression reuses OuterText: it needs exactly OuterText's
-// behaviour — stop at `;` (here the `with`'s own terminator rather than the
-// binding's), stop at a let/with keyword, consume words atomically. Spelling
-// out a private WithText/WithChunk/WithChar triple produced three rules
-// character-identical to their Outer* counterparts, which meant the
-// keyword-exclusion set had to be kept in lockstep by hand in two places.
-WithGroup     <- WithKw WithScope Semi
-WithScope     <- (Group / String / Comment / OuterText)*
-
-Value      <- (LetGroup / WithGroup / Group / String / Comment / OuterText)*
-Inner      <- (Group / String / Comment / InnerText)*
-Group      <- BraceOpen Inner BraceClose
-            / BracketOpen Inner BracketClose
-            / ParenOpen Inner ParenClose
-// OuterText stops at a `let` or `with` keyword. The exclusions are required
-// even though LetGroup/WithGroup are tried first in Value's alternation:
-// without them the greedy `+` swallows straight through a keyword appearing
-// after other value content, never handing control back. Words are
-// consumed ATOMICALLY (OuterWord) so the lookaheads are only ever
-// tested at a token boundary — otherwise an identifier merely ENDING in
-// "let" or "with" (`outlet`, `applet`, `runcommandwith`) would falsely stop
-// the run and fail the parse. `'` is deliberately excluded from OuterWord so
-// the `''` indented-string opener still reaches the String alternative.
-OuterText  <- (!(LetKw) !(WithKw) OuterChunk)+
-OuterChunk <- OuterWord / OuterChar
-OuterWord  <- #([a-zA-Z_] [a-zA-Z0-9_\-]*)
-OuterChar  <- !(';' / '{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .
-InnerText  <- #((!('{' / '}' / '[' / ']' / '(' / ')' / '"' / '\'\'' / '#' / '/*') .)+)
-
-String        <- DString / IString
-DString       <- '"' #(DStringPart* '"')
-DStringPart   <- Interp / DEscape / DPlain
-DPlain        <- #((!('"' / '\\' / '${') .)+)
-DEscape       <- #('\\' .)
-IString       <- '\'\'' #(IStringPart* '\'\'')
-IStringPart   <- Interp / IEscape / IPlain
-IEscape       <- #('\'\'' ('$' / '\\' / '\'') )
-IPlain        <- #((!('\'\'' / '${') .)+)
-Interp        <- '${' Inner '}'
-
-Comment    <- LineComment / BlockComment
-LineComment <- #('#' (!Newline .)*)
-BlockComment <- #('/*' (!'*/' .)* '*/')
-
-WS         <- #([ \t\r\n]+)
-Newline    <- #('\r\n' / '\n')
-Trivia     <- (WS / Comment)*
-
-InheritKw    <- 'inherit' ![a-zA-Z0-9_]
-Equals       <- '='
-Colon        <- ':'
-Dot          <- '.'
-Semi         <- ';'
-BraceOpen    <- '{'
-BraceClose   <- '}'
-BracketOpen  <- '['
-BracketClose <- ']'
-ParenOpen    <- '('
-ParenClose   <- ')'
-
-EOF        <- !.
