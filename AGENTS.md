@@ -164,7 +164,14 @@ under fail-on-change.
   pass carrying both defects (conformist#106). Because a disagreement between
   the passes about where a value ENDS is the worst bug class in a tool that
   rewrites `flake.nix` in place, prefer adding to `shared.peg` over
-  reintroducing a local copy. The recognized shape tolerates a redundant paren
+  reintroducing a local copy — and that is **enforced**, not advisory:
+  `compileMatcher` refuses an entrypoint that locally defines any name
+  `shared.peg` defines. Not paranoia about a hypothetical — langlang resolves
+  such a collision silently in favour of the LOCAL rule (it parses the importing
+  file first, and `GrammarNode.AddDefinition` is a no-op when the name is already
+  taken, `langlang/go@v0.0.12` `grammar_ast.go:732`), so a re-added copy would
+  shadow its way straight back to conformist#106 with no diagnostic at all;
+  reported as langlang#30. The recognized shape tolerates a redundant paren
   wrapping the whole `eachDefaultSystem` application (`(utils.lib.eachDefaultSystem
   (…))`) — in Nix that paren is identity, so refusing it was a parser limitation
   rather than a roster choice (conformist#101) — a top-level `with <expr>;` in a
