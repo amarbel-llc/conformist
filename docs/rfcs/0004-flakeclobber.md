@@ -83,8 +83,12 @@ is extracted into a new package, `cmd/conform/flakeparse`.
 
 **What moves to `flakeparse`:**
 
-- The PEG grammars (`nix.peg`, `outputs.peg`) and their `//go:embed` vars
-- Grammar entry constants (`nixEntry`, `outputsEntry`)
+- The PEG grammars (`nix.peg`, `outputs.peg`, `shared.peg`) and their
+  `//go:embed` vars. `shared.peg` was added later (conformist#106): the two
+  entrypoint grammars had each carried a copy of the same lexical layer, and
+  the copies silently diverged. It holds the single definition both now
+  `@import` by name, and is never an entrypoint itself.
+- Grammar entry constants (`nixEntry`, `outputsEntry`, `sharedEntry`)
 - `ErrUnrecognized`
 - `compileMatcher()` and the navigation helpers (all unexported): `nodeName()`,
   `childNamed()`, `firstSequence()`, `topAttrSetSequence()`, `bindingKeyVal()`,
