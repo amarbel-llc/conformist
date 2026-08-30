@@ -42,27 +42,32 @@
         # opt-in godyn build, x86_64-linux only.)
         conformistPkg = conformist.packages.${system}.default;
 
-        # The fork's `just`: the devShell's command runner AND the binary the
-        # justfile-orphan-summary check invokes. Never substitute `pkgs.just` —
-        # the check would then read as zero findings.
+        # The fork's `just`: the devShell's command runner AND the binary EVERY
+        # justfile-* linter invokes. Never substitute `pkgs.just` — those checks
+        # read fork-only parser data, so a stock `just` either rejects the format
+        # outright or reads as zero findings.
         justPkg = just-us.packages.${system}.default;
 
-        # Pure lane: the eng preset + this repo's own formatters/excludes
-        # (./conformist.nix). Drives `nix fmt` and the sandboxed `checks.formatting`.
+        # Pure lane: the eng preset + the just-us justfile roster + this repo's own
+        # formatters/excludes (./conformist.nix). Drives `nix fmt` and the sandboxed
+        # `checks.formatting`.
         eval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng
-            # The orphaned-summary rule ships from just-us, not conformist: no
-            # recipe may hide prose above the single comment line `just --list`
-            # prints as its description (conformist-justfile(7) RECIPE
-            # DESCRIPTIONS). No repair — the fix is editorial.
-            just-us.lib.conformistLinters.justfile-orphan-summary
+            # The justfile-convention linters ship from just-us, NOT conformist.
+            # They read `just --dump --dump-format model` (and, for the
+            # orphaned-summary rule, `doc_prelude`) — fork-only parser data — so
+            # the coupling lives in the repo that owns the parser, and conformist
+            # stays strictly upstream of it. conformist-justfile(7) remains the
+            # normative prose home for the rules themselves.
+            just-us.lib.conformistPresets.justfile
             ./conformist.nix
           ];
           package = conformistPkg;
 
-          linters.justfile-orphan-summary.enable = true;
-          linters.justfile-orphan-summary.justPackage = justPkg;
+          # ONE setting for the whole justfile-linter family: every rule in the
+          # roster reads it. It MUST be the fork.
+          linters.justfile-common.justPackage = justPkg;
         };
 
         # Impure lane: the git-state checks (git-remotes, sweatfile, agents-md).

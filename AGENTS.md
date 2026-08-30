@@ -344,19 +344,15 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   **eng-convention enforcers** conformist runs on itself: `eng-versioning`,
   `eng-versioning-deprecated-file` (flags `version.txt` / a flake.nix named
   version var, per eng-versioning(7) "Deprecated alternatives"),
-  the justfile checks (`justfile-default`, `justfile-recipe-names`,
-  `justfile-debug-recipes` #23, `justfile-recipe-descriptions` — every leaf
-  documented, `justfile-task-hierarchy` — pipeline-verb leaves in exactly one
-  aggregate, `justfile-leaf-noun` — leaves are verb-noun not bare verbs,
-  `justfile-aggregate-comments` — aggregates carry no doc comment; all per
-  conformist-justfile(7), the normative home conformist owns for these rules,
-  #17; all seven read just-us's fork-only `--dump --dump-format model` through
-  the one shared `nix/justfile-model.nix` helper, which pins the schema version
-  and defines the aggregate/leaf taxonomy — the flat, already-resolved model is
-  what makes conformist#85's qualifier mis-lint and #89's silent module skip
-  structurally impossible, and each linter takes a `justPackage` naming the
-  just-us build since a stock `just` rejects the format), `flake-outputs` and
-  `flake-lock`
+  the justfile-* convention checks are NO LONGER HERE: the seven moved to
+  just-us (`lib.conformistPresets.justfile`, alongside justfile-orphan-summary)
+  because they read the fork-only `just --dump --dump-format model`, and
+  conformist must stay strictly upstream — just-us already inputs conformist, so
+  a just-us input here would be a cycle. conformist-justfile(7) remains their
+  normative home, `presets/eng.nix` no longer enables them (it documents the
+  pairing instead), and conformist consumes them for its OWN self-lint via a
+  fixed-output source pin of just-us — the dewey pattern, never a flake input
+  (conformist#85/#89), `flake-outputs` and `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via

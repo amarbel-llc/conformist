@@ -274,9 +274,20 @@ name duplicated across two module scopes is attributed to the right scope
 rather than skipped as ambiguous.
 
 The model is a *fork* format: a stock _just_ rejects _--dump-format model_
-outright. Each of these linters therefore takes a *justPackage* option naming
-the just-us build whose binary it invokes; pointing it at a stock _just_ makes
-the check fail loudly rather than pass vacuously.
+outright. The _justfile-\*_ linter *modules* therefore ship from *just-us* —
+the repo that owns the parser — and not from conformist, which must stay
+strictly upstream of its consumers and so cannot take just-us as an input.
+This page remains their normative home: the rules are conformist's, the
+enforcers live with the binary. The same arrangement already governs
+*justfile-orphan-summary*.
+
+Enable the whole family by importing just-us's roster,
+_just-us.lib.conformistPresets.justfile_, and setting the one shared option
+_linters.justfile-common.justPackage_ to the just-us build. Pointing it at a
+stock _just_ makes every check fail loudly rather than pass vacuously.
+
+Note that _conformist.lib.presets.eng_ does *not* enable these rules; it
+carries the fork-free eng conventions only, and pairs with the just-us roster.
 
 # RECIPE DESCRIPTIONS
 

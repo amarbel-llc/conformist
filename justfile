@@ -83,30 +83,6 @@ build-gomod2nix:
 debug-godyn-graph:
     nix develop --command env CGO_ENABLED=0 godyn-gen . godyn-graph.json
 
-# Build the justfile-* linter fixtures against a just-us build whose `just`
-# supports `--dump --dump-format model` — the dev loop for the model rewrite
-# (conformist#85/#89) while conformist's own just-us wiring is still undecided.
-# JUST_US is a store path: build one with
-# `nix build --no-link --print-out-paths <just-us-flakeref>`. `lib` is imported
-# from the working tree rather than the flake so an uncommitted nix/ change is
-# picked up (a flake read sees only git-tracked files). RETIRE this once
-# flake.nix supplies justPackage and verify-linter-fixtures covers these.
-#
-# run the justfile-* linter fixtures against a just-us build
-[group("debug")]
-debug-justfile-model-fixtures just_us:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    nix build --no-link --print-out-paths --impure --expr \
-      'let
-         f = builtins.getFlake (toString ./.);
-         p = import f.inputs.igloo { system = builtins.currentSystem; };
-       in (import ./nix/linter-fixtures.nix {
-         pkgs = p;
-         lib = import ./nix;
-         justPackage = builtins.storePath "{{just_us}}";
-       }).justfile-fixtures'
-
 # Out-of-nix go build for a fast inner loop. Version/commit stay dev/unknown
 # here; the nix build injects the real values (eng-versioning(7)).
 #
