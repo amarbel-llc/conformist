@@ -88,15 +88,33 @@ let
       if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         nested=$(git ls-files | grep -E '(^|/)CLAUDE\.md$' || true)
       else
-        nested=$(find . -name CLAUDE.md -type f -not -path './.git/*' | sed 's|^\./||')
+        nested=$(find . \( -type f -o -type l \) -name CLAUDE.md -not -path './.git/*' | sed 's|^\./||')
       fi
 
       while IFS= read -r f; do
         [ -n "$f" ] || continue
         if [ "$f" = "CLAUDE.md" ]; then
-          continue # root regular file already handled above
+          continue # root path already handled above (regular file or symlink)
         fi
         if is_excluded "$f"; then
+          continue
+        fi
+        # An ALREADY-migrated nested directory carries exactly the shape this
+        # linter's own repair-command produces: AGENTS.md plus a back-compat
+        # CLAUDE.md -> AGENTS.md symlink. `git ls-files` lists that tracked
+        # symlink (mode 120000), where the pre-#95 `find -type f` walk
+        # implicitly skipped it — so without the root branch's symlink handling
+        # mirrored here, every migrated subdirectory reports a permanent,
+        # unclearable finding (conformist#111).
+        if [ -L "$f" ]; then
+          target=$(readlink "$f")
+          if [ "$target" != "AGENTS.md" ]; then
+            echo "agents-md: nested $f is a symlink to '$target', expected AGENTS.md" >&2
+            findings=1
+          elif [ ! -e "$(dirname "$f")/AGENTS.md" ]; then
+            echo "agents-md: nested $f -> AGENTS.md but AGENTS.md is missing (broken symlink)" >&2
+            findings=1
+          fi
           continue
         fi
         echo "agents-md: nested $f should be migrated to AGENTS.md by hand" >&2

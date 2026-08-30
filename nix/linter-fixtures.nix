@@ -213,6 +213,48 @@ let
       expectToken = "nested sub/CLAUDE.md should be migrated";
     })
 
+    # conformist#111: a nested directory that is ALREADY migrated — AGENTS.md
+    # plus the tracked CLAUDE.md -> AGENTS.md back-compat symlink this linter's
+    # own repair-command produces — must pass. `git ls-files` lists that tracked
+    # symlink where the pre-#95 `find -type f` walk implicitly skipped it, so
+    # without the root branch's symlink handling mirrored into the nested loop
+    # every migrated subdirectory reported a permanent, unclearable finding.
+    (mkAgentsMdWalkFixture {
+      label = "nested-migrated-symlink-pass";
+      setup = ''
+        mkdir -p sub
+        printf 'nested orientation\n' > sub/AGENTS.md
+        ln -s AGENTS.md sub/CLAUDE.md
+        git add sub/AGENTS.md sub/CLAUDE.md
+      '';
+    })
+
+    # …but a nested symlink pointing somewhere OTHER than its sibling AGENTS.md
+    # is still a finding (parity with the root branch's symlink handling).
+    (mkAgentsMdWalkFixture {
+      label = "nested-symlink-wrong-target-fail";
+      setup = ''
+        mkdir -p sub
+        printf 'nested orientation\n' > sub/ORIENTATION.md
+        ln -s ORIENTATION.md sub/CLAUDE.md
+        git add sub/ORIENTATION.md sub/CLAUDE.md
+      '';
+      expectFail = true;
+      expectToken = "nested sub/CLAUDE.md is a symlink to 'ORIENTATION.md'";
+    })
+
+    # …and one that dangles (points at an AGENTS.md that isn't there) too.
+    (mkAgentsMdWalkFixture {
+      label = "nested-symlink-broken-fail";
+      setup = ''
+        mkdir -p sub
+        ln -s AGENTS.md sub/CLAUDE.md
+        git add sub/CLAUDE.md
+      '';
+      expectFail = true;
+      expectToken = "nested sub/CLAUDE.md -> AGENTS.md but AGENTS.md is missing";
+    })
+
     # A tracked nested CLAUDE.md whose path is explicitly excluded (a deployed
     # dotfile payload where the filename IS the product) must pass.
     (mkAgentsMdWalkFixture {
