@@ -350,7 +350,13 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   aggregate, `justfile-leaf-noun` — leaves are verb-noun not bare verbs,
   `justfile-aggregate-comments` — aggregates carry no doc comment; all per
   conformist-justfile(7), the normative home conformist owns for these rules,
-  #17), `flake-outputs` and `flake-lock`
+  #17; all seven read just-us's fork-only `--dump --dump-format model` through
+  the one shared `nix/justfile-model.nix` helper, which pins the schema version
+  and defines the aggregate/leaf taxonomy — the flat, already-resolved model is
+  what makes conformist#85's qualifier mis-lint and #89's silent module skip
+  structurally impossible, and each linter takes a `justPackage` naming the
+  just-us build since a stock `just` rejects the format), `flake-outputs` and
+  `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via

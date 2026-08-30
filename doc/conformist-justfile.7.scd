@@ -16,8 +16,9 @@ supersedes *eng-design_patterns-justfile*(7), which is now a pointer here
 Where a convention has legitimate exceptions, this page pins the exact
 exemptions so the rule is a hard, checkable MUST. Each enforced rule names the
 linter that enforces it; the linters read recipe metadata from
-_just --dump --dump-format json_. Sections without a named linter are
-convention only — deliberately unenforced.
+_just --dump --dump-format model_, the just-us fork's normalized recipe model
+(see MODULES). Sections without a named linter are convention only —
+deliberately unenforced.
 
 # NAMING CONVENTION
 
@@ -254,13 +255,28 @@ The *default* recipe is always the first recipe in the file. Enforced by
 
 A _mod_-imported child justfile's recipes are addressed module-qualified
 (_explore::debug-widget_, nested _a::b::c_). The naming rules apply to the
-recipe's *own* name: linters strip every leading module qualifier before verb
-extraction (conformist#85). *justfile-recipe-names* checks
-every module recipe; *justfile-task-hierarchy* checks each module scope with
-the same per-verb bounds, crediting a root aggregate that lists _mod::leaf_ —
-ownership is matched on bare recipe names, because _just --dump_ drops the
-module qualifier from dependency entries, and a bare name duplicated across
-scopes is skipped as ambiguous.
+recipe's *own* name, and *every* _justfile-\*_ linter checks module recipes on
+the same terms as root ones.
+
+Both of those follow from the data source rather than from per-linter care.
+The linters read _just --dump --dump-format model_, in which each recipe
+carries its bare _name_ and its _module_ path as *separate* fields, and in
+which _recipes_ is a single *flat* list spanning the root and every module. So
+verb extraction splits a name that never contains a qualifier, and there is no
+module subtree a linter can fail to descend into. Both defects that motivated
+this were of exactly that shape: qualified names reaching verb extraction
+(conformist#85) and five of the seven linters reading only the root scope
+(conformist#89).
+
+Aggregate ownership is matched on the model's *resolved* dependency namepaths.
+A root aggregate listing _mod::leaf_ is credited exactly, and a bare recipe
+name duplicated across two module scopes is attributed to the right scope
+rather than skipped as ambiguous.
+
+The model is a *fork* format: a stock _just_ rejects _--dump-format model_
+outright. Each of these linters therefore takes a *justPackage* option naming
+the just-us build whose binary it invokes; pointing it at a stock _just_ makes
+the check fail loudly rather than pass vacuously.
 
 # RECIPE DESCRIPTIONS
 

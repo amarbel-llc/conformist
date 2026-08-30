@@ -2,8 +2,14 @@
 # only dependencies) must NOT carry a doc comment — its dependency list is
 # self-documenting (eng-design_patterns-justfile(7) ANTI-PATTERNS, "comments on
 # aggregates"). The inverse of justfile-recipe-descriptions, which requires LEAF
-# recipes to be documented. Whole-tree check (passes-files=false): reads
-# `just --dump --dump-format json`, takes no file arguments.
+# recipes to be documented. Whole-tree check (passes-files=false): reads the
+# native recipe model via `just --dump --dump-format model`, takes no file
+# arguments.
+#
+# conformist#89: this check read only the root `.recipes` of the raw dump and so
+# silently skipped every `mod`-imported recipe. The model's `recipes` is one FLAT
+# list spanning the root and all modules, so a commented aggregate inside a module
+# is now flagged.
 #
 # See conformist-justfile(7) AGGREGATES AND LEAVES and amarbel-llc/conformist#17.
 {
@@ -14,51 +20,25 @@
 }:
 let
   cfg = config.linters.justfile-aggregate-comments;
+  model = import ../justfile-model.nix { inherit pkgs lib; };
 
-  check = pkgs.writeShellApplication {
-    name = "conformist-justfile-aggregate-comments";
-    runtimeInputs = with pkgs; [
-      coreutils
-      jq
-      just
-    ];
-    text = ''
-      [ -f justfile ] || {
-        echo "justfile-aggregate-comments: justfile missing at tree root" >&2
-        exit 1
-      }
-
-      # Aggregate recipes (no body, has dependencies) that carry a doc comment.
-      # `just` derives `doc` from the comment immediately above the recipe.
-      filter='.recipes | to_entries[]
-        | select((.value.body | length) == 0 and (.value.dependencies | length) > 0)
-        | select((.value.doc // "") != "")
-        | .key'
-
-      # Capture (not `< <(...)`) so a just/jq failure aborts loudly instead of
-      # reading as "no findings" — a check must never pass vacuously on a parse error.
-      if ! offenders=$(just --dump --dump-format json | jq -r "$filter"); then
-        echo "justfile-aggregate-comments: failed to read recipes via just/jq" >&2
-        exit 2
-      fi
-
-      fail=0
-      while read -r name; do
-        [ -n "$name" ] || continue
-        echo "justfile-aggregate-comments: aggregate recipe '$name' has a doc comment; aggregates are self-documenting via their dependency list — drop the comment (conformist-justfile(7) AGGREGATES AND LEAVES)" >&2
-        fail=1
-      done <<< "$offenders"
-
-      if [ "$fail" -ne 0 ]; then
-        exit 1
-      fi
-      echo "justfile-aggregate-comments: no aggregate recipe carries a doc comment"
+  check = model.mkModelCheck {
+    name = "justfile-aggregate-comments";
+    justPackage = cfg.justPackage;
+    okMessage = "no aggregate recipe carries a doc comment";
+    filter = ''
+      recipes
+      | .[]
+      | select(isAggregate)
+      | select((.doc // "") != "")
+      | "aggregate recipe '\(.namepath)' has a doc comment; aggregates are self-documenting via their dependency list — drop the comment (conformist-justfile(7) AGGREGATES AND LEAVES)"
     '';
   };
 in
 {
   options.linters.justfile-aggregate-comments = {
     enable = lib.mkEnableOption "the aggregates-must-not-be-commented whole-tree check (conformist-justfile(7), conformist#17)";
+    justPackage = model.mkJustPackageOption "justfile-aggregate-comments";
   };
 
   config = lib.mkIf cfg.enable {

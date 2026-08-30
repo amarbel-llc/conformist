@@ -19,9 +19,22 @@
 {
   pkgs,
   lib, # conformist library (evalModule); nixpkgs lib is pkgs.lib below
+  # The `just` the justfile-* fixtures run against. Those seven linters read
+  # `just --dump --dump-format model`, a just-us fork format that a stock `just`
+  # REJECTS, so their fixtures are only meaningful against a just-us build. The
+  # `pkgs.just` default keeps this file evaluating standalone; with it, every
+  # justfile-* fixture fails loudly (the check exits 2 naming `justPackage`)
+  # rather than passing vacuously. flake.nix supplies the real build.
+  justPackage ? pkgs.just,
 }:
 let
   nixlib = pkgs.lib;
+
+  # Which linters need the just-us binary rather than the stock default. Keyed on
+  # the module's name prefix rather than an explicit per-fixture assignment, so a
+  # justfile-* fixture added later cannot forget to wire it and silently exercise
+  # the wrong `just`. A fixture may still override via `enableModule`.
+  needsJustUs = name: nixlib.hasPrefix "justfile-" name;
 
   # Materialize an attrset of project-relative-path -> content into the cwd,
   # via the store so no shell heredoc escaping is needed. Read-only (444) is
@@ -68,6 +81,7 @@ let
         linters.${name} = {
           enable = true;
         }
+        // nixlib.optionalAttrs (needsJustUs name) { inherit justPackage; }
         // enableModule;
       };
       cmd = mod.config.settings.linter.${name}.command;
@@ -1385,6 +1399,199 @@ let
       expectFail = true;
       expectToken = "first recipe must be 'default'";
     })
+
+    # ---- conformist#89: the other five linters must SEE module recipes ------
+    #
+    # Before the `--dump-format model` rewrite, justfile-recipe-descriptions,
+    # justfile-debug-recipes, justfile-leaf-noun, justfile-aggregate-comments and
+    # justfile-default read only the ROOT `.recipes` of `--dump-format json` and
+    # never recursed into `.modules`, so every `mod`-imported recipe was silently
+    # unlinted. The model's `recipes` is one FLAT list spanning the root and all
+    # modules, so each of these now fires.
+    #
+    # Each case below is a FAILURE case asserting the RULE's own message. That
+    # matters more than usual here: `expectFail` only demands a non-zero exit, and
+    # these checks exit 2 on an operational error (a stock `just` rejecting the
+    # model format, a malformed fixture justfile) — so a fixture asserting only
+    # non-zero would report success for a check that never evaluated the rule at
+    # all. The token pins that a real finding was produced.
+    #
+    # The submodule is named `sub`, deliberately not `explore`: what exempts a
+    # recipe from justfile-recipe-descriptions is its `[group('explore')]`
+    # membership, not the name of the module it lives in, and a module named
+    # `explore` would blur the two.
+    (mkLinterFixtureCheck {
+      name = "justfile-recipe-descriptions";
+      label = "module-undocumented-fail";
+      files = {
+        "justfile" = ''
+          # builds the thing
+          build-thing:
+              echo hi
+
+          mod sub 'zz-sub/justfile'
+        '';
+        "zz-sub/justfile" = ''
+          run-widget:
+              echo widget
+        '';
+      };
+      expectFail = true;
+      expectToken = "no doc comment";
+    })
+
+    (mkLinterFixtureCheck {
+      name = "justfile-debug-recipes";
+      label = "module-undocumented-fail";
+      files = {
+        # The canonical eng shape for throwaway recipes is a `mod explore
+        # 'zz-explore/justfile'` block — precisely the place this check could not
+        # see before, so an undocumented debug recipe was most invisible exactly
+        # where debug recipes actually live.
+        "justfile" = ''
+          # builds the thing
+          build-thing:
+              echo hi
+
+          mod sub 'zz-sub/justfile'
+        '';
+        "zz-sub/justfile" = ''
+          [group('debug')]
+          debug-widget:
+              echo widget
+        '';
+      };
+      expectFail = true;
+      expectToken = "no doc comment";
+    })
+
+    (mkLinterFixtureCheck {
+      name = "justfile-leaf-noun";
+      label = "module-bare-verb-fail";
+      files = {
+        "justfile" = ''
+          # builds the thing
+          build-thing:
+              echo hi
+
+          mod sub 'zz-sub/justfile'
+        '';
+        # A bare-verb leaf inside a module. The noun test runs on the model's
+        # BARE `name` (`build`), never the qualified `namepath`
+        # (`sub::build`) — testing the namepath would find the `::` and let this
+        # through as though it had a noun (conformist#85).
+        "zz-sub/justfile" = ''
+          # builds it
+          build:
+              echo hi
+        '';
+      };
+      expectFail = true;
+      expectToken = "bare verb";
+    })
+
+    (mkLinterFixtureCheck {
+      name = "justfile-aggregate-comments";
+      label = "module-commented-fail";
+      files = {
+        "justfile" = ''
+          # builds the thing
+          build-thing:
+              echo hi
+
+          mod sub 'zz-sub/justfile'
+        '';
+        "zz-sub/justfile" = ''
+          # a commented aggregate inside a module
+          build-all: build-inner
+
+          # builds the inner thing
+          build-inner:
+              echo inner
+        '';
+      };
+      expectFail = true;
+      expectToken = "doc comment";
+    })
+
+    # justfile-default over a module dependency. `default` naming a module
+    # AGGREGATE is legitimate and must pass...
+    (mkLinterFixtureCheck {
+      name = "justfile-default";
+      label = "module-aggregate-dep-pass";
+      files = {
+        "justfile" = ''
+          default: sub::build-thing
+
+          mod sub 'zz-sub/justfile'
+        '';
+        "zz-sub/justfile" = ''
+          build-thing: build-inner
+
+          # builds the inner thing
+          build-inner:
+              echo inner
+        '';
+      };
+    })
+
+    # ...while `default` naming a module LEAF must fail. This is the sharpest
+    # conformist#89 discriminator for this linter: the old filter resolved a
+    # dependency by looking the raw dump's BARE dependency name up in the ROOT
+    # recipe table, so a `mod::`-qualified dependency resolved to null, `null.body`
+    # measured 0, and the leaf was reported as an aggregate — a silent PASS on a
+    # tree that violates the rule. Resolution is now by the model's
+    # `dependencies[].namepath` against the flat list.
+    (mkLinterFixtureCheck {
+      name = "justfile-default";
+      label = "module-leaf-dep-fail";
+      files = {
+        "justfile" = ''
+          default: sub::run-thing
+
+          mod sub 'zz-sub/justfile'
+        '';
+        "zz-sub/justfile" = ''
+          # runs the thing
+          run-thing:
+              echo x
+        '';
+      };
+      expectFail = true;
+      expectToken = "lists leaf recipe";
+    })
+
+    # justfile-task-hierarchy: the ambiguity-skip is gone. The raw dump dropped
+    # the `mod::` qualifier from dependencies, so ownership had to be matched on
+    # bare names, and any leaf whose bare name appeared in more than one scope was
+    # SKIPPED as unattributable. Here `test-thing` exists in both modules and only
+    # alpha's is owned by the root `test` aggregate — so beta's is an un-aggregated
+    # pipeline-verb leaf and must be flagged. Under the old bare-name matching both
+    # were skipped as duplicates and the tree passed vacuously.
+    (mkLinterFixtureCheck {
+      name = "justfile-task-hierarchy";
+      label = "duplicate-bare-name-across-modules-fail";
+      files = {
+        "justfile" = ''
+          test: alpha::test-thing
+
+          mod alpha 'zz-alpha/justfile'
+          mod beta 'zz-beta/justfile'
+        '';
+        "zz-alpha/justfile" = ''
+          # tests the thing, owned by the root test aggregate
+          test-thing:
+              echo a
+        '';
+        "zz-beta/justfile" = ''
+          # tests the thing, owned by nothing
+          test-thing:
+              echo b
+        '';
+      };
+      expectFail = true;
+      expectToken = "exactly one aggregate";
+    })
   ];
 
   allFixtures = fixtures ++ agentsMdWalkFixtures ++ gitRemotesFixtures ++ deadnixFixtures;
@@ -1402,6 +1609,14 @@ builtins.listToAttrs (
   # Deliberately EXCLUDES the clippy fixtures (below) so the merge-hook lane
   # never pulls a Rust toolchain.
   linter-fixtures = pkgs.linkFarmFromDrvs "linter-fixtures" allFixtures;
+
+  # Just the justfile-* fixtures, for the model-rewrite dev loop: they are the
+  # only ones that need a just-us `justPackage`, and building them alone avoids
+  # dragging in the git/agents-md/deadnix fixtures on every iteration. Built by
+  # `just debug-justfile-model-fixtures` (conformist#85/#89).
+  justfile-fixtures = pkgs.linkFarmFromDrvs "justfile-fixtures" (
+    builtins.filter (d: nixlib.hasPrefix "linter-fixture-justfile-" d.name) allFixtures
+  );
 
   # clippy fixtures live in their own aggregate, built on demand by
   # `just explore-clippy-fixture` (NOT in the default verify lane), so the Rust
