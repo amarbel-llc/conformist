@@ -255,6 +255,34 @@ let
       expectToken = "nested sub/CLAUDE.md -> AGENTS.md but AGENTS.md is missing";
     })
 
+    # The fleet's OTHER migration shape (conformist#111 follow-up): rename the
+    # nested files OUTRIGHT, keeping a back-compat symlink only at the repo
+    # root — cutting-garden's d3b94ca, as against maneater's
+    # rename-plus-nested-compat-symlink covered above. Here the nested walk
+    # must yield nothing at all: the tracked ROOT CLAUDE.md symlink IS handed
+    # to the loop by `git ls-files`, and is skipped by the `$f = "CLAUDE.md"`
+    # guard before any symlink logic runs, while the nested AGENTS.md siblings
+    # are never enumerated. Pinned because half the fleet depends on this shape
+    # staying green and nothing else in this matrix exercises it — every other
+    # agents-md fixture either has no CLAUDE.md at all or has a nested one.
+    #
+    # Scope, so a later reader doesn't over-trust it: this is a SHAPE-level
+    # guard, not a guard on the `$f = "CLAUDE.md"` line. Deleting that line
+    # would leave this fixture green, because the nested symlink branch then
+    # accepts the root symlink on identical terms. What it does catch is the
+    # walk regressing to report anything at all for a tree in this shape.
+    (mkAgentsMdWalkFixture {
+      label = "root-symlink-nested-agents-only-pass";
+      setup = ''
+        printf 'root orientation\n' > AGENTS.md
+        ln -s AGENTS.md CLAUDE.md
+        mkdir -p plugins/caldav internal/capture_plugin
+        printf 'plugin orientation\n' > plugins/caldav/AGENTS.md
+        printf 'internal orientation\n' > internal/capture_plugin/AGENTS.md
+        git add AGENTS.md CLAUDE.md plugins/caldav/AGENTS.md internal/capture_plugin/AGENTS.md
+      '';
+    })
+
     # A tracked nested CLAUDE.md whose path is explicitly excluded (a deployed
     # dotfile payload where the filename IS the product) must pass.
     (mkAgentsMdWalkFixture {
