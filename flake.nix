@@ -118,6 +118,49 @@
           };
         };
 
+        # just-us (the eng `just` fork), consumed WITHOUT a flake input for the
+        # same reason as the dewey plugin above: conformist must stay strictly
+        # UPSTREAM of its consumers, and just-us already takes conformist as an
+        # input — a `just-us` input here would close a cycle. So the source is a
+        # fixed-output fetch pinned by rev+hash and the binary is built here; an
+        # FOD leaf pins by commit and pulls no flake graph.
+        #
+        # This is what lets conformist keep linting its OWN justfile with the
+        # justfile-* convention rules. Those rules live in just-us (they read
+        # `just --dump --dump-format model`, a fork-only dump format a stock
+        # `just` rejects — conformist#85/#89), and without this pin conformist
+        # would be the one repo in the fleet not held to the justfile conventions
+        # whose normative manpage it owns.
+        #
+        # The paths imported out of this source are a documented contract with
+        # just-us (its FDR 0003 records them as conformist's consumption
+        # surface): nix/presets/justfile.nix (the roster), and beneath it
+        # nix/linters/justfile-*.nix, nix/justfile-common.nix,
+        # nix/justfile-model.nix. Import nothing else from here — anything
+        # outside those paths just-us is free to move without telling us.
+        #
+        # Bump deliberately, in step with a just-us release.
+        justUsSrc = pkgs.fetchgit {
+          url = "https://code.linenisgreat.com/just-us.git";
+          rev = "597826cbf9ab4f516b4340184beaf786803cc3c2";
+          hash = "sha256-w9WEuQ0qpzSzl26Glj5Tq11E8WuQzipBk7O+5aIwfXM=";
+        };
+
+        # The fork's `just`, built with just-us's own recipe (see its flake.nix)
+        # trimmed to what conformist needs: no shell completions, no man pages,
+        # no test suite. This binary exists solely to be invoked by the
+        # justfile-* linter checks.
+        justUsPkg = pkgs.rustPlatform.buildRustPackage {
+          pname = "just-us";
+          version = "conformist-pin";
+          src = justUsSrc;
+          cargoLock.lockFile = "${justUsSrc}/Cargo.lock";
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          auditable = false;
+          doCheck = false;
+          meta.mainProgram = "just";
+        };
+
         # bga (buildGoApplication) build — the ca-derivations-free backend behind
         # `.#conformist-bga` and the DEFAULT on every system (godynSystem above;
         # godyn is opt-in via `.#conformist-native`).
@@ -278,8 +321,24 @@
         # backend during lint. `package` is required because conformist is not
         # in nixpkgs.
         conformistEval = conformistLib.evalModule pkgs {
-          imports = [ ./nix/conformist.nix ];
+          imports = [
+            ./nix/conformist.nix
+            # The justfile-* convention linters ship from just-us (see justUsSrc
+            # above). conformist owns conformist-justfile(7), the normative home
+            # for these rules, but cannot own the enforcers without taking a
+            # just-us input and closing a cycle — so they are imported BY PATH
+            # out of the FOD source rather than as a flake output. That is the
+            # whole point of the pin.
+            "${justUsSrc}/nix/presets/justfile.nix"
+          ];
           package = selfBin;
+
+          # One setting for the whole justfile-linter family. It is mandatory in
+          # just-us by design: a `pkgs.just` fallback would make
+          # justfile-orphan-summary pass VACUOUSLY, since a stock `just` silently
+          # omits doc_prelude rather than rejecting the request — the exact
+          # failure that option exists to prevent.
+          linters.justfile-common.justPackage = justUsPkg;
         };
 
         # IMPURE self-check config: git-state whole-tree checks (e.g. git-remotes)
