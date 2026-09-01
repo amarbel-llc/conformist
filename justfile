@@ -122,6 +122,47 @@ explore-pre-commit:
 # just-us linter move, when this recipe reported a config missing eight linters
 # that the real lane was running.
 #
+# Build just-us's `just` as a fully STATIC (pkgsStatic/musl) binary and check it
+# still emits `--dump --dump-format model`. This is the cheapest falsification of
+# the profile-cache POC's core premise (eng FDR 0015 / conformist RFC 0005): that
+# linter tools can ship as static end derivations exec'd from a content-addressed
+# cache dir OUTSIDE /nix/store. If a static `just` cannot produce the model, the
+# justfile-* linters cannot be delivered that way and the POC needs rescoping
+# before anything is written. Read-only w.r.t. just-us — builds from a pinned rev
+# via a throwaway expression, adding no input or pin to this flake.
+#
+# check a static just still emits the recipe-model dump
+[group("explore")]
+explore-static-just:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(nix build --no-link --print-out-paths --impure --expr \
+      'let
+         f = builtins.getFlake (toString ./.);
+         p = import f.inputs.igloo { system = builtins.currentSystem; };
+         src = p.fetchgit {
+           url = "https://code.linenisgreat.com/just-us.git";
+           rev = "308ef38000c220c59eff9ef6dc91b5d8ee885a54";
+           hash = "sha256-d2+UNPI0WCaabsVFKAYrGlMQbSfnHLuljXaPsqvzE3A=";
+         };
+       in p.pkgsStatic.rustPlatform.buildRustPackage {
+         pname = "just-static";
+         version = "poc";
+         inherit src;
+         cargoLock.lockFile = "${src}/Cargo.lock";
+         doCheck = false;
+       }')
+    echo "built: $out"
+    # Prove it is genuinely static, not merely built via the static overlay: a
+    # dynamically-linked binary here would invalidate the exec-outside-the-store
+    # premise even though the dump might still work.
+    ldd "$out/bin/just" 2>&1 | head -3 || true
+    "$out/bin/just" --dump --dump-format model > .tmp/static-just-model.json
+    head -c 300 .tmp/static-just-model.json
+    echo
+    grep -q 'just-us.recipe-model' .tmp/static-just-model.json
+    echo "OK: static just emitted a recipe-model payload for this repo's justfile"
+
 # print conformist's own generated conformist.toml
 [group("explore")]
 explore-show-config:
