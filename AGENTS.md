@@ -349,10 +349,12 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   because they read the fork-only `just --dump --dump-format model`, and
   conformist must stay strictly upstream — just-us already inputs conformist, so
   a just-us input here would be a cycle. conformist-justfile(7) remains their
-  normative home, `presets/eng.nix` no longer enables them (it documents the
-  pairing instead), and conformist consumes them for its OWN self-lint via a
-  fixed-output source pin of just-us — the dewey pattern, never a flake input
-  (conformist#85/#89), `flake-outputs` and `flake-lock`
+  normative home and `presets/eng.nix` documents the pairing, but conformist
+  does NOT currently run them on its own justfile: reaching them would need
+  either the forbidden input or a source pin, and the fleet-adoption route is
+  still being designed (papi as the injection point). So conformist authors
+  these conventions without being held to them for now — a known gap, not an
+  oversight (conformist#85/#89), `flake-outputs` and `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via

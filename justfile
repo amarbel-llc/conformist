@@ -117,10 +117,10 @@ explore-pre-commit:
 # generation (issue #4) without a full check run.
 #
 # This builds the flake's OWN `conformist-config` package rather than
-# re-evaluating ./nix/conformist.nix standalone, because those two DIVERGED when
-# the justfile-* linters moved to just-us: the roster is imported by path from
-# the FOD pin in flake.nix, so a standalone eval omits all eight and this recipe
-# would report a config conformist does not actually use.
+# re-evaluating ./nix/conformist.nix standalone. Those two silently diverge the
+# moment flake.nix adds anything to conformistEval — which happened during the
+# just-us linter move, when this recipe reported a config missing eight linters
+# that the real lane was running.
 #
 # print conformist's own generated conformist.toml
 [group("explore")]
