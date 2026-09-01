@@ -112,17 +112,22 @@ explore-pre-commit:
     hook=$(nix build --no-link --print-out-paths '.#conformist-pre-commit')
     "$hook/bin/conformist-pre-commit"
 
-# Build conformist's own generated conformist.toml via self.lib.evalModule and
-# cat it, to inspect the emitted [formatter.*] / [linter.*] stanzas. Verifies the
-# Nix module's config generation (issue #4) without a full check run.
+# Build conformist's own generated conformist.toml and cat it, to inspect the
+# emitted [formatter.*] / [linter.*] stanzas. Verifies the Nix module's config
+# generation (issue #4) without a full check run.
+#
+# This builds the flake's OWN `conformist-config` package rather than
+# re-evaluating ./nix/conformist.nix standalone, because those two DIVERGED when
+# the justfile-* linters moved to just-us: the roster is imported by path from
+# the FOD pin in flake.nix, so a standalone eval omits all eight and this recipe
+# would report a config conformist does not actually use.
 #
 # print conformist's own generated conformist.toml
 [group("explore")]
 explore-show-config:
     #!/usr/bin/env bash
     set -euo pipefail
-    out=$(nix build --no-link --print-out-paths --impure --expr \
-      'let f = builtins.getFlake (toString ./.); s = builtins.currentSystem; p = import f.inputs.igloo { system = s; }; in (f.lib.evalModule p { imports = [ ./nix/conformist.nix ]; package = f.packages.${s}.conformist; }).config.build.configFile')
+    out=$(nix build --no-link --print-out-paths '.#conformist-config')
     cat "$out"
 
 # Smoke-test the eng template end-to-end: instantiate it into a temp dir, lock +

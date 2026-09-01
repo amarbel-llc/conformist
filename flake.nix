@@ -142,8 +142,8 @@
         # Bump deliberately, in step with a just-us release.
         justUsSrc = pkgs.fetchgit {
           url = "https://code.linenisgreat.com/just-us.git";
-          rev = "597826cbf9ab4f516b4340184beaf786803cc3c2";
-          hash = "sha256-w9WEuQ0qpzSzl26Glj5Tq11E8WuQzipBk7O+5aIwfXM=";
+          rev = "308ef38000c220c59eff9ef6dc91b5d8ee885a54";
+          hash = "sha256-d2+UNPI0WCaabsVFKAYrGlMQbSfnHLuljXaPsqvzE3A=";
         };
 
         # The fork's `just`, built with just-us's own recipe (see its flake.nix)
@@ -389,6 +389,13 @@
           # (`nix build .#manpages`); built with the bga default backend's binary,
           # and also bundled into the conformist package.
           manpages = manpagesBga;
+          # conformist's own generated conformist.toml for the PURE lane, consumed
+          # by `just explore-show-config`. Exposed because the pure config can no
+          # longer be reproduced by evaluating ./nix/conformist.nix on its own:
+          # the justfile-* roster is imported BY PATH from the just-us FOD pin in
+          # conformistEval above, so a standalone eval silently omits all eight
+          # linters. Anything wanting to inspect the real config must build this.
+          conformist-config = conformistEval.config.build.configFile;
           # The generated config for the impure (git-state) self-checks, consumed
           # by `just check-worktree`.
           conformist-impure-config = conformistImpureEval.config.build.configFile;
