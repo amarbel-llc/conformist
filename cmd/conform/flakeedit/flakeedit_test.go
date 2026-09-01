@@ -75,13 +75,12 @@ const brownfieldEdited = `{
         eval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng
-            just-us.lib.conformistLinters.justfile-orphan-summary
+            just-us.lib.conformistPresets.justfile
             ./conformist.nix
           ];
           package = conformistPkg;
 
-          linters.justfile-orphan-summary.enable = true;
-          linters.justfile-orphan-summary.justPackage = justPkg;
+          linters.justfile-common.justPackage = justPkg;
         };
 
         impureEval = conformist.lib.evalModule pkgs {
@@ -573,13 +572,12 @@ const outerLetEdited = `{
         eval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng
-            just-us.lib.conformistLinters.justfile-orphan-summary
+            just-us.lib.conformistPresets.justfile
             ./conformist.nix
           ];
           package = conformistPkg;
 
-          linters.justfile-orphan-summary.enable = true;
-          linters.justfile-orphan-summary.justPackage = justPkg;
+          linters.justfile-common.justPackage = justPkg;
         };
 
         impureEval = conformist.lib.evalModule pkgs {

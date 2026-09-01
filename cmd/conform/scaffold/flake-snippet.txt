@@ -25,15 +25,16 @@ Add conformist to flake.nix and wire it into your per-system outputs
     justPkg = just-us.packages.${system}.default;
     eval = conformist.lib.evalModule pkgs {
       imports = [
-        conformist.lib.presets.eng   # the eng-convention roster
-        # the orphaned-summary rule, shipped from just-us (no repair):
-        just-us.lib.conformistLinters.justfile-orphan-summary
+        conformist.lib.presets.eng   # the eng-convention roster (no justfile rules)
+        # the justfile-* convention rules, shipped from just-us because they
+        # read a fork-only `just` dump format; enables all eight:
+        just-us.lib.conformistPresets.justfile
         ./conformist.nix             # this repo's overlay (written by `conform`)
       ];
       package = conformistPkg;
 
-      linters.justfile-orphan-summary.enable = true;
-      linters.justfile-orphan-summary.justPackage = justPkg;
+      # one setting for the whole justfile-linter family; MUST be the fork
+      linters.justfile-common.justPackage = justPkg;
     };
   in {
     formatter = eval.config.build.wrapper;             # `nix fmt`

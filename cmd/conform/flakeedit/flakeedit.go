@@ -363,18 +363,23 @@ func conformistLetBindings() []letBinding {
 		{"justPkg", func(i string) string {
 			return i + "justPkg = just-us.packages.${system}.default;\n"
 		}},
+		// The justfile-* convention linters ship from just-us, not conformist:
+		// they read the fork-only `just --dump --dump-format model`, and
+		// conformist must stay strictly upstream of just-us (which already
+		// inputs it). The roster enables all eight — the seven conventions plus
+		// justfile-orphan-summary — off ONE shared justPackage, so this splices
+		// the roster rather than the single orphan-summary module it used to.
 		{"eval", func(i string) string {
 			return "" +
 				i + "eval = conformist.lib.evalModule pkgs {\n" +
 				i + "  imports = [\n" +
 				i + "    conformist.lib.presets.eng\n" +
-				i + "    just-us.lib.conformistLinters.justfile-orphan-summary\n" +
+				i + "    just-us.lib.conformistPresets.justfile\n" +
 				i + "    ./conformist.nix\n" +
 				i + "  ];\n" +
 				i + "  package = conformistPkg;\n" +
 				"\n" +
-				i + "  linters.justfile-orphan-summary.enable = true;\n" +
-				i + "  linters.justfile-orphan-summary.justPackage = justPkg;\n" +
+				i + "  linters.justfile-common.justPackage = justPkg;\n" +
 				i + "};\n"
 		}},
 		{"impureEval", func(i string) string {
