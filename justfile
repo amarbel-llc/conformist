@@ -122,6 +122,32 @@ explore-pre-commit:
 # just-us linter move, when this recipe reported a config missing eight linters
 # that the real lane was running.
 #
+# Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
+# The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
+# remote get-url origin` (canonical-host rule). If those return the REWRITTEN
+# url, a per-session insteadOf — e.g. ssh->https for ephemeral push credentials —
+# makes the linter flag a repo whose CONFIGURED remotes are entirely correct,
+# failing the merge gate for a reason the operator cannot see in .git/config.
+# This pins which read path sees configured vs effective, so the fix is chosen
+# from evidence rather than from a guess about git's behavior.
+#
+# show which git remote read paths apply insteadOf rewriting
+[group("debug")]
+debug-git-insteadof:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+    git init -q "$d"
+    cd "$d"
+    git remote add origin git@code.linenisgreat.com:conformist.git
+    git config url."https://code.linenisgreat.com/".insteadOf "git@code.linenisgreat.com:"
+    echo "config --get remote.origin.url : $(git config --get remote.origin.url)"
+    echo "remote get-url origin          : $(git remote get-url origin)"
+    echo "remote -v (fetch url)          : $(git remote -v | awk 'NR==1{print $2}')"
+    echo "ls-remote --get-url origin     : $(git ls-remote --get-url origin)"
+
 # Build just-us's `just` as a fully STATIC (pkgsStatic/musl) binary and check it
 # still emits `--dump --dump-format model`. This is the cheapest falsification of
 # the profile-cache POC's core premise (eng FDR 0015 / conformist RFC 0005): that

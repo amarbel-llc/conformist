@@ -54,7 +54,36 @@ let
       findings=0
 
       # 1. Transport: every remote (any name, any host) must be SSH.
-      bad=$(git remote -v | awk '$2 ~ /^(https?|git|ftp):\/\// {print $1"\t"$2}' | sort -u)
+      #
+      # Read the CONFIGURED url, never the effective one. BOTH `git remote -v`
+      # and `git remote get-url` apply `url.<base>.insteadOf` rewriting, so a
+      # per-machine ssh->https rewrite — e.g. a session using ephemeral push
+      # credentials — made this rule flag a repo whose committed remotes are
+      # entirely correct, naming a URL the operator cannot find anywhere in
+      # .git/config. insteadOf is local policy that never leaves the operator's
+      # machine; this rule is about what the repo DECLARES, which is what a
+      # reviewer sees and what other clones get. `git config --get` is the only
+      # read that sees it (verified by `just debug-git-insteadof`).
+      #
+      # pushurl is read too: a remote may declare a separate push URL, and the
+      # old `git remote -v` scan covered the (push) line.
+      bad=$(
+        git remote | while IFS= read -r name; do
+          [ -n "$name" ] || continue
+          for key in url pushurl; do
+            # `git config --get-all` exits 1 when the key is unset, which is the
+            # NORMAL case for pushurl. Under writeShellApplication's `set -euo
+            # pipefail` that would abort the whole check before it reports
+            # anything, so swallow it explicitly.
+            { git config --get-all "remote.$name.$key" 2>/dev/null || true; } | while IFS= read -r u; do
+              [ -n "$u" ] || continue
+              case "$u" in
+                http://* | https://* | git://* | ftp://*) printf '%s\t%s\n' "$name" "$u" ;;
+              esac
+            done
+          done
+        done | sort -u
+      )
       if [ -n "$bad" ]; then
         echo "git-remotes(#8): non-SSH remote URL(s) found — use SSH (git@github.com:... or ssh://):" >&2
         printf '%s\n' "$bad" | sed 's/^/  /' >&2
@@ -94,7 +123,9 @@ let
         printf '%s' "$host"
       }
 
-      if origin_url=$(git remote get-url origin 2>/dev/null); then
+      # Configured, not effective — same insteadOf reasoning as the transport
+      # rule above.
+      if origin_url=$(git config --get remote.origin.url 2>/dev/null); then
         if host=$(origin_host "$origin_url") && [ "$host" != "$canonical_host" ]; then
           case " $allowed_hosts " in
             *" $host "*) ;; # explicitly allowlisted for this repo
@@ -154,8 +185,12 @@ let
       while IFS= read -r name; do
         [ -n "$name" ] || continue
 
-        url=$(git remote get-url "$name")
-        if ssh=$(to_ssh "$url") && [ "$ssh" != "$url" ]; then
+        # Configured, not effective. Reading the insteadOf-rewritten URL here
+        # would make repair "convert" a rewrite that only exists on this machine
+        # and write the result back over config — churning .git/config for a
+        # remote that was already correct.
+        url=$(git config --get "remote.$name.url" 2>/dev/null || true)
+        if [ -n "$url" ] && ssh=$(to_ssh "$url") && [ "$ssh" != "$url" ]; then
           git remote set-url "$name" "$ssh"
           echo "git-remotes(#8): rewrote remote '$name' $url -> $ssh"
           rewrote=1
@@ -164,8 +199,8 @@ let
         # A separately-configured push URL (remote.<name>.pushurl) is rewritten
         # too; without an explicit pushurl, `set-url` above already covers push.
         if git config --get-all "remote.$name.pushurl" >/dev/null 2>&1; then
-          purl=$(git remote get-url --push "$name")
-          if pssh=$(to_ssh "$purl") && [ "$pssh" != "$purl" ]; then
+          purl=$(git config --get "remote.$name.pushurl" 2>/dev/null || true)
+          if [ -n "$purl" ] && pssh=$(to_ssh "$purl") && [ "$pssh" != "$purl" ]; then
             git remote set-url --push "$name" "$pssh"
             echo "git-remotes(#8): rewrote push URL of remote '$name' $purl -> $pssh"
             rewrote=1

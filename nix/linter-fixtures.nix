@@ -337,6 +337,11 @@ let
       expectToken ? null,
       expectRemotes ? { },
       recheckPasses ? true,
+      # Extra `git config <key> <value>` pairs applied after the remotes are
+      # added. Exists so a fixture can install a `url.<base>.insteadOf` rewrite,
+      # which is local machine policy rather than repo state and so cannot be
+      # expressed through `remotes` above.
+      gitConfig ? { },
     }:
     let
       mod = lib.evalModule pkgs {
@@ -353,6 +358,12 @@ let
         nixlib.mapAttrsToList (
           name: url: "git remote add ${nixlib.escapeShellArg name} ${nixlib.escapeShellArg url}"
         ) remotes
+      );
+
+      setGitConfig = nixlib.concatStringsSep "\n" (
+        nixlib.mapAttrsToList (
+          key: value: "git config ${nixlib.escapeShellArg key} ${nixlib.escapeShellArg value}"
+        ) gitConfig
       );
 
       assertToken = nixlib.optionalString (expectToken != null) ''
@@ -435,6 +446,7 @@ let
         mkdir fixture && cd fixture
         git init -q
         ${addRemotes}
+        ${setGitConfig}
 
         ${if action == "repair" then repairBody else checkBody}
 
@@ -457,6 +469,50 @@ let
     (mkGitRemotesFixture {
       label = "check-forge-ssh-pass";
       remotes.origin = "git@code.linenisgreat.com:hyphence.git";
+    })
+
+    # Check, insteadOf: a CORRECT ssh remote that a local `url.<base>.insteadOf`
+    # rewrites to https at use time MUST still pass. Both `git remote -v` and
+    # `git remote get-url` apply that rewriting, so reading either made this rule
+    # fail a repo whose committed remotes are right, citing a URL absent from
+    # .git/config — which broke every merge for a session using ephemeral https
+    # push credentials. insteadOf is per-machine policy; the rule is about what
+    # the repo DECLARES, so the check reads `git config --get`.
+    #
+    # This fixture is the discriminator: it FAILS against the pre-fix linter and
+    # passes after. `just debug-git-insteadof` shows the underlying git behavior.
+    (mkGitRemotesFixture {
+      label = "check-ssh-with-insteadof-rewrite-pass";
+      remotes.origin = "git@code.linenisgreat.com:hyphence.git";
+      gitConfig = {
+        "url.https://code.linenisgreat.com/.insteadOf" = "git@code.linenisgreat.com:";
+      };
+    })
+
+    # ...and the rewrite must not become a way to HIDE a genuinely non-SSH
+    # remote: an https remote stays flagged even when an insteadOf maps it to
+    # ssh at use time. Guards against the fix over-correcting into "trust
+    # whatever local config says".
+    (mkGitRemotesFixture {
+      label = "check-https-with-insteadof-to-ssh-still-fails";
+      remotes.origin = "https://code.linenisgreat.com/hyphence.git";
+      gitConfig = {
+        "url.git@code.linenisgreat.com:.insteadOf" = "https://code.linenisgreat.com/";
+      };
+      expectFail = true;
+      expectToken = "non-SSH remote";
+    })
+
+    # Transport rule still covers a separately-declared push URL, which the old
+    # `git remote -v` scan caught via its (push) line.
+    (mkGitRemotesFixture {
+      label = "check-non-ssh-pushurl-fail";
+      remotes.origin = "git@code.linenisgreat.com:hyphence.git";
+      gitConfig = {
+        "remote.origin.pushurl" = "https://code.linenisgreat.com/hyphence.git";
+      };
+      expectFail = true;
+      expectToken = "non-SSH remote";
     })
 
     # Check, host rule: origin on github.com via SSH — transport is fine, but
