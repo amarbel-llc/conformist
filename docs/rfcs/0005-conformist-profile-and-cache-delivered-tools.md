@@ -83,17 +83,29 @@ Every artifact entry MUST declare a `form`. Three forms are defined:
 
 | `form` | Required fields | Status |
 |---|---|---|
-| `static` | `url`, `hash` | REQUIRED — every implementation MUST support it |
-| `oci` | `image`, `digest` | OPTIONAL escape hatch |
+| `static` | `url`, `markl` | REQUIRED — every implementation MUST support it |
+| `oci` | `image`, `markl` | OPTIONAL escape hatch |
 | `drv` | `store-path` (or a means of realizing one) | OPTIONAL escape hatch |
 
 `static` is the primary form and the only one the POC (§7) covers.
 Implementations MUST support `static`; they MAY support the others.
 
-`hash` MUST be a SRI string. After download and before any use, the
-implementation MUST verify the artifact against `hash`, and MUST fail the run
-with an operational error (exit 2) on mismatch. It MUST NOT execute, cache, or
-partially apply an artifact that failed verification.
+`markl` MUST be a purpose-full **markl-id** — `purpose@format-payload`, the
+self-describing identifier wire format normative in piggy RFC 0011. It MUST NOT
+be a bare SRI string. Purpose-full markl-ids are the canonical spelling for
+pinned and locked references across this ecosystem, so an artifact pin, a
+delegation lock (§3.1) and a signature (§3.2) are all the same kind of
+identifier rather than three bespoke encodings.
+
+A content pin SHOULD use a registered content-digest purpose whose compatible
+formats include the digest in use — `dodder-blob-digest-sha256-v1` covers
+`sha256` and `blake2b256`. An implementation MUST reject a `markl` whose purpose
+or format it does not understand rather than fetching the artifact.
+
+After download and before any use, the implementation MUST verify the artifact
+against `markl`, and MUST fail the run with an operational error (exit 2) on
+mismatch. It MUST NOT execute, cache, or partially apply an artifact that failed
+verification.
 
 #### 2.1 Executability, and why `static` is the primary form
 
@@ -139,20 +151,65 @@ Merge is per-key, not per-table: a nearer layer overriding one field of an
 `[artifact.<name>]` or `[linter.<name>]` table MUST NOT discard the sibling
 fields defined by a farther layer.
 
-#### 3.1 Locked delegation
+#### 3.1 Delegation
 
-A profile MAY delegate to an organization baseline served by papi, via a hyphence
-`-` reference of the form `- <object-id> < <markl-id>`.
+A profile MAY delegate to an organization baseline served by papi. A delegation
+MUST be verifiable in exactly one of two ways, and an implementation MUST NOT
+follow one that is neither.
 
-The reference MUST be **locked**: it MUST pin a specific object identity, and an
-implementation MUST verify the fetched baseline against it. An implementation
-MUST NOT follow an unlocked or floating delegation. A delegation that fails to
-resolve or verify MUST fail the run with an operational error; an implementation
-MUST NOT silently continue with the local layers alone, because doing so would
-quietly drop every rule the baseline contributes.
+**Content-locked** — the reference pins the baseline's identity as a markl-id,
+exactly as an artifact does (§2). The fetched baseline MUST hash to that
+identity. This is immutable: the baseline cannot change under the consumer.
+
+**Signature-pinned** — the reference pins one or more **signing keys**, and the
+baseline carries a signature the implementation verifies (§3.2). This is
+mutable by design: the baseline may be updated centrally, and consumers accept
+the new content because they trust the signer rather than the bytes.
+
+A delegation that fails to resolve or verify MUST fail the run with an
+operational error. An implementation MUST NOT silently continue with the local
+layers alone, because doing so would quietly drop every rule the baseline
+contributes — turning a compromised or unreachable baseline into a silently
+weaker lint.
 
 Delegated layers MUST be treated as farther than every local layer, so a
 repository can always override its organization baseline locally.
+
+#### 3.2 Signature verification
+
+A signature-pinned delegation is what makes central update possible: change the
+baseline once, and every repository picks it up without editing a pin. It is
+therefore the mechanism by which this design answers the requirement that
+motivated it, and §3.1's content-locked form is the conservative alternative
+where immutability matters more than reach.
+
+Requirements:
+
+- The signature and the verifying key MUST both be markl-ids. The
+  `papi-doc-sig-v1` purpose (a slot-9A ECDSA P-256 signature over a PAPI
+  document's canonicalized bytes) and the `piggy-piv_auth-v1` key purpose are
+  the registered pair for a papi-served baseline, and an implementation
+  consuming one SHOULD use them rather than registering a parallel purpose.
+- The verifying key MUST be **published** by the serving domain, and MUST match
+  a key the consuming profile pins. A signature by an unpinned key MUST be
+  rejected even if it is otherwise valid — otherwise anyone the domain
+  publishes a key for could redirect the fleet's tooling.
+- A signature carried inside a hyphence profile MUST occupy its own `-` line.
+  It MUST NOT be placed on the `!` type line: that arrangement was tried in the
+  pigpen self-signed document and failed in practice, because the type line's
+  value is split on only one delimiter and a `purpose@format-payload` markl-id
+  contains more.
+- Where papi's own document rules are more permissive than these, the stricter
+  rule applies here. Specifically: papi treats an unsigned document as valid and
+  skips a signature whose purpose it does not understand. A conformist
+  implementation MUST do neither — for a signature-pinned delegation, unsigned
+  MUST be rejected, and an unrecognized purpose MUST be rejected rather than
+  skipped. The asymmetry is deliberate: papi is describing a person, whereas
+  this document decides which binaries get executed.
+
+Multiple pinned keys MUST be supported, so a key rotation can be performed by
+co-signing with the outgoing and incoming keys before the outgoing one is
+withdrawn.
 
 ### 4. Linter configuration in the profile
 
@@ -231,8 +288,16 @@ In scope:
 4. Success criterion: **conformist self-lints its own justfile**, closing the
    gap recorded in this repository's AGENTS.md.
 
-Explicitly out of scope: papi hosting, layer walking (§3), the changer lane
-(§6), and the `oci`/`drv` forms (§2).
+Explicitly out of scope: papi hosting, layer walking (§3), delegation and
+signature verification (§3.1, §3.2 — the POC profile is local and hand-written,
+so it has no baseline to delegate to), the changer lane (§6), and the `oci`/`drv`
+forms (§2).
+
+Deferring signatures does not weaken the POC: it exercises the artifact pin,
+which is the mechanism every other part depends on. It does mean the POC cannot
+demonstrate the central-update property, so that property remains **claimed but
+unproven** until a later increment, and MUST NOT be treated as validated by a
+green POC.
 
 The POC's ergonomics — not merely its exit code — determine whether the design
 proceeds.
@@ -245,22 +310,43 @@ execution of pre-built binaries from a network location**. That is a material
 change to the trust boundary and deserves to be stated plainly rather than
 inherited silently.
 
-**Hash verification is the entire trust anchor.** The `hash` field is what
+**Verification is the entire trust anchor.** The `markl` pin is what
 distinguishes this from downloading and running an arbitrary binary.
 Implementations MUST verify before execution, MUST fail closed on mismatch, and
-MUST NOT provide an option to skip verification. An artifact whose hash is
-absent MUST be rejected at parse time, not at fetch time.
+MUST NOT provide an option to skip verification. An artifact whose `markl` is
+absent, or whose purpose/format is unrecognized, MUST be rejected at parse time,
+not at fetch time.
 
 **No trust-on-first-use.** An implementation MUST NOT record and thereafter
-trust a hash it observed. Every artifact's hash MUST come from the profile.
+trust an identity it observed. Every artifact's pin MUST come from the profile.
 
-**Delegation is remote control of local enforcement.** A locked `-` reference
-lets an organization baseline determine which tools a repository downloads and
-executes. Locking is what makes this safe: the reference pins an object
-identity, so a compromised or changed baseline does not silently alter what runs.
-An implementation MUST NOT follow an unlocked delegation (§3.1) — an unlocked
-reference would let whoever serves the baseline execute arbitrary code on every
-machine that lints.
+**Sign the policy; pin the artifacts.** These are different trust questions and
+this document answers them differently on purpose. A signature answers *who
+decided this* and permits central change; a content pin answers *are these the
+exact bytes they meant* and forbids change. A baseline update therefore alters
+**pinned artifact identities inside a signed document**: the fleet gets one
+authoritative change, and every executed byte remains individually verified. An
+implementation MUST NOT accept an artifact solely because the document naming it
+was signed — a signature over a document is not a signature over its
+dependencies.
+
+**Delegation is remote control of local enforcement, and signature-pinning makes
+that explicit.** A delegation decides which tools a repository downloads and
+executes. Under signature-pinning the operator of the pinned key can change what
+every consuming machine runs, by design — that is the central-update property,
+and it is also the blast radius. It is bounded by three things and no others:
+the key is hardware-resident (a PIV slot-9A key, so signing requires the
+physical card), the key MUST be both published by the domain and pinned by the
+consumer (§3.2), and the artifacts it names remain individually pinned.
+
+**Revocation is the expensive direction, and MUST be planned for.** Rotation is
+cheap: co-sign with the outgoing and incoming keys. Revocation is not — a
+compromised or lost key must be un-pinned in every consuming profile, which is
+precisely the fleet-wide sweep this design exists to avoid. Implementations
+SHOULD make the set of pinned keys easy to enumerate across a fleet so that a
+revocation sweep is mechanical. Deployments SHOULD prefer content-locked
+delegation (§3.1) where the baseline is not expected to change, since it has no
+revocation problem at all.
 
 **The cache is executable content on disk.** The materialization directory holds
 executables outside `/nix/store` and therefore outside its immutability
@@ -290,12 +376,15 @@ use binary injection via `bats-emo`, never a hardcoded build output path:
 | Requirement | Test File | Description |
 |-------------|-----------|-------------|
 | §1, MUST reject an unknown type tag | `profile_parse.bats` | An unrecognized tag fails and the tag is reported |
-| §2, MUST fail on hash mismatch | `profile_artifact.bats` | A tampered artifact is rejected, not executed or cached |
-| §2, MUST reject a missing hash at parse time | `profile_parse.bats` | Absent `hash` fails before any fetch |
+| §2, MUST fail on pin mismatch | `profile_artifact.bats` | A tampered artifact is rejected, not executed or cached |
+| §2, MUST reject an absent or unrecognized `markl` at parse time | `profile_parse.bats` | Failure precedes any fetch |
 | §2.2, MUST support data artifacts | `profile_artifact.bats` | A non-executable artifact materializes and is referenceable |
 | §3, closest layer wins | `profile_resolve.bats` | A nearer layer overrides one field without discarding siblings |
-| §3.1, MUST NOT follow an unlocked delegation | `profile_delegate.bats` | An unlocked reference is refused |
+| §3.1, MUST NOT follow an unverifiable delegation | `profile_delegate.bats` | Neither content-locked nor signature-pinned is refused |
 | §3.1, MUST fail on unresolvable delegation | `profile_delegate.bats` | Failure is loud, not a silent drop of baseline rules |
+| §3.2, MUST reject a signature by an unpinned key | `profile_signature.bats` | A validly-signed baseline signed by a published-but-unpinned key is refused |
+| §3.2, MUST reject unsigned and unrecognized-purpose | `profile_signature.bats` | papi's permissive defaults are not inherited |
+| §3.2, MUST accept co-signed rotation | `profile_signature.bats` | Outgoing plus incoming key verifies |
 | §4.3, MUST report each stanza's source | `profile_merge.bats` | Diagnostic output attributes every active stanza |
 
 ## Compatibility
@@ -318,10 +407,19 @@ conformist upgrade.
 ### Normative
 
 - [RFC 2119] Key words for use in RFCs to Indicate Requirement Levels
+- [piggy RFC 0011] markl-id wire format — normative for the `purpose@format-payload`
+  grammar, the blech32 encoding, and the cross-language stable purpose registry
+  used by §2 pins, §3.1 locks and §3.2 signatures. Note that madder's
+  `docs/rfcs/0002-markl-id-format.md` is a **superseded stub** and MUST NOT be
+  cited as normative, notwithstanding references to it elsewhere in the fleet;
+  `markl-id(7)` is the readable summary.
 - [conformist RFC 0001] Linter Support: the `[linter.<name>]` Config Section,
   the `check` Subcommand, and Check/Repair Execution Modes
 - [conformist RFC 0004] flakeclobber: Destructive flake.nix Edits for Fleet
   Migration — the refuse-on-ambiguity contract §6 generalizes
+- [papi RFC-0001] Personal API wire format — §10 (Document Signature) for the
+  `papi-doc-sig-v1`/`piggy-piv_auth-v1` pair, key publication, and the
+  canonicalized signing input §3.2 builds on
 
 ### Informative
 
