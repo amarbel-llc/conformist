@@ -122,6 +122,26 @@ explore-pre-commit:
 # just-us linter move, when this recipe reported a config missing eight linters
 # that the real lane was running.
 #
+# Round-trip a content digest into madder's native markl-id encoding, to verify
+# the artifact-pin format RFC 0005 §2 mandates is actually producible — not just
+# something read about in markl-id(7). The entire profile design rests on that
+# pin, so it should be observed once rather than assumed. Prints the hex digest,
+# the native (blech32) markl id, and the purpose-full spelling the RFC requires.
+#
+# round-trip a content digest into a native markl id
+[group("explore")]
+explore-markl-roundtrip:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=$(mktemp)
+    trap 'rm -f "$f"' EXIT
+    printf 'conformist RFC 0005 artifact pin round-trip\n' > "$f"
+    hex=$(b2sum -l 256 "$f" | cut -d' ' -f1)
+    echo "blake2b256 (hex) : $hex"
+    id=$(printf '%s\n' "$hex" | madder encode-ids blake2b256)
+    echo "native markl id  : $id"
+    echo "purpose-full     : dodder-blob-digest-sha256-v1@$id"
+
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
 # remote get-url origin` (canonical-host rule). If those return the REWRITTEN

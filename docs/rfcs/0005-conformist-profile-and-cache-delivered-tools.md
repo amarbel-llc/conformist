@@ -288,16 +288,35 @@ In scope:
 4. Success criterion: **conformist self-lints its own justfile**, closing the
    gap recorded in this repository's AGENTS.md.
 
-Explicitly out of scope: papi hosting, layer walking (§3), delegation and
-signature verification (§3.1, §3.2 — the POC profile is local and hand-written,
-so it has no baseline to delegate to), the changer lane (§6), and the `oci`/`drv`
+Explicitly out of scope for v1: papi hosting, layer walking (§3), delegation and
+signature verification (§3.1, §3.2 — the v1 profile is local and hand-written, so
+it has no baseline to delegate to), the changer lane (§6), and the `oci`/`drv`
 forms (§2).
 
-Deferring signatures does not weaken the POC: it exercises the artifact pin,
-which is the mechanism every other part depends on. It does mean the POC cannot
-demonstrate the central-update property, so that property remains **claimed but
-unproven** until a later increment, and MUST NOT be treated as validated by a
-green POC.
+Deferring signatures does not weaken v1: it exercises the artifact pin, which is
+the mechanism every other part depends on, and it answers the ergonomics question
+fastest. It does mean v1 cannot demonstrate central update, so that property is
+**claimed but unproven** at the end of v1 and MUST NOT be treated as validated by
+a green v1.
+
+### 7.1 POC v2 — required before production
+
+Because central update is the property that motivates the whole design, it MUST
+be demonstrated before this specification is relied on in production. A second
+POC increment is therefore REQUIRED, not optional:
+
+1. A signed baseline profile, served and signature-pinned per §3.2.
+2. A consumer that pins the signing key and verifies it.
+3. Success criterion: changing the baseline **once** changes what a consuming
+   repository runs, with no edit to that repository.
+
+This specification MUST NOT advance beyond `experimental` until v2 succeeds. A
+green v1 authorizes continued development; it does not authorize production
+adoption, because the benefit that justifies the design would still be untested.
+
+Splitting it this way keeps the first gate small enough to answer the ergonomics
+question quickly, while making it impossible to reach production having only ever
+proven the easy half.
 
 The POC's ergonomics — not merely its exit code — determine whether the design
 proceeds.
