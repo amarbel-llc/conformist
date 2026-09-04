@@ -64,15 +64,19 @@ interpreted as described in RFC 2119.
 
 ### 1. The profile document
 
-A profile is a hyphence document. Its type tag MUST be `conformist-profile-v1`.
-Its body MUST be TOML.
+A profile is a hyphence document. Its type tag MUST be
+`toml-conformist_profile-v1`, carried on the `!` metadata line. Its body MUST be
+TOML.
 
-The `v1` suffix is the schema version. An implementation MUST reject a profile
-whose type tag it does not recognize, and MUST report the tag it found; it MUST
-NOT attempt a partial read of an unknown version. Additive fields within a
-version do not change the tag.
+The tag follows hyphence's existing convention of naming the body format first
+(`toml-blob_store_config-v3`, `toml-type-v1`), so a decoder knows how to read the
+body from the tag alone. The `v1` suffix is the schema version.
 
-A profile MAY carry a locked `-` reference delegating to another profile (§3).
+An implementation MUST reject a profile whose type tag it does not recognize,
+and MUST report the tag it found; it MUST NOT attempt a partial read of an
+unknown version. Additive fields within a version do not change the tag.
+
+A profile MAY delegate to another profile (§3.1).
 
 ### 2. Artifacts
 
@@ -161,6 +165,15 @@ follow one that is neither.
 exactly as an artifact does (§2). The fetched baseline MUST hash to that
 identity. This is immutable: the baseline cannot change under the consumer.
 
+A content-locked delegation is spelled as hyphence's **locked field line** — a
+typed edge — on a `-` metadata line:
+
+    - baseline=<target-id> @<markl-id>
+
+Implementations MUST NOT emit the `<` prefix for this or any other metadata
+line. `<` is a deprecated synonym for `-` retained only for decoding; encoders
+are required to emit `-`.
+
 **Signature-pinned** — the reference pins one or more **signing keys**, and the
 baseline carries a signature the implementation verifies (§3.2). This is
 mutable by design: the baseline may be updated centrally, and consumers accept
@@ -232,6 +245,39 @@ absolute path.
 Implementations MUST NOT require a stanza to embed a hash or URL; the artifact
 table is the single place a pin is expressed, so that a version bump touches one
 line.
+
+Two mechanisms are REQUIRED, and writing a profile by hand is what showed they
+were missing from the first draft:
+
+- **Executable artifacts MUST be reachable by bare name.** A stanza's command
+  invokes `just`, not a cache path, so the implementation MUST place executable
+  artifacts on `PATH` for the duration of the run. Without this every command
+  would have to interpolate a path for its own tool, and the stanza stops being
+  readable.
+- **Data artifacts MUST be interpolable by name.** A command needs the *path* of
+  a non-executable artifact (`jq -f <the filter>`). An implementation MUST
+  provide a reference syntax resolving an artifact name to its materialized
+  path. This document does not fix the spelling; `{{artifact.<name>}}` is used
+  illustratively and is NOT normative.
+
+#### 4.4 Open: rule logic as artifact vs. as stanza field
+
+Every `justfile-*` linter is a shell pipeline over a tool plus a **jq program
+that is the rule itself**. §2.2 makes that program a data artifact, which keeps
+it out of any command line and is why data artifacts are REQUIRED.
+
+An alternative deserves consideration before v1 hardens: a dedicated non-command
+stanza field carrying the program inline (TOML's `'''` literal strings hold a jq
+program without escaping), which the implementation passes to the tool directly
+rather than through a shell. That would remove one artifact and one pin per
+linter, and the reference syntax above with them.
+
+Inlining the program into `command` is REJECTED: the program would still reach
+the tool through a shell command line, reintroducing precisely the quoting
+hazard that moving these filters into files eliminated.
+
+This is recorded as unresolved rather than decided, because it is cheap to
+settle now and expensive once profiles exist in the fleet.
 
 #### 4.3 Merge with existing configuration sources
 
