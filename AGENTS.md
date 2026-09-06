@@ -293,7 +293,13 @@ under fail-on-change.
   checks (`passes-files=false` linters) are cached separately (conformist#16):
   `check.go`'s `Finalize` runs them once over their full matched set and keys a
   per-check cache entry on the config + an order-independent union of the matched
-  files' signatures, skipping the check when nothing it matches has changed.
+  files' signatures, skipping the check when nothing it matches has changed. Because `Finalize` runs
+  AFTER all formatter batches, a whole-tree linter's `repair-command` output is
+  NOT reformatted in the same run — a repair that splices Nix must emit
+  already-`nixfmt`-clean text, or the tree is left unformatted and the next run
+  reformats it (in a pre-commit lane, that means committing unformatted output).
+  `restage-repair-outputs` does not help here: it governs `--staged` restaging,
+  not formatting.
   `check.go` / `repair.go` are the two modes; `sandbox.go` implements the
   copy-and-diff strategy that lets fix-only formatters be _checked_ without
   writing to the source tree (so checks work on a read-only tree); `linter.go`,
