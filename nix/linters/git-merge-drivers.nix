@@ -171,25 +171,21 @@ in
       '';
     };
 
-    includes = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [
-        "flake.nix"
-        ".gitattributes"
-      ];
-      description = ''
-        Trigger gate for the whole-tree check. Must match something in a repo
-        the check should run in — widen it when adding entries whose `when-file`
-        is not flake.nix.
-      '';
-    };
   };
 
   config = lib.mkIf cfg.enable {
     settings.linter.git-merge-drivers = {
       command = lib.getExe check;
       repair-command = lib.getExe repair;
-      includes = cfg.includes;
+      # Trigger gate for the whole-tree check. Every eng repo has a flake.nix,
+      # so this always fires; .gitattributes is listed too so a non-flake repo
+      # that already has one is still checked. Not an option: nothing needs to
+      # override it, and a whole-tree check is exempt from the global excludes
+      # (conformist#45) which would otherwise drop both of these.
+      includes = [
+        "flake.nix"
+        ".gitattributes"
+      ];
       passes-files = false;
     };
   };
