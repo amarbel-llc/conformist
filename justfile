@@ -1272,6 +1272,58 @@ test-go:
     fi
     exit "$rc"
 
+# Reproduce the AF_UNIX failure the merge gate hit on the nixpkgs f13ff45 bump — one a
+# plain `just test-go` can miss, since it depends on the exact LENGTH of $TMPDIR.
+# black's forkserver binds a socket at $TMPDIR/pymp-XXXXXXXX/sock-<12 hex>. CPython
+# 3.14 tries to dodge sun_path (108 on Linux) by falling back to /tmp when $TMPDIR is
+# long, but multiprocessing/util.py:179 budgets only 14 bytes for "/sock-XXXXXXXX"
+# where connection.py:83 emits 18. The four-byte window that leaves —
+# len($TMPDIR) in [76, 79] — passes the fallback check and still overflows on bind,
+# so black exits non-zero and every test running the unmodified fixture roster fails
+# with ErrFormattingFailures. A spinclass session lands on 79 exactly: the worktree's
+# .tmp (62) plus `nix develop`'s own /nix-shell.XXXXXX (17). Note that padding $TMPDIR
+# LONGER hides the bug (the fallback engages and the socket goes to /tmp), which is
+# why this pins $TMPDIR to the window instead of merely making it deep. Runs a CONTROL
+# with black's pool re-enabled, which MUST fail with the AF_UNIX error — otherwise the
+# run proves nothing — then the real run, which MUST pass because cmd's TestMain pins
+# BLACK_NUM_WORKERS=1. Diagnostic only: it evaluates the devShell, not the CI lane.
+#
+# reproduce the sun_path window that makes black fail under a spinclass $TMPDIR
+[group("debug")]
+debug-test-go-sunpath-window:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # Pin $TMPDIR to 79 bytes — the top of the [76, 79] window, and exactly what a
+    # spinclass session's devShell produces. A fixed /tmp root keeps the length
+    # independent of where this worktree happens to live.
+    deep="/tmp/conformist-sunpath-window"
+    while [ ${#deep} -lt 79 ]; do deep="${deep}x"; done
+    log="$deep.log"
+    trap 'rm -rf "$deep" "$log"' EXIT
+    mkdir -p "$deep"
+    tests='TestOnUnmatched|TestQuiet|TestCpuProfile'
+
+    # Set $TMPDIR INSIDE the devShell (`--command env VAR=...`, as debug-godyn-graph
+    # does): `nix develop` makes its own $TMPDIR/nix-shell.XXXXXX, so a value exported
+    # before `nix develop` is replaced rather than honoured.
+    echo "=== control: black's pool re-enabled, TMPDIR=${#deep} bytes — MUST fail ==="
+    nix develop --command env TMPDIR="$deep" BLACK_NUM_WORKERS=0 \
+        go test -tags test -run "$tests" ./cmd > "$log" 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "debug-test-go-sunpath-window: control PASSED — TMPDIR=${#deep} bytes did not trip sun_path, so this run proves nothing. Re-check the [76, 79] window arithmetic against multiprocessing/util.py (or note that a single-CPU host skips the pool regardless)." >&2
+        exit 1
+    fi
+    if ! grep -q 'AF_UNIX path too long' "$log"; then
+        echo "debug-test-go-sunpath-window: control failed for the WRONG reason — no AF_UNIX error in its output:" >&2
+        cat "$log" >&2
+        exit 1
+    fi
+    echo "control failed as expected: OSError: AF_UNIX path too long"
+
+    echo "=== fixed: cmd TestMain pins BLACK_NUM_WORKERS=1 — MUST pass ==="
+    nix develop --command env TMPDIR="$deep" go test -tags test -run "$tests" ./cmd
+
 # --- format ---
 
 codemod-fmt: codemod-fmt-conformist
