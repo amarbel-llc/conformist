@@ -55,6 +55,14 @@
   linters.flake-outputs.enable = true;
   linters.flake-lock.enable = true;
 
+  # conformist-git(7) MERGE DRIVERS: .gitattributes binds flake.lock to the
+  # regenerate-on-conflict merge driver, so a rebase does not stall on a lock
+  # whose two sides are both merely stale. Pure — it reads .gitattributes and
+  # flake.nix, not live git state, so it belongs here rather than in eng-impure.
+  # Only flake.lock is bound by default; a repo adds its own generated-source
+  # globs via linters.git-merge-drivers.entries.
+  linters.git-merge-drivers.enable = true;
+
   # conformist-justfile(7): the justfile convention roster is NOT enabled here.
   # It ships from just-us as `lib.conformistPresets.justfile` — see the header.
 }

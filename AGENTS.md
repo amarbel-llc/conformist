@@ -54,6 +54,15 @@ not run `just`/`just lint` again right before merging.
 - `just update-go` — `go mod tidy` then regenerate gomod2nix.
 - `just explore-show-config` — emit conformist's own generated `conformist.toml`
   from the Nix module without a full check run (debugging the module).
+- `just explore-merge-driver-flake-lock` — end-to-end smoke test of the
+  `conformist-flake-lock` merge driver: a throwaway repo with a local path
+  input, a genuine `flake.lock` conflict, and a real `git merge`. It lives
+  outside the CI lane because it needs a real `nix` on PATH, which a nix build
+  sandbox does not have — so the sandboxed fixtures in `nix/linter-fixtures.nix`
+  can only cover that driver's fail-closed paths. The `conformist-codegen-header`
+  driver needs no nix and IS gated in `verify-linter-fixtures`, including a
+  driver-not-registered control proving the passing merge passes because of the
+  driver rather than incidentally.
 - `just debug-bench-backends [iterations]` (positional, e.g. `just
   debug-bench-backends 5`) — microbench the native (godyn) vs bga build backends
   across `cold`/`warm`/`leaf`/`found` edit-locality phases,
@@ -356,7 +365,14 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   these conventions without being held to them for now — a known gap, not an
   oversight (conformist#85/#89), `flake-outputs` and `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
-  inputs, flake.lock is committed; #9/#11), `golangci-dewey`
+  inputs, flake.lock is committed; #9/#11), `git-merge-drivers`
+  (conformist-git(7) MERGE DRIVERS — `.gitattributes` must bind generated paths
+  to the regenerate-on-conflict merge drivers in `nix/merge-drivers.nix`; check
+  reads `.gitattributes`, repair appends the missing lines. Only `flake.lock` is
+  bound by default: a repo's generated-SOURCE globs are opt-in via
+  `linters.git-merge-drivers.entries`, because a glob that also matched a
+  hand-written sibling would route real source through a driver that resolves
+  stamp conflicts on its own), `golangci-dewey`
   (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
   `.custom-gcl.yml`), `git-remotes` (SSH-only remotes AND a canonical `origin`
   host — check reports any non-SSH remote plus an `origin` whose host isn't
@@ -386,7 +402,8 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   `clippy-fixtures` aggregate built by `just explore-clippy-fixture`, kept out of
   the verify/CI lane so CI stays Rust-free).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
-  eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`, the
+  eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`,
+  `git-merge-drivers`, the
   seven `justfile-*`), `eng-go.nix` (the canonical Go formatter chain: `goimports`
   priority 1 then `gofumpt` priority 2 — the sequence the fleet converged on,
   eng #18; kept separate from `eng` so a non-Go repo never pulls a Go toolchain),
@@ -475,7 +492,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   2–9 (`doc/conformist.toml.5.scd`, `doc/conformist.7.scd`,
   `doc/conformist-nix.7.scd` — the normative home for the `flake-*` linters'
   conventions, `doc/conformist-justfile.7.scd` — likewise for the `justfile-*`
-  linters, citing eng-design_patterns-justfile(7) as prose origin) plus the
+  linters, citing eng-design_patterns-justfile(7) as prose origin,
+  `doc/conformist-git.7.scd` — likewise for the merge drivers and the
+  `git-merge-drivers` linter) plus the
   codegen
   section-1 reference via `conformist gen-man`, all compiled by the `manpages`
   Nix derivation — the build is the man-page lint (PRINCIPLE 4), there is no

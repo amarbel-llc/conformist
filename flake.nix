@@ -309,6 +309,12 @@
           inherit pkgs;
           lib = conformistLib;
         };
+
+        # The git merge drivers for generated files (conformist-git(7) MERGE
+        # DRIVERS). Not linter commands — git invokes these directly once the
+        # `merge.<name>.driver` registration puts them on PATH; the
+        # `git-merge-drivers` linter only checks the .gitattributes half.
+        mergeDrivers = import ./nix/merge-drivers.nix { inherit pkgs; };
       in
       {
         packages = {
@@ -364,6 +370,14 @@
           # flake input — that edge was removed to keep conformist upstream of
           # purse-first (conformist#10 / upstream-flip).
           golangci-lint-dewey = golangciLintDewey;
+          # The git merge drivers for generated files (conformist-git(7) MERGE
+          # DRIVERS). Exposed as packages because they are installed onto PATH
+          # fleet-wide and registered once in git config — they are invoked by
+          # git, not by conformist. `nix build .#conformist-merge-flake-lock`
+          # also forces the writeShellApplication to build, which is where
+          # shellcheck runs on the generated shell.
+          conformist-merge-flake-lock = mergeDrivers.flake-lock;
+          conformist-merge-codegen-header = mergeDrivers.codegen-header;
         };
 
         # `nix fmt` writes (repair mode); `checks.formatting` is the sandboxed

@@ -220,6 +220,84 @@ explore-template-eng:
     nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
     echo "explore-template-eng: template instantiates and passes checks.formatting"
 
+# End-to-end happy path for the conformist-flake-lock merge driver
+# (conformist-git(7) MERGE DRIVERS). The sandboxed fixtures in
+# nix/linter-fixtures.nix can only cover the driver's FAIL-CLOSED paths, because
+# a nix build sandbox has no `nix` on PATH — so the one path that matters most,
+# "actually regenerates the lock and lets the merge complete", has no home in the
+# CI lane and lives here instead.
+#
+# Offline: the flake's only input is a local path outside the repo, mutated per
+# branch so the two sides' locks genuinely conflict. Proves git invokes the
+# driver, the driver re-locks, and the merge completes with a valid lock. Does
+# NOT prove behaviour against registry/github inputs.
+#
+# smoke-test the flake.lock merge driver end to end
+[group("explore")]
+explore-merge-driver-flake-lock:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    driver=$(nix build '.#conformist-merge-flake-lock' --no-link --print-out-paths)/bin/conformist-merge-flake-lock
+    tmp=$(mktemp -d); trap 'chmod -R u+w "$tmp" 2>/dev/null || true; rm -rf "$tmp"' EXIT
+
+    dep="$tmp/dep"; mkdir -p "$dep"
+    printf '{ outputs = _: { }; }\n' > "$dep/flake.nix"
+
+    repo="$tmp/repo"; mkdir -p "$repo"; cd "$repo"
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+    git init -q -b main
+    git config user.email fixture@example.invalid
+    git config user.name fixture
+    git config merge.conformist-flake-lock.name 'conformist flake.lock'
+    git config merge.conformist-flake-lock.driver "$driver %O %A %B %P"
+
+    printf 'flake.lock merge=conformist-flake-lock\n' > .gitattributes
+    printf '{\n  inputs.dep.url = "path:%s";\n  outputs = { ... }: { };\n}\n' "$dep" > flake.nix
+    # Stage BEFORE locking: nix reads a git-tree flakeref's TRACKED files only,
+    # so an unstaged flake.nix is invisible to `nix flake lock`. This is the same
+    # property the driver depends on to see the lock it seeds.
+    git add -A
+    nix flake lock --no-warn-dirty .
+    git add -A && git commit -qm base
+
+    # Both branches rewrite the SAME lock field to different values, which is a
+    # guaranteed textual conflict. Deliberately not done by re-locking: `nix
+    # flake lock` does not re-resolve an input the lock already satisfies, so a
+    # mutate-dep-and-relock setup silently produces no lock change at all.
+    git checkout -q -b feature
+    sed -i 's/"lastModified": [0-9]*/"lastModified": 1111111111/' flake.lock
+    git commit -qam theirs
+
+    git checkout -q main
+    sed -i 's/"lastModified": [0-9]*/"lastModified": 2222222222/' flake.lock
+    git commit -qam ours
+
+    echo "--- merging (driver should regenerate flake.lock) ---"
+    if git merge --no-edit feature; then rc=0; else rc=$?; fi
+
+    if [ "$rc" -ne 0 ]; then
+        echo "explore-merge-driver-flake-lock: merge FAILED (exit $rc); driver did not resolve" >&2
+        sed 's/^/    /' flake.lock >&2
+        exit 1
+    fi
+    if grep -q '<<<<<<<' flake.lock; then
+        echo "explore-merge-driver-flake-lock: merge succeeded but flake.lock has conflict markers" >&2
+        exit 1
+    fi
+    if ! nix --extra-experimental-features 'nix-command flakes' \
+        eval --impure --raw --expr 'builtins.toJSON (builtins.fromJSON (builtins.readFile ./flake.lock)).version' \
+        >/dev/null 2>&1; then
+        echo "explore-merge-driver-flake-lock: resulting flake.lock is not valid lock JSON" >&2
+        sed 's/^/    /' flake.lock >&2
+        exit 1
+    fi
+    if ! grep -q '"dep"' flake.lock; then
+        echo "explore-merge-driver-flake-lock: regenerated flake.lock lost the 'dep' input" >&2
+        sed 's/^/    /' flake.lock >&2
+        exit 1
+    fi
+    echo "explore-merge-driver-flake-lock: ok (merge clean, flake.lock regenerated and valid)"
+
 # Behavioral fixtures for the built-in clippy linter (#69): build + run the
 # clippy check/repair against a tiny offline Rust crate, asserting the check
 # fails on a lint, passes when clean, and the repair --fix removes it. Pulls a

@@ -34,6 +34,28 @@
   # golangci-lint-gating repo must wire the dewey plugin via .custom-gcl.yml).
   linters.golangci-dewey.enable = true;
 
+  # conformist-git(7) MERGE DRIVERS. The eng preset above binds flake.lock; these
+  # are conformist's own generated sources, which the preset deliberately does
+  # NOT guess at (a glob that caught a hand-written file would route real source
+  # through a driver that resolves stamp conflicts on its own). Both are
+  # enumer output, and they are named individually rather than by a `*_type.go`
+  # glob precisely because such a glob would also match hand-written siblings.
+  linters.git-merge-drivers.entries = [
+    {
+      pattern = "flake.lock";
+      driver = "conformist-flake-lock";
+      when-file = "flake.nix";
+    }
+    {
+      pattern = "stats/stats_type.go";
+      driver = "conformist-codegen-header";
+    }
+    {
+      pattern = "walk/type_enum.go";
+      driver = "conformist-codegen-header";
+    }
+  ];
+
   # Prefer top-level `excludes` over the deprecated `global.excludes`. These
   # apply to formatters and linters alike, so the test/** fixtures (deliberately
   # mis-formatted) are not linted or format-checked.

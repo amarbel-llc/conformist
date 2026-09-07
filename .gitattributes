@@ -1,0 +1,6 @@
+# conformist-git(7) MERGE DRIVERS: regenerate-on-conflict merge for
+# generated files. The merge.<name>.driver side is registered per-machine
+# in eng home-manager git config; these lines are the per-repo half.
+flake.lock merge=conformist-flake-lock
+stats/stats_type.go merge=conformist-codegen-header
+walk/type_enum.go merge=conformist-codegen-header
