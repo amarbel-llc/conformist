@@ -120,8 +120,6 @@ explore-pre-commit:
 # re-evaluating ./nix/conformist.nix standalone. Those two silently diverge the
 # moment flake.nix adds anything to conformistEval — which happened during the
 # just-us linter move, when this recipe reported a config missing eight linters
-# that the real lane was running.
-#
 # Round-trip a content digest into madder's native markl-id encoding, to verify
 # the artifact-pin format RFC 0005 §2 mandates is actually producible — not just
 # something read about in markl-id(7). The entire profile design rests on that
@@ -141,6 +139,9 @@ explore-markl-roundtrip:
     id=$(printf '%s\n' "$hex" | madder encode-ids blake2b256)
     echo "native markl id  : $id"
     echo "purpose-full     : dodder-blob-digest-sha256-v1@$id"
+    sha=$(sha256sum "$f" | cut -d' ' -f1)
+    echo "sha256 (hex)     : $sha"
+    echo "sha256 markl id  : $(printf '%s\n' "$sha" | madder encode-ids sha256)"
 
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
@@ -174,8 +175,8 @@ debug-git-insteadof:
 # linter tools can ship as static end derivations exec'd from a content-addressed
 # cache dir OUTSIDE /nix/store. If a static `just` cannot produce the model, the
 # justfile-* linters cannot be delivered that way and the POC needs rescoping
-# before anything is written. Read-only w.r.t. just-us — builds from a pinned rev
-# via a throwaway expression, adding no input or pin to this flake.
+# before anything is written. Read-only w.r.t. just-us — builds
+# nix/static-just-poc.nix from a pinned rev, adding no input to this flake.
 #
 # check a static just still emits the recipe-model dump
 [group("explore")]
@@ -183,20 +184,8 @@ explore-static-just:
     #!/usr/bin/env bash
     set -euo pipefail
     out=$(nix build --no-link --print-out-paths --impure --expr \
-      'let
-         f = builtins.getFlake (toString ./.);
-         p = import f.inputs.igloo { system = builtins.currentSystem; };
-         src = p.fetchgit {
-           url = "https://code.linenisgreat.com/just-us.git";
-           rev = "308ef38000c220c59eff9ef6dc91b5d8ee885a54";
-           hash = "sha256-d2+UNPI0WCaabsVFKAYrGlMQbSfnHLuljXaPsqvzE3A=";
-         };
-       in p.pkgsStatic.rustPlatform.buildRustPackage {
-         pname = "just-static";
-         version = "poc";
-         inherit src;
-         cargoLock.lockFile = "${src}/Cargo.lock";
-         doCheck = false;
+      'import ./nix/static-just-poc.nix {
+         pkgs = import (builtins.getFlake (toString ./.)).inputs.igloo { system = builtins.currentSystem; };
        }')
     echo "built: $out"
     # Prove it is genuinely static, not merely built via the static overlay: a
@@ -209,6 +198,16 @@ explore-static-just:
     grep -q 'just-us.recipe-model' .tmp/static-just-model.json
     echo "OK: static just emitted a recipe-model payload for this repo's justfile"
 
+# Build conformist's own generated conformist.toml and cat it, to inspect the
+# emitted [formatter.*] / [linter.*] stanzas. Verifies the Nix module's config
+# generation (issue #4) without a full check run.
+#
+# This builds the flake's OWN `conformist-config` package rather than
+# re-evaluating ./nix/conformist.nix standalone. Those two silently diverge the
+# moment flake.nix adds anything to conformistEval — which happened during the
+# just-us linter move, when this recipe reported a config missing eight linters
+# that the real lane was running.
+#
 # print conformist's own generated conformist.toml
 [group("explore")]
 explore-show-config:
@@ -216,6 +215,68 @@ explore-show-config:
     set -euo pipefail
     out=$(nix build --no-link --print-out-paths '.#conformist-config')
     cat "$out"
+
+# The RFC 0005 POC v1 gate, run locally: self-lint conformist's own tree —
+# justfile included — through conformist.profile, over conformist's own
+# generated config. The committed profile's `just` pin is PENDING until just-us
+# publishes a static build to the fleet cache, and the resolver correctly refuses
+# it, so this pins a locally built static `just` (nix/static-just-poc.nix) into a
+# scratch copy. Everything after that substitution is the real path: parse →
+# verify → materialize → PATH → merge → check (conformist#112).
+#
+# A clean pass alone proves little — a linter that never ran passes too — so the
+# recipe also runs a positive control (the same profile with its verb check
+# neutralized MUST flag a real recipe) and confirms the committed profile fails
+# closed at its PENDING pin. That last step inverts once just-us publishes and
+# the real pin lands; update it then.
+#
+# self-lint conformist through its own profile
+[group("explore")]
+explore-profile-check: build-go
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just_dir=$(nix build --no-link --print-out-paths --impure --expr \
+      'import ./nix/static-just-poc.nix {
+         pkgs = import (builtins.getFlake (toString ./.)).inputs.igloo { system = builtins.currentSystem; };
+       }')
+    sha=$(sha256sum "$just_dir/bin/just" | cut -d' ' -f1)
+    pin="dodder-blob-digest-sha256-v1@$(printf '%s\n' "$sha" | madder encode-ids sha256)"
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    sed -e "s|^url = .*|url = \"file://$just_dir/bin/just\"|" \
+        -e "s|^markl = .*|markl = \"$pin\"|" conformist.profile > "$d/conformist.profile"
+    cfg=$(nix build --no-link --print-out-paths '.#conformist-config')
+    check() { build/conformist check --config-file "$cfg" --tree-root . --no-cache --profile "$@"; }
+
+    echo "--- gate: conformist self-lints through its own profile ---"
+    check "$d/conformist.profile"
+
+    echo "--- positive control: verb check neutralized, so recipes MUST be flagged ---"
+    sed 's/select((\$verbs | index(\$verb)) == null)/select(true)/' \
+      "$d/conformist.profile" > "$d/control.profile"
+    if ! grep -q 'select(true)' "$d/control.profile"; then
+      echo "CONTROL BROKEN: the rule substitution did not apply" >&2; exit 1
+    fi
+    set +e
+    out=$(check "$d/control.profile" 2>&1)
+    rc=$?
+    set -e
+    if [ "$rc" -ne 1 ] || ! grep -q "'build-go' does not start with a known verb" <<<"$out"; then
+      printf 'CONTROL FAILED (exit %s): the profile rule did not observably run\n%s\n' "$rc" "$out" >&2
+      exit 1
+    fi
+    echo "OK: the control flagged real recipes, so the gate's clean pass is real"
+
+    echo "--- the committed profile fails closed at its PENDING pin ---"
+    set +e
+    out=$(check conformist.profile 2>&1)
+    rc=$?
+    set -e
+    if [ "$rc" -ne 2 ] || ! grep -q 'markl-id purpose' <<<"$out"; then
+      printf 'EXPECTED exit 2 at the pending pin, got %s\n%s\n' "$rc" "$out" >&2
+      exit 1
+    fi
+    echo "OK: the committed profile was refused before any fetch"
 
 # Smoke-test the eng template end-to-end: instantiate it into a temp dir, lock +
 # commit it, and run the sandboxed formatting check — the adopter's `nix flake

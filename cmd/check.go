@@ -60,7 +60,7 @@ func ExitCode(err error) int {
 }
 
 func newCheckCmd(v *viper.Viper, statz *stats.Stats) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "check [paths...]",
 		Short: "Check formatting and run linters without modifying any files",
 		Long: "Evaluate every configured formatter and linter in read-only check mode. " +
@@ -71,6 +71,16 @@ func newCheckCmd(v *viper.Viper, statz *stats.Stats) *cobra.Command {
 			return runCheck(v, statz, cmd, args)
 		},
 	}
+
+	// Local, not persistent, so it never reaches viper's config decoding.
+	cmd.Flags().String(
+		"profile", "",
+		"EXPERIMENTAL (RFC 0005 POC v1): resolve this conformist profile before checking — fetch and "+
+			"verify its pinned artifacts, put the executable ones on PATH, and add its linter stanzas "+
+			"(conformist.toml wins on a name clash). Single-layer and unsigned; not for production use.",
+	)
+
+	return cmd
 }
 
 func runCheck(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []string) error {
@@ -88,6 +98,10 @@ func runCheck(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []st
 	cfg, err := config.FromViper(v)
 	if err != nil {
 		return fmt.Errorf("%w: failed to load config: %w", ErrCheckOperational, err)
+	}
+
+	if err := applyProfile(cmd, cfg, workingDir); err != nil {
+		return fmt.Errorf("%w: profile: %w", ErrCheckOperational, err)
 	}
 
 	walkType, err := walk.TypeString(cfg.Walk)

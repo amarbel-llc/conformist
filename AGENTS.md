@@ -317,6 +317,26 @@ under fail-on-change.
   the last successful repair/format run (conformist#76 — `ReadAttestation`/
   `WriteAttestation`, used by the format path to detect a competing config).
 - `stats/`, `git/`, `jujutsu/` — run statistics and VCS helpers.
+- `profile/` — the RFC 0005 POC v1 resolver behind the EXPERIMENTAL
+  `conformist check --profile <file>` (`cmd/profile.go` applies it before the
+  checker is built, because tool lookup reads PATH at construction). It parses a
+  hyphence `! toml-conformist_profile-v1` document and checks EVERY artifact pin
+  before fetching anything. A pin is a purpose-full markl-id, decoded by a
+  blech32 port that test vectors pin to madder's own encoder. Only sha256 is
+  verifiable: blake2b256 is refused, never skipped. Verified artifacts are
+  materialized read-only into `$XDG_CACHE_HOME/conformist/profile`, executable
+  ones are prepended to PATH, and linter stanzas merge UNDER conformist.toml
+  (which wins a name clash). An inline `rule` is written to a content-addressed
+  file and handed to its `rule-tool` as `"$1"`, never spliced into a command
+  line; the generated pipeline runs under pipefail so a failing producer cannot
+  pass vacuously. Each generated command ends in a shell comment listing the
+  profile's pins, because the whole-tree cache keys on command TEXT and would
+  otherwise serve a stale pass after a re-pin. Out of scope, and rejected with an
+  error naming them: layer walk, delegation, signatures, the `oci`/`drv` forms,
+  formatter stanzas, and interpolating a data artifact into a command (a data
+  artifact is reachable only as a `rule-artifact`). `just explore-profile-check`
+  runs conformist's own `conformist.profile` with a locally built static `just`
+  substituted for the pin just-us has yet to publish.
 - `test/` — integration harness and fixtures (`test/config`, `test/examples`).
   Fixtures under `test/**` are **deliberately mis-formatted**; they are excluded
   from conformist's own self-lint and must not be reformatted.
@@ -369,7 +389,10 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   either the forbidden input or a source pin, and the fleet-adoption route is
   still being designed (papi as the injection point). So conformist authors
   these conventions without being held to them for now — a known gap, not an
-  oversight (conformist#85/#89), `flake-outputs` and `flake-lock`
+  oversight (conformist#85/#89; tracked as conformist#112). The route out is the
+  RFC 0005 profile: `conformist.profile` carries a justfile rule for
+  `check --profile` and closes the gap once just-us publishes the static `just`
+  it pins (see `profile/` above), `flake-outputs` and `flake-lock`
   (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
   inputs, flake.lock is committed; #9/#11), `git-merge-drivers`
   (conformist-git(7) MERGE DRIVERS — `.gitattributes` must bind generated paths

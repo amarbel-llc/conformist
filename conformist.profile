@@ -14,12 +14,18 @@
 # `just` is genuinely static and emits a valid recipe-model payload
 # (`just explore-static-just`), and that this pin format round-trips with real
 # tooling (`just explore-markl-roundtrip`).
+#
+# Until that publish lands, `conformist check --profile conformist.profile`
+# REJECTS this file at the pin, before fetching anything (fail closed, RFC 0005
+# §2), and `just explore-profile-check` runs it with a locally built static
+# `just` substituted in. The POC resolver verifies sha256 pins only, so the real
+# pin must be sha256: blake2b256 is registered for this purpose but refused.
 # ---------------------------------------------------------------------------
 
 [artifact.just]
 form = "static"
 url = "PENDING: just-us static build, fleet cache"
-markl = "PENDING: dodder-blob-digest-sha256-v1@blake2b256-..."
+markl = "PENDING: dodder-blob-digest-sha256-v1@sha256-..."
 
 # NOTE: the rule logic is NOT an artifact here. It is authored alongside this
 # profile, so it travels inline on the stanza below and inherits this document's

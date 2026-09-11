@@ -600,6 +600,11 @@
             pkgs-master.golangci-lint
             pkgs-master.gopls
             pkgs.just
+            # jq runs conformist.profile's inline rules (RFC 0005 §4.4) under
+            # `conformist check --profile`. The profile delivers the fork's `just`
+            # itself — this stock `pkgs.just` rejects `--dump-format model` — but
+            # the rule tool comes from nixpkgs.
+            pkgs.jq
             # conformist's own config-specific, toolchain-hermetic hook wrappers
             # (build.preCommit / build.repair), on PATH as `conformist-pre-commit`
             # / `conformist-repair` so the sweatfile can name them — the same

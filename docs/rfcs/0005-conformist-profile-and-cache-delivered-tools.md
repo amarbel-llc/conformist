@@ -260,6 +260,15 @@ were missing from the first draft:
   path. This document does not fix the spelling; `{{artifact.<name>}}` is used
   illustratively and is NOT normative.
 
+Building the resolver surfaced a third requirement. conformist caches a
+whole-tree check's result under a key derived from the stanza's command *text*,
+and `just` in that text names a binary without identifying it. An implementation
+that caches results MUST make every cache key it derives for a profile stanza
+depend on the pins of the artifacts reachable from that stanza. Otherwise
+re-pinning an artifact leaves every command string unchanged, and the new
+binary is never consulted: the old cached pass is served instead. The POC meets
+this by recording the pins, as a shell comment, in each command it generates.
+
 #### 4.4 Rule logic: inline, or as an artifact
 
 Every `justfile-*` linter is a shell pipeline over a tool plus a **program that
