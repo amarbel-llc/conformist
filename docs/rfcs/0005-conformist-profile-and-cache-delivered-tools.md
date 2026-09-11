@@ -260,24 +260,34 @@ were missing from the first draft:
   path. This document does not fix the spelling; `{{artifact.<name>}}` is used
   illustratively and is NOT normative.
 
-#### 4.4 Open: rule logic as artifact vs. as stanza field
+#### 4.4 Rule logic: inline, or as an artifact
 
-Every `justfile-*` linter is a shell pipeline over a tool plus a **jq program
-that is the rule itself**. §2.2 makes that program a data artifact, which keeps
-it out of any command line and is why data artifacts are REQUIRED.
+Every `justfile-*` linter is a shell pipeline over a tool plus a **program that
+is the rule itself** (for those linters, a jq filter). Implementations MUST
+support BOTH ways of carrying such a program. They are not alternatives; they
+answer different questions about where the rule's integrity comes from.
 
-An alternative deserves consideration before v1 hardens: a dedicated non-command
-stanza field carrying the program inline (TOML's `'''` literal strings hold a jq
-program without escaping), which the implementation passes to the tool directly
-rather than through a shell. That would remove one artifact and one pin per
-linter, and the reference syntax above with them.
+**Inline, on the stanza** — a dedicated non-command field carries the program
+directly (TOML's `'''` literal strings hold a jq filter without escaping). The
+implementation MUST pass it to the tool via a file or standard input, and MUST
+NOT interpolate it into a shell command line. Its integrity is the **profile's**
+integrity: the rule travels inside the document, so a signature or content lock
+over the profile already covers it and no separate pin exists to get wrong.
+This is the expected form for a rule authored alongside the profile.
 
-Inlining the program into `command` is REJECTED: the program would still reach
-the tool through a shell command line, reintroducing precisely the quoting
+**As a data artifact** (§2.2) — the program is fetched and pinned like any other
+artifact. Required when the rule is large, shared across profiles, or produced by
+a build rather than hand-written, since in those cases it does not travel in the
+document and needs its own pin.
+
+Inlining the program into `command` is REJECTED in both cases: the program would
+reach the tool through a shell command line, reintroducing precisely the quoting
 hazard that moving these filters into files eliminated.
 
-This is recorded as unresolved rather than decided, because it is cheap to
-settle now and expensive once profiles exist in the fleet.
+A stanza MUST NOT carry a rule both ways. An implementation encountering both an
+inline program and an artifact reference for the same stanza MUST fail with an
+operational error rather than choose one — a silent precedence rule here would
+mean a profile whose effective rule is not the one its author is reading.
 
 #### 4.3 Merge with existing configuration sources
 
@@ -301,19 +311,18 @@ misconfigured, whereas a rule in the sandboxed gate is a derivation that either
 builds or does not. `fetchClosure` is the identified path to restoring pure
 parity and SHOULD be re-evaluated when available.
 
-### 6. The changer lane
+### 6. The edit lane
 
 conformist gains a third verb alongside check and repair, for one-off
 migrations: hyphence-document migration definitions, profile-delivered editing
 tools, and ast-grep-like rewriters.
 
-**The verb's name is UNRESOLVED.** Candidates under consideration are `change`,
-`modify`, `edit`, and `mutate`. This document does not select one, and no
-implementation should encode a choice until it is made.
+The verb is **`edit`** (`conformist edit`), chosen over `change`, `modify` and
+`mutate`. It sits alongside the existing `check` and the bare repair command.
 
-A changer MUST adopt flakeclobber's refuse-on-ambiguity contract (RFC 0004): when
-a target is matched more than once, or when the intended edit cannot be
-distinguished from an adjacent one, the changer MUST refuse and leave the target
+`edit` MUST adopt flakeclobber's refuse-on-ambiguity contract (RFC 0004): when a
+target is matched more than once, or when the intended edit cannot be
+distinguished from an adjacent one, it MUST refuse and leave the target
 byte-identical rather than apply a partial or guessed edit. Existing tools
 (`conform`, `flakeclobber`) are candidate first ports and are explicitly out of
 scope here.
@@ -336,7 +345,7 @@ In scope:
 
 Explicitly out of scope for v1: papi hosting, layer walking (§3), delegation and
 signature verification (§3.1, §3.2 — the v1 profile is local and hand-written, so
-it has no baseline to delegate to), the changer lane (§6), and the `oci`/`drv`
+it has no baseline to delegate to), the edit lane (§6), and the `oci`/`drv`
 forms (§2).
 
 Deferring signatures does not weaken v1: it exercises the artifact pin, which is
