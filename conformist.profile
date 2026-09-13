@@ -42,24 +42,69 @@ markl = "dodder-blob-digest-sha256-v1@sha256-yh7nfr5zsyr8s458qrunuwu5tas6ndy08eh
 # Otherwise every command interpolates a path for its own tool.
 # ---------------------------------------------------------------------------
 
+# Each rule opens with the same few definitions as just-us's shared jq prelude
+# (nix/justfile-model.nix): the recipe-model schema/version pin, and the
+# private-recipe exemption. The pin is not optional. A rule reading an absent
+# field such as `doc_prelude` would otherwise pass vacuously against any `just`
+# that emitted a different model. A profile has no way to share definitions
+# between inline rules, so they are COPIED per rule — a gap this tracer
+# surfaced; see the notes at the end of this file.
+
 [linter.justfile-recipe-names]
 command = "just --dump --dump-format model"
 rule-tool = "jq"
 includes = ["justfile"]
 passes-files = false
 rule = '''
+  def model:
+    if .schema != "just-us.recipe-model" then
+      error("unexpected schema '\(.schema // "<absent>")'; expected 'just-us.recipe-model'")
+    elif .version != 1 then
+      error("unsupported recipe-model version '\(.version // "<absent>")'; this rule pins version 1")
+    else . end;
+  def public: map(select(.private | not));
+
   ["build","test","validate","verify","lint","run","list","codemod","install",
    "deploy","load","migrate","provision","restart","bump","update","clean",
    "debug","explore"] as $verbs
   | ["default","tag","release"] as $exceptions
+  | model
   | .recipes
-  | map(select(.private | not))
+  | public
   | .[]
   | .name as $name
   | (.name | split("-") | .[0]) as $verb
   | select(($exceptions | index($name)) == null)
   | select(($verbs | index($verb)) == null)
   | "'\(.namepath)' does not start with a known verb (conformist-justfile(7) VERB LIST)"
+'''
+
+# conformist-justfile(7) RECIPE DESCRIPTIONS: `just --list` shows only the ONE
+# comment line directly above a recipe, so a block of comment lines leaves the
+# rest invisible and the description a truncated fragment. Reads the fork-only
+# `doc_prelude` field. Covers every public recipe, debug/explore included, and
+# has no repair: the fix is editorial. Ported from just-us's
+# justfile-orphan-summary module.
+[linter.justfile-orphan-summary]
+command = "just --dump --dump-format model"
+rule-tool = "jq"
+includes = ["justfile"]
+passes-files = false
+rule = '''
+  def model:
+    if .schema != "just-us.recipe-model" then
+      error("unexpected schema '\(.schema // "<absent>")'; expected 'just-us.recipe-model'")
+    elif .version != 1 then
+      error("unsupported recipe-model version '\(.version // "<absent>")'; this rule pins version 1")
+    else . end;
+  def public: map(select(.private | not));
+
+  model
+  | .recipes
+  | public
+  | .[]
+  | select((.doc_prelude | length) > 0)
+  | "recipe '\(.namepath)' has comment lines above its doc comment; `just --list` shows ONLY the last comment line, so the rest is invisible and the description reads as a truncated fragment - separate the prose from the one-line summary with a bare `#` line (or a blank line), and make that summary a whole sentence fragment that stands alone (conformist-justfile(7) RECIPE DESCRIPTIONS)"
 '''
 
 # ---------------------------------------------------------------------------
@@ -90,6 +135,14 @@ rule = '''
 # author is reading.
 #
 # Consequence for v1: this profile needs no artifact-reference syntax at all,
-# because its only rule is inline. That mechanism is still specified (§4.2) and
+# because its rules are inline. That mechanism is still specified (§4.2) and
 # still needed for the artifact case, but it is no longer on v1's critical path.
+#
+# Porting a SECOND rule surfaced a gap the first could not: shared definitions.
+# just-us's Nix modules prepend one jq prelude to every rule. A profile cannot,
+# so each rule carries its own copy of the model pin, and eight rules would mean
+# eight copies to keep in step. Neither carrier fixes this today — a
+# `rule-artifact` replaces the whole rule, it does not prefix one. Candidates
+# for RFC 0005: a per-rule-tool prelude table, or multiple rule artifacts
+# concatenated in order.
 # ---------------------------------------------------------------------------

@@ -293,6 +293,24 @@ explore-profile-check: build-go
     fi
     echo "OK: the control flagged real recipes, so the gate's clean pass is real"
 
+    echo "--- positive control: an orphaned doc prelude MUST be flagged ---"
+    # A scratch tree with an empty config, so only the profile's rules run, and
+    # a justfile whose recipe hides prose above its one-line description.
+    mkdir "$d/orphan"
+    printf 'Build the release binary and\n' | sed 's/^/# /' > "$d/orphan/justfile"
+    printf '# strip it\nbuild-release:\n    true\n' >> "$d/orphan/justfile"
+    : > "$d/orphan/conformist.toml"
+    set +e
+    out=$(PATH="$d/bare-path" build/conformist check --config-file "$d/orphan/conformist.toml" \
+      --tree-root "$d/orphan" --walk filesystem --no-cache --profile "$PWD/conformist.profile" 2>&1)
+    rc=$?
+    set -e
+    if [ "$rc" -ne 1 ] || ! grep -q "recipe 'build-release' has comment lines above its doc comment" <<<"$out"; then
+      printf 'CONTROL FAILED (exit %s): orphan-summary did not flag the orphaned prelude\n%s\n' "$rc" "$out" >&2
+      exit 1
+    fi
+    echo "OK: orphan-summary flagged the orphaned prelude, so doc_prelude is really read"
+
 # Smoke-test the eng template end-to-end: instantiate it into a temp dir, lock +
 # commit it, and run the sandboxed formatting check — the adopter's `nix flake
 # init -t .#eng` path (templates/eng/, #17). Fetches conformist from github, so
