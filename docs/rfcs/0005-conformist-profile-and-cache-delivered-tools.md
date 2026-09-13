@@ -302,6 +302,34 @@ inline program and an artifact reference for the same stanza MUST fail with an
 operational error rather than choose one — a silent precedence rule here would
 mean a profile whose effective rule is not the one its author is reading.
 
+#### 4.5 Preludes: definitions shared between rules
+
+Rules over the same tool output repeat the same definitions — every
+`justfile-*` rule pins the recipe-model schema and version before reading it,
+and a rule that omits that pin passes vacuously when a field goes missing. A
+profile therefore MAY declare `[prelude.<name>]` tables, and a rule MAY list
+them in `preludes`.
+
+- A prelude carries its program inline (`rule`) or as a data artifact
+  (`artifact`), under the same rules as a rule (§4.4): exactly one, and both is
+  an operational error.
+- A prelude MUST declare a `rule-tool`, and an implementation MUST reject a rule
+  listing a prelude written for a different tool, or a prelude that is not
+  declared, or the same prelude twice.
+- An implementation MUST join a rule's preludes in the order the rule lists
+  them, followed by the rule, and run the result as one program. Order is the
+  rule author's to state, because a tool like jq requires a definition to
+  precede its use.
+- Listing is explicit on purpose. A profile-wide prelude applied to every rule
+  was rejected: it is invisible when reading one rule, and it would reach rules
+  that have nothing to do with the output it describes.
+
+Ownership follows the definition. A prelude describing a tool's output format
+(the recipe-model pin) belongs with that tool and SHOULD be published as a data
+artifact beside it, so a format version bump ships the binary and the check for
+its output together. A prelude stating policy over that output stays with the
+profile's author.
+
 #### 4.3 Merge with existing configuration sources
 
 Profile-delivered stanzas MUST merge with `conformist.toml` such that

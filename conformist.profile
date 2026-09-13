@@ -43,19 +43,20 @@ markl = "conformist-artifact-digest-v1@sha256-yh7nfr5zsyr8s458qrunuwu5tas6ndy08e
 # Otherwise every command interpolates a path for its own tool.
 # ---------------------------------------------------------------------------
 
-# Each rule opens with the same few definitions as just-us's shared jq prelude
-# (nix/justfile-model.nix): the recipe-model schema/version pin, and the
-# private-recipe exemption. The pin is not optional. A rule reading an absent
-# field such as `doc_prelude` would otherwise pass vacuously against any `just`
-# that emitted a different model. A profile has no way to share definitions
-# between inline rules, so they are COPIED per rule — a gap this tracer
-# surfaced; see the notes at the end of this file.
+# ---------------------------------------------------------------------------
+# PRELUDES
+#
+# Definitions shared by every rule that lists them, written once. The resolver
+# joins a rule's preludes, in the order it lists them, in front of the rule.
+# ---------------------------------------------------------------------------
 
-[linter.justfile-recipe-names]
-command = "just --dump --dump-format model"
+# The recipe-model schema/version pin, from just-us's shared jq prelude
+# (nix/justfile-model.nix). Not optional: a rule reading an absent field such as
+# `doc_prelude` would otherwise pass vacuously against any `just` that emitted a
+# different model. It describes just-us's output format, so it moves to a
+# just-us-published data artifact once one exists; inline until then.
+[prelude.recipe-model]
 rule-tool = "jq"
-includes = ["justfile"]
-passes-files = false
 rule = '''
   def model:
     if .schema != "just-us.recipe-model" then
@@ -63,8 +64,28 @@ rule = '''
     elif .version != 1 then
       error("unsupported recipe-model version '\(.version // "<absent>")'; this rule pins version 1")
     else . end;
-  def public: map(select(.private | not));
+'''
 
+# conformist's eng policy over the model's raw data (just-us FDR 0003 policy
+# boundary): what counts as public, and what a recipe's verb is.
+[prelude.eng-taxonomy]
+rule-tool = "jq"
+rule = '''
+  def public: map(select(.private | not));
+  def verb: .name | split("-") | .[0];
+'''
+
+# ---------------------------------------------------------------------------
+# LINTERS
+# ---------------------------------------------------------------------------
+
+[linter.justfile-recipe-names]
+command = "just --dump --dump-format model"
+rule-tool = "jq"
+includes = ["justfile"]
+passes-files = false
+preludes = ["recipe-model", "eng-taxonomy"]
+rule = '''
   ["build","test","validate","verify","lint","run","list","codemod","install",
    "deploy","load","migrate","provision","restart","bump","update","clean",
    "debug","explore"] as $verbs
@@ -74,7 +95,7 @@ rule = '''
   | public
   | .[]
   | .name as $name
-  | (.name | split("-") | .[0]) as $verb
+  | verb as $verb
   | select(($exceptions | index($name)) == null)
   | select(($verbs | index($verb)) == null)
   | "'\(.namepath)' does not start with a known verb (conformist-justfile(7) VERB LIST)"
@@ -91,15 +112,8 @@ command = "just --dump --dump-format model"
 rule-tool = "jq"
 includes = ["justfile"]
 passes-files = false
+preludes = ["recipe-model", "eng-taxonomy"]
 rule = '''
-  def model:
-    if .schema != "just-us.recipe-model" then
-      error("unexpected schema '\(.schema // "<absent>")'; expected 'just-us.recipe-model'")
-    elif .version != 1 then
-      error("unsupported recipe-model version '\(.version // "<absent>")'; this rule pins version 1")
-    else . end;
-  def public: map(select(.private | not));
-
   model
   | .recipes
   | public
@@ -140,10 +154,8 @@ rule = '''
 # still needed for the artifact case, but it is no longer on v1's critical path.
 #
 # Porting a SECOND rule surfaced a gap the first could not: shared definitions.
-# just-us's Nix modules prepend one jq prelude to every rule. A profile cannot,
-# so each rule carries its own copy of the model pin, and eight rules would mean
-# eight copies to keep in step. Neither carrier fixes this today — a
-# `rule-artifact` replaces the whole rule, it does not prefix one. Candidates
-# for RFC 0005: a per-rule-tool prelude table, or multiple rule artifacts
-# concatenated in order.
+# just-us's Nix modules prepend one jq prelude to every rule; a profile could
+# not, so each rule carried its own copy of the model pin. Named preludes (RFC
+# 0005 §4.5) close it: each rule LISTS what it depends on, so a reader sees it,
+# and a change to the model pin is one edit however many rules use it.
 # ---------------------------------------------------------------------------

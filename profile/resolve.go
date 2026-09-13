@@ -128,7 +128,7 @@ func (r Resolver) Resolve(ctx context.Context, doc *Document) (*Resolved, error)
 	pinComment := "\n# conformist profile pins: " + strings.Join(pinList, " ")
 
 	for _, name := range sortedKeys(doc.Linters) {
-		lc, err := r.translate(doc.Linters[name], paths)
+		lc, err := r.translate(doc, doc.Linters[name], paths)
 		if err != nil {
 			return nil, fmt.Errorf("linter %q: %w", name, err)
 		}
@@ -140,7 +140,7 @@ func (r Resolver) Resolve(ctx context.Context, doc *Document) (*Resolved, error)
 	return res, nil
 }
 
-func (r Resolver) translate(l Linter, artifactPaths map[string]string) (*config.Linter, error) {
+func (r Resolver) translate(doc *Document, l Linter, artifactPaths map[string]string) (*config.Linter, error) {
 	lc := &config.Linter{
 		Command:       l.Command,
 		Options:       l.Options,
@@ -157,14 +157,14 @@ func (r Resolver) translate(l Linter, artifactPaths map[string]string) (*config.
 		return lc, nil
 	}
 
-	rulePath := artifactPaths[l.RuleArtifact]
+	program, err := assembleProgram(doc, l, artifactPaths)
+	if err != nil {
+		return nil, err
+	}
 
-	if l.Rule != "" {
-		var err error
-
-		if rulePath, err = r.writeRule(l.Rule); err != nil {
-			return nil, err
-		}
+	rulePath, err := r.writeRule(program)
+	if err != nil {
+		return nil, err
 	}
 
 	lc.Command = fmt.Sprintf(ruleCommandTemplate, l.Command, ruleToolArgs[l.RuleTool])
@@ -173,8 +173,47 @@ func (r Resolver) translate(l Linter, artifactPaths map[string]string) (*config.
 	return lc, nil
 }
 
-// writeRule stores an inline rule under its content hash, so the path (and so
-// the linter's cache key) changes exactly when the rule text does.
+// assembleProgram joins a rule's preludes, in the order it lists them, then the
+// rule itself, into the one program its rule-tool runs. Each part is inline
+// text or the verified bytes of a materialized data artifact. Order matters: jq
+// requires a definition to precede its use.
+func assembleProgram(doc *Document, l Linter, artifactPaths map[string]string) (string, error) {
+	parts := make([]string, 0, len(l.Preludes)+1)
+
+	for _, ref := range l.Preludes {
+		text, err := carriedText(doc.Preludes[ref].Rule, doc.Preludes[ref].Artifact, artifactPaths)
+		if err != nil {
+			return "", fmt.Errorf("prelude %q: %w", ref, err)
+		}
+
+		parts = append(parts, text)
+	}
+
+	text, err := carriedText(l.Rule, l.RuleArtifact, artifactPaths)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.Join(append(parts, text), "\n"), nil
+}
+
+// carriedText returns inline text, or the content of the named artifact.
+func carriedText(inline, artifact string, artifactPaths map[string]string) (string, error) {
+	if artifact == "" {
+		return inline, nil
+	}
+
+	content, err := os.ReadFile(artifactPaths[artifact])
+	if err != nil {
+		return "", fmt.Errorf("reading artifact %q: %w", artifact, err)
+	}
+
+	return string(content), nil
+}
+
+// writeRule stores an assembled rule program under its content hash, so the
+// path (and so the linter's cache key) changes exactly when any part of it
+// does — a prelude edit included.
 func (r Resolver) writeRule(rule string) (string, error) {
 	sum := sha256.Sum256([]byte(rule))
 	path := filepath.Join(r.CacheDir, "rules", hex.EncodeToString(sum[:]))

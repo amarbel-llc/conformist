@@ -36,6 +36,10 @@ var (
 	ErrRuleCarriedTwice  = errors.New("rule carried both inline and as an artifact (RFC 0005 §4.4)")
 	ErrUnknownRuleTool   = errors.New("unsupported rule-tool")
 	ErrUnknownArtifactID = errors.New("reference to an undeclared artifact")
+
+	ErrInvalidPrelude      = errors.New("invalid prelude stanza")
+	ErrUnknownPrelude      = errors.New("reference to an undeclared prelude")
+	ErrPreludeToolMismatch = errors.New("prelude is written for a different rule-tool")
 )
 
 // nameRegex matches config.FromViper's tool-name rule, so a profile cannot
@@ -74,10 +78,22 @@ type Linter struct {
 	RuleArtifact string `toml:"rule-artifact"`
 	// RuleTool runs the rule over Command's standard output.
 	RuleTool string `toml:"rule-tool"`
+	// Preludes name `[prelude.<name>]` stanzas joined, in this order, in front
+	// of the rule before it runs.
+	Preludes []string `toml:"preludes"`
 }
 
 // HasRule reports whether the stanza carries a rule program either way.
 func (l Linter) HasRule() bool { return l.Rule != "" || l.RuleArtifact != "" }
+
+// Prelude is one `[prelude.<name>]` table: definitions shared by every rule that
+// lists it, written once instead of copied into each rule. Like a rule it is
+// carried inline or as a data artifact, never both.
+type Prelude struct {
+	RuleTool string `toml:"rule-tool"`
+	Rule     string `toml:"rule"`
+	Artifact string `toml:"artifact"`
+}
 
 // Document is a parsed profile.
 type Document struct {
@@ -86,11 +102,13 @@ type Document struct {
 	// Description is the hyphence `#` lines, space-joined.
 	Description string
 	Artifacts   map[string]Artifact
+	Preludes    map[string]Prelude
 	Linters     map[string]Linter
 }
 
 type body struct {
 	Artifact map[string]Artifact `toml:"artifact"`
+	Prelude  map[string]Prelude  `toml:"prelude"`
 	Linter   map[string]Linter   `toml:"linter"`
 }
 
@@ -125,6 +143,7 @@ func Parse(path string, data []byte) (*Document, error) {
 	}
 
 	doc.Artifacts = decoded.Artifact
+	doc.Preludes = decoded.Prelude
 	doc.Linters = decoded.Linter
 
 	if err := doc.validate(); err != nil {
@@ -226,10 +245,53 @@ func (d *Document) validate() error {
 		}
 	}
 
+	for _, name := range sortedKeys(d.Preludes) {
+		if err := d.validatePrelude(name, d.Preludes[name]); err != nil {
+			return err
+		}
+	}
+
 	for _, name := range sortedKeys(d.Linters) {
 		if err := d.validateLinter(name, d.Linters[name]); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (d *Document) validatePrelude(name string, p Prelude) error {
+	switch {
+	case !nameRegex.MatchString(name):
+		return fmt.Errorf("%w %q: name must match %s", ErrInvalidPrelude, name, nameRegex)
+	case p.Rule != "" && p.Artifact != "":
+		return fmt.Errorf("prelude %q: %w", name, ErrRuleCarriedTwice)
+	case p.Rule == "" && p.Artifact == "":
+		return fmt.Errorf("%w %q: needs `rule` or `artifact`", ErrInvalidPrelude, name)
+	}
+
+	if _, ok := ruleToolArgs[p.RuleTool]; !ok {
+		return fmt.Errorf("prelude %q: %w %q (supported: %s)",
+			name, ErrUnknownRuleTool, p.RuleTool, strings.Join(sortedKeys(ruleToolArgs), ", "))
+	}
+
+	if p.Artifact != "" {
+		return d.requireDataArtifact(ErrInvalidPrelude, "prelude "+name, p.Artifact)
+	}
+
+	return nil
+}
+
+// requireDataArtifact checks that ref names a declared, non-executable artifact,
+// wrapping invalid (the owner's own invalid-stanza error) when it is executable.
+func (d *Document) requireDataArtifact(invalid error, owner, ref string) error {
+	a, ok := d.Artifacts[ref]
+	if !ok {
+		return fmt.Errorf("%s: %w %q", owner, ErrUnknownArtifactID, ref)
+	}
+
+	if a.IsExecutable() {
+		return fmt.Errorf("%w: %s: artifact %q must be a data artifact (`executable = false`)", invalid, owner, ref)
 	}
 
 	return nil
@@ -246,8 +308,11 @@ func (d *Document) validateLinter(name string, l Linter) error {
 	}
 
 	if !l.HasRule() {
-		if l.RuleTool != "" {
+		switch {
+		case l.RuleTool != "":
 			return fmt.Errorf("%w %q: `rule-tool` without a rule", ErrInvalidLinter, name)
+		case len(l.Preludes) > 0:
+			return fmt.Errorf("%w %q: `preludes` without a rule", ErrInvalidLinter, name)
 		}
 
 		return nil
@@ -272,16 +337,26 @@ func (d *Document) validateLinter(name string, l Linter) error {
 		return fmt.Errorf("%w %q: `options` cannot be combined with a rule", ErrInvalidLinter, name)
 	}
 
-	if l.RuleArtifact != "" {
-		a, ok := d.Artifacts[l.RuleArtifact]
-		if !ok {
-			return fmt.Errorf("linter %q: %w %q", name, ErrUnknownArtifactID, l.RuleArtifact)
+	seen := map[string]bool{}
+
+	for _, ref := range l.Preludes {
+		p, ok := d.Preludes[ref]
+
+		switch {
+		case !ok:
+			return fmt.Errorf("linter %q: %w %q", name, ErrUnknownPrelude, ref)
+		case seen[ref]:
+			return fmt.Errorf("%w %q: prelude %q listed twice", ErrInvalidLinter, name, ref)
+		case p.RuleTool != l.RuleTool:
+			return fmt.Errorf("linter %q: %w: %q is for %q, the rule is %q",
+				name, ErrPreludeToolMismatch, ref, p.RuleTool, l.RuleTool)
 		}
 
-		if a.IsExecutable() {
-			return fmt.Errorf("%w %q: rule-artifact %q must be a data artifact (`executable = false`)",
-				ErrInvalidLinter, name, l.RuleArtifact)
-		}
+		seen[ref] = true
+	}
+
+	if l.RuleArtifact != "" {
+		return d.requireDataArtifact(ErrInvalidLinter, "linter "+name, l.RuleArtifact)
 	}
 
 	return nil

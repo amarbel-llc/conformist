@@ -2,6 +2,7 @@ package profile_test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -132,6 +133,20 @@ func TestParseRejections(t *testing.T) {
 		},
 		"rule stanza passes files": {"passes-files = false", "passes-files = true", profile.ErrInvalidLinter},
 		"unknown rule tool":        {`rule-tool = "jq"`, `rule-tool = "sed"`, profile.ErrUnknownRuleTool},
+		"undeclared prelude": {
+			"passes-files = false", "passes-files = false\npreludes = [\"nope\"]", profile.ErrUnknownPrelude,
+		},
+		"prelude both ways": {
+			"[linter.recipes]", "[prelude.p]\nrule-tool = \"jq\"\nrule = \"def x: 1;\"\nartifact = \"tool\"\n\n[linter.recipes]",
+			profile.ErrRuleCarriedTwice,
+		},
+		"prelude carries nothing": {
+			"[linter.recipes]", "[prelude.p]\nrule-tool = \"jq\"\n\n[linter.recipes]", profile.ErrInvalidPrelude,
+		},
+		"prelude on an executable artifact": {
+			"[linter.recipes]", "[prelude.p]\nrule-tool = \"jq\"\nartifact = \"tool\"\n\n[linter.recipes]",
+			profile.ErrInvalidPrelude,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			as := require.New(t)
@@ -195,6 +210,64 @@ func TestResolveMaterializesAndTranslates(tt *testing.T) {
 	again, err := r.Resolve(t.Context(), doc)
 	as.NoError(err)
 	as.Equal(res.PathDirs, again.PathDirs)
+}
+
+// TestResolveJoinsPreludesInOrder pins the assembled program: preludes in the
+// order the rule lists them (not declaration or name order), an artifact
+// prelude contributing its verified bytes, then the rule.
+func TestResolveJoinsPreludesInOrder(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	dir := t.TempDir()
+
+	tool := []byte("#!/bin/sh\n")
+	defs := []byte("def fromartifact: 1;")
+	toolPath := filepath.Join(dir, "tool-src")
+	defsPath := filepath.Join(dir, "defs-src")
+	as.NoError(os.WriteFile(toolPath, tool, 0o644))
+	as.NoError(os.WriteFile(defsPath, defs, 0o644))
+
+	src := fmt.Sprintf(`---
+! toml-conformist_profile-v1
+---
+
+[artifact.tool]
+form = "static"
+url = "file://%s"
+markl = %q
+
+[artifact.defs]
+form = "static"
+executable = false
+url = "file://%s"
+markl = %q
+
+[prelude.a-from-artifact]
+rule-tool = "jq"
+artifact = "defs"
+
+[prelude.z-inline]
+rule-tool = "jq"
+rule = "def inline: 2;"
+
+[linter.recipes]
+command = "tool --dump"
+rule-tool = "jq"
+preludes = ["z-inline", "a-from-artifact"]
+includes = ["justfile"]
+passes-files = false
+rule = "inline + fromartifact"
+`, toolPath, profile.NewMarklID("sha256", tool), defsPath, profile.NewMarklID("blake2b256", defs))
+
+	doc, err := profile.Parse("test.profile", []byte(src))
+	as.NoError(err)
+
+	res, err := profile.Resolver{CacheDir: filepath.Join(dir, "cache")}.Resolve(t.Context(), doc)
+	as.NoError(err)
+
+	program, err := os.ReadFile(res.Linters["recipes"].Options[0])
+	as.NoError(err)
+	as.Equal("def inline: 2;\ndef fromartifact: 1;\ninline + fromartifact", string(program))
 }
 
 func TestResolveRejectsMismatchWithoutCaching(tt *testing.T) {
