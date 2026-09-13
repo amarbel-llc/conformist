@@ -252,6 +252,11 @@ explore-show-config:
 # neutralized MUST flag a real recipe, proving the fetched `just` was found on
 # PATH, dumped this justfile, and the rule ran over it.
 #
+# Both runs use a PATH holding ONLY `git`: jq is unreachable, so the rule's jq
+# must be conformist's embedded one, as in a bare pre-merge hook or on a jq-less
+# host. `git` stays because without it conformist's auto walker falls back to a
+# filesystem walk, which lints untracked files and confounds the result.
+#
 # self-lint conformist through its own profile
 [group("explore")]
 explore-profile-check: build-go
@@ -259,8 +264,15 @@ explore-profile-check: build-go
     set -euo pipefail
     d=$(mktemp -d)
     trap 'rm -rf "$d"' EXIT
+    mkdir "$d/bare-path"
+    ln -s "$(command -v git)" "$d/bare-path/git"
+    if PATH="$d/bare-path" command -v jq >/dev/null; then
+      echo "CONTROL BROKEN: jq is reachable on the bare PATH" >&2; exit 1
+    fi
     cfg=$(nix build --no-link --print-out-paths '.#conformist-config')
-    check() { build/conformist check --config-file "$cfg" --tree-root . --no-cache --profile "$@"; }
+    check() {
+      PATH="$d/bare-path" build/conformist check --config-file "$cfg" --tree-root . --no-cache --profile "$@"
+    }
 
     echo "--- gate: conformist self-lints through its own profile ---"
     check conformist.profile

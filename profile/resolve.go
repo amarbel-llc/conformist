@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/conformist/config"
+	"code.linenisgreat.com/conformist/rulejq"
 )
 
 var (
@@ -31,9 +32,10 @@ const maxArtifactBytes = 256 << 20
 
 // ruleToolArgs maps each supported rule-tool to the shell words that run it
 // over standard input with the rule file as "$1". The rule reaches the tool as
-// a file, never as shell text (RFC 0005 §4.4).
+// a file, never as shell text (RFC 0005 §4.4). `jq` is conformist's embedded
+// gojq (rulejq), served in-process, so a rule never depends on a jq on PATH.
 var ruleToolArgs = map[string]string{
-	"jq": `jq -r -f "$1"`,
+	"jq": rulejq.Command + ` -f "$1"`,
 }
 
 // ruleCommandTemplate wraps a stanza's command and its rule tool into one whole-

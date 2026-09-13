@@ -66,8 +66,9 @@ rule = '''
 # WHAT WRITING THIS FILE SETTLED
 #
 # A linter is not a tool. `justfile-recipe-names` is a pipeline over `just`
-# (fork-only), `jq` (nixpkgs), and a program that IS the rule. Delivering the
-# fork's `just` delivers roughly a third of it.
+# (fork-only), `jq`, and a program that IS the rule. Delivering the fork's
+# `just` delivered only a third of it; conformist now embeds jq (gojq) and runs
+# it in-process, so a consumer needs no jq of its own.
 #
 # Both carriers for that program are REQUIRED (RFC 0005 §4.4), because they
 # answer different questions about where the rule's integrity comes from:

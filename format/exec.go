@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"code.linenisgreat.com/conformist/rulejq"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -125,6 +126,7 @@ func (inv invocation) run(ctx context.Context, dir string, args []string) (nonze
 		interp.Env(inv.env),
 		interp.StdIO(nil, &buf, &buf),
 		interp.Params(append([]string{"--"}, args...)...),
+		interp.ExecHandlers(ruleJQExecHandler),
 	)
 	if newErr != nil {
 		return false, "", fmt.Errorf("'%s' failed to start: %w", inv.name, newErr)
@@ -140,6 +142,25 @@ func (inv invocation) run(ctx context.Context, dir string, args []string) (nonze
 	}
 
 	return false, buf.String(), nil
+}
+
+// ruleJQExecHandler serves rulejq.Command in-process, so a profile rule
+// pipeline runs its jq program without any jq on PATH (RFC 0005). Every other
+// command falls through to normal execution.
+func ruleJQExecHandler(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+	return func(ctx context.Context, args []string) error {
+		if args[0] != rulejq.Command {
+			return next(ctx, args)
+		}
+
+		hc := interp.HandlerCtx(ctx)
+
+		if status := rulejq.Run(args[1:], hc.Dir, hc.Stdin, hc.Stdout, hc.Stderr); status != 0 {
+			return interp.ExitStatus(status)
+		}
+
+		return nil
+	}
 }
 
 // signature contributes the invocation's identity to a cache hash h. A bare

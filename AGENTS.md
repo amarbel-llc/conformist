@@ -315,7 +315,7 @@ under fail-on-change.
 - `stats/`, `git/`, `jujutsu/` — run statistics and VCS helpers.
 - `profile/` — the RFC 0005 POC v1 resolver behind EXPERIMENTAL
   `check --profile` (scope and fail-closed rules in its package doc; sha256
-  pins only). `just explore-profile-check` runs the gate against just-us's
+  pins only; rule jq is gojq in-process via `rulejq/`, never PATH). `just explore-profile-check` runs the gate against just-us's
   published static `just`.
 - `test/` — integration harness and fixtures (`test/config`, `test/examples`).
   Fixtures under `test/**` are **deliberately mis-formatted**; they are excluded
