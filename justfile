@@ -138,7 +138,7 @@ explore-markl-roundtrip:
     echo "blake2b256 (hex) : $hex"
     id=$(printf '%s\n' "$hex" | madder encode-ids blake2b256)
     echo "native markl id  : $id"
-    echo "purpose-full     : dodder-blob-digest-sha256-v1@$id"
+    echo "purpose-full     : conformist-artifact-digest-v1@$id"
     sha=$(sha256sum "$f" | cut -d' ' -f1)
     echo "sha256 (hex)     : $sha"
     echo "sha256 markl id  : $(printf '%s\n' "$sha" | madder encode-ids sha256)"
@@ -166,7 +166,7 @@ explore-markl-pin url:
     sha=$(sha256sum "$f" | cut -d' ' -f1)
     echo "bytes  : $(stat -c %s "$f")"
     echo "sha256 : $sha"
-    echo "markl  : dodder-blob-digest-sha256-v1@$(printf '%s\n' "$sha" | madder encode-ids sha256)"
+    echo "markl  : conformist-artifact-digest-v1@$(printf '%s\n' "$sha" | madder encode-ids sha256)"
 
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git

@@ -17,26 +17,34 @@ import (
 // explore-markl-roundtrip`). They pin this package's blech32 port to madder's,
 // so the two cannot drift into pins that silently never verify.
 const (
-	vectorContent   = "conformist RFC 0005 artifact pin round-trip\n"
-	vectorSHA256Hex = "3e20e9cff1463002c20e6f375ea51b8ba874ac3e8521a4a7da7ce32af30d3bc2"
-	vectorSHA256ID  = "sha256-8cswnnl3gccq9sswdum4afgm3w58ftp7s5s6ff760n3j4ucd80pq5pm63c"
-	vectorBlake2bID = "blake2b256-vatfg4209g8eek3ykxvweexylvkaf6pg7xnpyrnxc3jgxkyelxdsjez5vl"
-	purpose         = profile.PurposeContentDigestSHA256
+	vectorContent    = "conformist RFC 0005 artifact pin round-trip\n"
+	vectorSHA256Hex  = "3e20e9cff1463002c20e6f375ea51b8ba874ac3e8521a4a7da7ce32af30d3bc2"
+	vectorSHA256ID   = "sha256-8cswnnl3gccq9sswdum4afgm3w58ftp7s5s6ff760n3j4ucd80pq5pm63c"
+	vectorBlake2bHex = "675694554f2a0f9cda24b198ece4c4fb2dd4e828f1a6120e66c464835899f99b"
+	vectorBlake2bID  = "blake2b256-vatfg4209g8eek3ykxvweexylvkaf6pg7xnpyrnxc3jgxkyelxdsjez5vl"
+	purpose          = profile.PurposeArtifactDigest
 )
 
-func TestMarklMatchesMadderVector(t *testing.T) {
-	as := require.New(t)
+func TestMarklMatchesMadderVectors(t *testing.T) {
+	for format, tc := range map[string]struct{ hex, id string }{
+		"sha256":     {vectorSHA256Hex, vectorSHA256ID},
+		"blake2b256": {vectorBlake2bHex, vectorBlake2bID},
+	} {
+		t.Run(format, func(t *testing.T) {
+			as := require.New(t)
 
-	id := profile.NewSHA256MarklID([]byte(vectorContent))
-	as.Equal(vectorSHA256Hex, hex.EncodeToString(id.Digest))
-	as.Equal(purpose+"@"+vectorSHA256ID, id.String(), "encoder must reproduce madder's spelling")
+			id := profile.NewMarklID(format, []byte(vectorContent))
+			as.Equal(tc.hex, hex.EncodeToString(id.Digest))
+			as.Equal(purpose+"@"+tc.id, id.String(), "encoder must reproduce madder's spelling")
 
-	parsed, err := profile.ParseMarklID(purpose + "@" + vectorSHA256ID)
-	as.NoError(err)
-	as.Equal(id, parsed, "decoder must recover madder's digest")
+			parsed, err := profile.ParseMarklID(purpose + "@" + tc.id)
+			as.NoError(err)
+			as.Equal(id, parsed, "decoder must recover madder's digest")
 
-	as.NoError(parsed.Verify([]byte(vectorContent)))
-	as.ErrorIs(parsed.Verify([]byte(vectorContent+"tampered")), profile.ErrMarklMismatch)
+			as.NoError(parsed.Verify([]byte(vectorContent)))
+			as.ErrorIs(parsed.Verify([]byte(vectorContent+"tampered")), profile.ErrMarklMismatch)
+		})
+	}
 }
 
 func TestMarklRejections(t *testing.T) {
@@ -48,12 +56,11 @@ func TestMarklRejections(t *testing.T) {
 	}{
 		"bare, no purpose": {vectorSHA256ID, profile.ErrMarklPurposeMissing},
 		"unknown purpose":  {"piggy-piv_auth-v1@" + vectorSHA256ID, profile.ErrMarklUnknownPurpose},
-		"pending pin":      {"PENDING: " + purpose + "@sha256-...", profile.ErrMarklUnknownPurpose},
-		"bad checksum":     {purpose + "@" + badChecksum, profile.ErrBlech32Checksum},
-		"uppercase":        {purpose + "@" + strings.ToUpper(vectorSHA256ID), profile.ErrBlech32Case},
-		// Decodes and checksums (so the port reads madder's blake2b256 vector
-		// too), then is refused: registered for the purpose, not computable here.
-		"blake2b256 not verifiable": {purpose + "@" + vectorBlake2bID, profile.ErrMarklUnsupportedFormat},
+		// The purpose pins used to borrow; a leftover pin must fail loudly.
+		"borrowed dodder purpose": {"dodder-blob-digest-sha256-v1@" + vectorSHA256ID, profile.ErrMarklUnknownPurpose},
+		"pending pin":             {"PENDING: " + purpose + "@sha256-...", profile.ErrMarklUnknownPurpose},
+		"bad checksum":            {purpose + "@" + badChecksum, profile.ErrBlech32Checksum},
+		"uppercase":               {purpose + "@" + strings.ToUpper(vectorSHA256ID), profile.ErrBlech32Case},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := profile.ParseMarklID(tc.in)
@@ -149,7 +156,7 @@ func resolveFixture(t *test_ui.T, content, pinned []byte) (*profile.Document, pr
 	require.NoError(t, os.WriteFile(artifact, content, 0o644))
 
 	src := strings.Replace(validProfile, `url = "file:///unused"`, `url = "file://`+artifact+`"`, 1)
-	src = strings.Replace(src, `markl = "unused"`, `markl = "`+profile.NewSHA256MarklID(pinned).String()+`"`, 1)
+	src = strings.Replace(src, `markl = "unused"`, `markl = "`+profile.NewMarklID("sha256", pinned).String()+`"`, 1)
 
 	doc, err := profile.Parse("test.profile", []byte(src))
 	require.NoError(t, err)
@@ -177,7 +184,7 @@ func TestResolveMaterializesAndTranslates(tt *testing.T) {
 	lc := res.Linters["recipes"]
 	as.NotContains(lc.Command, "it's", "the rule must never be interpolated into the command line")
 	as.Contains(lc.Command, "tool --dump")
-	as.Contains(lc.Command, profile.NewSHA256MarklID(content).String(), "pins are part of the cache key")
+	as.Contains(lc.Command, profile.NewMarklID("sha256", content).String(), "pins are part of the cache key")
 
 	as.Len(lc.Options, 1)
 	rule, err := os.ReadFile(lc.Options[0])

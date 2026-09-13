@@ -91,7 +91,7 @@ func writeProfileTree(t *test_ui.T, script string, tamper bool, cfg *config.Conf
 	}
 
 	profilePath := filepath.Join(aux, "test.profile")
-	doc := fmt.Sprintf(profileTemplate, "file://"+artifact, profile.NewSHA256MarklID(pinned).String())
+	doc := fmt.Sprintf(profileTemplate, "file://"+artifact, profile.NewMarklID("blake2b256", pinned).String())
 	require.NoError(t, os.WriteFile(profilePath, []byte(doc), 0o644))
 
 	return profilePath

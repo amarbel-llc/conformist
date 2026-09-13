@@ -290,30 +290,35 @@ schema = 3
     hash = 'sha256-NkGFiDPoCxbr3LFsI6OCygjjkY0rdmg5ggvVVwpyDQ4='
     goVersion = '1.16'
 
+  [mod.'golang.org/x/crypto']
+    version = 'v0.57.0'
+    hash = 'sha256-3/hkB+mZVBKnoxUaJv7DOzvxaL+8uQ7V6ofW4JiHhz4='
+    goVersion = '1.26.0'
+
   [mod.'golang.org/x/exp']
     version = 'v0.0.0-20260410095643-746e56fc9e2f'
     hash = 'sha256-JaDJGLIRoJjjvsg3dgfFuo7XApEJO2V4kUDmd58qTLI='
     goVersion = '1.25.0'
 
   [mod.'golang.org/x/sync']
-    version = 'v0.20.0'
-    hash = 'sha256-ybcjhCfK6lroUM0yswUvWooW8MOQZBXyiSqoxG6Uy0Y='
-    goVersion = '1.25.0'
+    version = 'v0.23.0'
+    hash = 'sha256-nF8YZFVC+TitjkderlqgGwJkuMqJCxI+fIElVLjBT2M='
+    goVersion = '1.26.0'
 
   [mod.'golang.org/x/sys']
-    version = 'v0.46.0'
-    hash = 'sha256-NzRXMSEk6upeudJvUEPVnw6clJ3d8UdC/vdfANWAc8g='
-    goVersion = '1.25.0'
+    version = 'v0.48.0'
+    hash = 'sha256-u+LwI76YIeg1asQKZItD2mnL4Yvx8veLhBuL8wv60Ls='
+    goVersion = '1.26.0'
 
   [mod.'golang.org/x/term']
-    version = 'v0.44.0'
-    hash = 'sha256-nzbvOgvGRbx1qpq1rbk7b6zNsNeNj8mOGoyZLtnzq3w='
-    goVersion = '1.25.0'
+    version = 'v0.46.0'
+    hash = 'sha256-w/LexmQ91G8N1zdjIujuaEIONVfAg7U/DciHVYp0+QY='
+    goVersion = '1.26.0'
 
   [mod.'golang.org/x/text']
-    version = 'v0.36.0'
-    hash = 'sha256-/0t9C6Mc8kYjxweFB0us2lGKo8GovHhBiq5nlMOppC0='
-    goVersion = '1.25.0'
+    version = 'v0.42.0'
+    hash = 'sha256-bviKbNmkN4Yf2dpgwmP6yNcZEakCcv1R+YyAxCdJGkY='
+    goVersion = '1.26.0'
 
   [mod.'gopkg.in/check.v1']
     version = 'v1.0.0-20201130134442-10cb98267c6c'

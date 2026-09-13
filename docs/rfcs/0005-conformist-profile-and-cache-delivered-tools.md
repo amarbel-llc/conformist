@@ -101,10 +101,14 @@ pinned and locked references across this ecosystem, so an artifact pin, a
 delegation lock (§3.1) and a signature (§3.2) are all the same kind of
 identifier rather than three bespoke encodings.
 
-A content pin SHOULD use a registered content-digest purpose whose compatible
-formats include the digest in use — `dodder-blob-digest-sha256-v1` covers
-`sha256` and `blake2b256`. An implementation MUST reject a `markl` whose purpose
-or format it does not understand rather than fetching the artifact.
+An artifact pin MUST use the purpose `conformist-artifact-digest-v1`: the
+content digest of an artifact a profile delivers. Purposes are owned by their
+domain, so this document defines conformist's own rather than borrowing a
+neighbouring domain's (a dodder blob digest names a dodder blob, not an
+artifact). Its compatible formats are every markl content-digest format —
+currently `sha256` and `blake2b256` — and an implementation MUST support all of
+them. An implementation MUST reject a `markl` whose purpose or format it does
+not understand rather than fetching the artifact.
 
 After download and before any use, the implementation MUST verify the artifact
 against `markl`, and MUST fail the run with an operational error (exit 2) on

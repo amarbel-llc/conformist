@@ -314,8 +314,8 @@ under fail-on-change.
   `WriteAttestation`, used by the format path to detect a competing config).
 - `stats/`, `git/`, `jujutsu/` — run statistics and VCS helpers.
 - `profile/` — the RFC 0005 POC v1 resolver behind EXPERIMENTAL
-  `check --profile` (scope and fail-closed rules in its package doc; sha256
-  pins only; rule jq is gojq in-process via `rulejq/`, never PATH). `just explore-profile-check` runs the gate against just-us's
+  `check --profile` (scope and fail-closed rules in its package doc; pins use
+  purpose `conformist-artifact-digest-v1`, sha256 or blake2b256; rule jq is gojq in-process via `rulejq/`, never PATH). `just explore-profile-check` runs the gate against just-us's
   published static `just`.
 - `test/` — integration harness and fixtures (`test/config`, `test/examples`).
   Fixtures under `test/**` are **deliberately mis-formatted**; they are excluded

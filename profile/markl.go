@@ -5,8 +5,9 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
+
+	"golang.org/x/crypto/blake2b"
 )
 
 // MarklID is a purpose-full markl-id, `purpose@format-payload` (piggy RFC
@@ -22,38 +23,38 @@ type MarklID struct {
 
 var (
 	ErrMarklPurposeMissing    = errors.New("markl-id has no purpose (RFC 0005 §2 requires purpose@format-payload)")
-	ErrMarklUnknownPurpose    = errors.New("markl-id purpose is not a content-digest purpose this build understands")
-	ErrMarklFormatMismatch    = errors.New("markl-id format is not compatible with its purpose")
-	ErrMarklUnsupportedFormat = errors.New("markl-id format cannot be verified by this build")
+	ErrMarklUnknownPurpose    = errors.New("markl-id purpose is not " + PurposeArtifactDigest)
+	ErrMarklUnsupportedFormat = errors.New("markl-id format is not a content digest this build can verify")
 	ErrMarklDigestLength      = errors.New("markl-id digest has the wrong length for its format")
 	ErrMarklMismatch          = errors.New("content does not match its markl-id pin")
 )
 
-// contentDigestPurposes maps each registered content-digest purpose this build
-// accepts to the formats that purpose permits.
-var contentDigestPurposes = map[string][]string{
-	"dodder-blob-digest-sha256-v1": {formatSHA256, "blake2b256"},
+// PurposeArtifactDigest is conformist's own purpose for an artifact pin: the
+// content digest of an artifact a profile delivers (RFC 0005 §2). Purposes are
+// owned by their domain, so conformist defines this one rather than borrowing a
+// neighbour's (a dodder blob digest describes a dodder blob, not an artifact).
+const PurposeArtifactDigest = "conformist-artifact-digest-v1"
+
+// digestFormats maps every markl content-digest format (markl-id(7) FORMAT IDS)
+// to the function computing it. The purpose accepts all of them; a format not
+// listed cannot be verified and is REJECTED before any fetch (RFC 0005 §2).
+var digestFormats = map[string]func([]byte) []byte{
+	"sha256": func(b []byte) []byte {
+		sum := sha256.Sum256(b)
+
+		return sum[:]
+	},
+	"blake2b256": func(b []byte) []byte {
+		sum := blake2b.Sum256(b)
+
+		return sum[:]
+	},
 }
 
-// verifiableFormats maps each format this build can compute to its digest
-// length. blake2b256 is registered for the purpose above but deliberately not
-// computable here: it would add a golang.org/x/crypto dependency for a POC
-// whose only pin can be sha256. A blake2b256 pin is therefore REJECTED before
-// any fetch (RFC 0005 §2), never downgraded to unverified.
-var verifiableFormats = map[string]int{
-	formatSHA256: sha256.Size,
-}
-
-// PurposeContentDigestSHA256 is the purpose NewSHA256MarklID emits.
-const PurposeContentDigestSHA256 = "dodder-blob-digest-sha256-v1"
-
-const formatSHA256 = "sha256"
-
-// NewSHA256MarklID returns the purpose-full sha256 markl-id of content.
-func NewSHA256MarklID(content []byte) MarklID {
-	sum := sha256.Sum256(content)
-
-	return MarklID{Purpose: PurposeContentDigestSHA256, Format: formatSHA256, Digest: sum[:]}
+// NewMarklID returns the purpose-full artifact-digest markl-id of content in
+// format, which must be a key of digestFormats.
+func NewMarklID(format string, content []byte) MarklID {
+	return MarklID{Purpose: PurposeArtifactDigest, Format: format, Digest: digestFormats[format](content)}
 }
 
 // ParseMarklID parses a purpose-full markl-id and rejects any purpose or format
@@ -65,8 +66,7 @@ func ParseMarklID(s string) (MarklID, error) {
 		return MarklID{}, fmt.Errorf("%w: %q", ErrMarklPurposeMissing, s)
 	}
 
-	formats, ok := contentDigestPurposes[purpose]
-	if !ok {
+	if purpose != PurposeArtifactDigest {
 		return MarklID{}, fmt.Errorf("%w: %q", ErrMarklUnknownPurpose, purpose)
 	}
 
@@ -75,17 +75,13 @@ func ParseMarklID(s string) (MarklID, error) {
 		return MarklID{}, fmt.Errorf("markl-id %q: %w", s, err)
 	}
 
-	if !slices.Contains(formats, format) {
-		return MarklID{}, fmt.Errorf("%w: %q under %q", ErrMarklFormatMismatch, format, purpose)
-	}
-
-	size, ok := verifiableFormats[format]
+	sum, ok := digestFormats[format]
 	if !ok {
-		return MarklID{}, fmt.Errorf("%w: %q (this POC verifies sha256 only)", ErrMarklUnsupportedFormat, format)
+		return MarklID{}, fmt.Errorf("%w: %q", ErrMarklUnsupportedFormat, format)
 	}
 
-	if len(digest) != size {
-		return MarklID{}, fmt.Errorf("%w: %q has %d bytes, want %d", ErrMarklDigestLength, format, len(digest), size)
+	if want := len(sum(nil)); len(digest) != want {
+		return MarklID{}, fmt.Errorf("%w: %q has %d bytes, want %d", ErrMarklDigestLength, format, len(digest), want)
 	}
 
 	return MarklID{Purpose: purpose, Format: format, Digest: digest}, nil
@@ -98,15 +94,12 @@ func (m MarklID) String() string {
 
 // Verify reports whether content hashes to the pinned digest.
 func (m MarklID) Verify(content []byte) error {
-	var got []byte
-
-	switch m.Format {
-	case formatSHA256:
-		sum := sha256.Sum256(content)
-		got = sum[:]
-	default:
+	sum, ok := digestFormats[m.Format]
+	if !ok {
 		return fmt.Errorf("%w: %q", ErrMarklUnsupportedFormat, m.Format)
 	}
+
+	got := sum(content)
 
 	if subtle.ConstantTimeCompare(got, m.Digest) != 1 {
 		return fmt.Errorf("%w: want %s, got %s", ErrMarklMismatch, m, MarklID{m.Purpose, m.Format, got})

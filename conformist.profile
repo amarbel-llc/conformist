@@ -8,8 +8,9 @@
 # ---------------------------------------------------------------------------
 # ARTIFACTS
 #
-# Pins are purpose-full markl-ids (piggy RFC 0011). The POC resolver verifies
-# sha256 only; blake2b256 is registered for this purpose but refused.
+# Pins are purpose-full markl-ids (piggy RFC 0011) under conformist's own
+# purpose, `conformist-artifact-digest-v1`, in any markl content-digest format
+# (sha256 or blake2b256).
 #
 # `just` is just-us v0.1.0's static (pkgsStatic/musl) build, a forge release
 # asset. The pin was computed from the bytes the url actually serves
@@ -21,7 +22,7 @@
 [artifact.just]
 form = "static"
 url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.0/just-static-x86_64-unknown-linux-musl"
-markl = "dodder-blob-digest-sha256-v1@sha256-yh7nfr5zsyr8s458qrunuwu5tas6ndy08ehwnsfgrlhg7h8muysqx8ftc5"
+markl = "conformist-artifact-digest-v1@sha256-yh7nfr5zsyr8s458qrunuwu5tas6ndy08ehwnsfgrlhg7h8muysqx8ftc5"
 
 # NOTE: the rule logic is NOT an artifact here. It is authored alongside this
 # profile, so it travels inline on the stanza below and inherits this document's
