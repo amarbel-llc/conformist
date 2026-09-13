@@ -143,6 +143,31 @@ explore-markl-roundtrip:
     echo "sha256 (hex)     : $sha"
     echo "sha256 markl id  : $(printf '%s\n' "$sha" | madder encode-ids sha256)"
 
+# Download a published artifact and print the purpose-full sha256 markl pin
+# conformist.profile needs for it (RFC 0005 §2). The pin is computed from the
+# bytes actually served, not from a digest a publisher reported, so a mismatch
+# between the two shows up here rather than as a failed check later.
+#
+# print the markl pin for a published artifact url
+[group("explore")]
+explore-markl-pin url:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=$(mktemp)
+    trap 'rm -f "$f"' EXIT
+    if ! curl -fsSL -o "$f" "{{ url }}"; then
+      # Show the redirect chain: a url behind a login (e.g. the forge's own
+      # hostname) fails at a localhost authorize hop, which reads like a
+      # proxy problem and is not one.
+      echo "--- download failed; redirect chain ---" >&2
+      curl -sSvL --max-redirs 5 -o /dev/null "{{ url }}" 2>&1 | grep -iE '^> Host|^< HTTP|^< location' >&2 || true
+      exit 1
+    fi
+    sha=$(sha256sum "$f" | cut -d' ' -f1)
+    echo "bytes  : $(stat -c %s "$f")"
+    echo "sha256 : $sha"
+    echo "markl  : dodder-blob-digest-sha256-v1@$(printf '%s\n' "$sha" | madder encode-ids sha256)"
+
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
 # remote get-url origin` (canonical-host rule). If those return the REWRITTEN
@@ -217,43 +242,32 @@ explore-show-config:
     cat "$out"
 
 # The RFC 0005 POC v1 gate, run locally: self-lint conformist's own tree —
-# justfile included — through conformist.profile, over conformist's own
-# generated config. The committed profile's `just` pin is PENDING until just-us
-# publishes a static build to the fleet cache, and the resolver correctly refuses
-# it, so this pins a locally built static `just` (nix/static-just-poc.nix) into a
-# scratch copy. Everything after that substitution is the real path: parse →
-# verify → materialize → PATH → merge → check (conformist#112).
+# justfile included — through the COMMITTED conformist.profile, over
+# conformist's own generated config: parse → fetch just-us's published static
+# `just` over https → verify its pin → materialize → PATH → merge → check
+# (conformist#112).
 #
 # A clean pass alone proves little — a linter that never ran passes too — so the
-# recipe also runs a positive control (the same profile with its verb check
-# neutralized MUST flag a real recipe) and confirms the committed profile fails
-# closed at its PENDING pin. That last step inverts once just-us publishes and
-# the real pin lands; update it then.
+# recipe also runs a positive control: the same profile with its verb check
+# neutralized MUST flag a real recipe, proving the fetched `just` was found on
+# PATH, dumped this justfile, and the rule ran over it.
 #
 # self-lint conformist through its own profile
 [group("explore")]
 explore-profile-check: build-go
     #!/usr/bin/env bash
     set -euo pipefail
-    just_dir=$(nix build --no-link --print-out-paths --impure --expr \
-      'import ./nix/static-just-poc.nix {
-         pkgs = import (builtins.getFlake (toString ./.)).inputs.igloo { system = builtins.currentSystem; };
-       }')
-    sha=$(sha256sum "$just_dir/bin/just" | cut -d' ' -f1)
-    pin="dodder-blob-digest-sha256-v1@$(printf '%s\n' "$sha" | madder encode-ids sha256)"
     d=$(mktemp -d)
     trap 'rm -rf "$d"' EXIT
-    sed -e "s|^url = .*|url = \"file://$just_dir/bin/just\"|" \
-        -e "s|^markl = .*|markl = \"$pin\"|" conformist.profile > "$d/conformist.profile"
     cfg=$(nix build --no-link --print-out-paths '.#conformist-config')
     check() { build/conformist check --config-file "$cfg" --tree-root . --no-cache --profile "$@"; }
 
     echo "--- gate: conformist self-lints through its own profile ---"
-    check "$d/conformist.profile"
+    check conformist.profile
 
     echo "--- positive control: verb check neutralized, so recipes MUST be flagged ---"
     sed 's/select((\$verbs | index(\$verb)) == null)/select(true)/' \
-      "$d/conformist.profile" > "$d/control.profile"
+      conformist.profile > "$d/control.profile"
     if ! grep -q 'select(true)' "$d/control.profile"; then
       echo "CONTROL BROKEN: the rule substitution did not apply" >&2; exit 1
     fi
@@ -266,17 +280,6 @@ explore-profile-check: build-go
       exit 1
     fi
     echo "OK: the control flagged real recipes, so the gate's clean pass is real"
-
-    echo "--- the committed profile fails closed at its PENDING pin ---"
-    set +e
-    out=$(check conformist.profile 2>&1)
-    rc=$?
-    set -e
-    if [ "$rc" -ne 2 ] || ! grep -q 'markl-id purpose' <<<"$out"; then
-      printf 'EXPECTED exit 2 at the pending pin, got %s\n%s\n' "$rc" "$out" >&2
-      exit 1
-    fi
-    echo "OK: the committed profile was refused before any fetch"
 
 # Smoke-test the eng template end-to-end: instantiate it into a temp dir, lock +
 # commit it, and run the sandboxed formatting check — the adopter's `nix flake
