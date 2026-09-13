@@ -12,17 +12,25 @@
 # purpose, `conformist-artifact-digest-v1`, in any markl content-digest format
 # (sha256 or blake2b256).
 #
-# `just` is just-us v0.1.0's static (pkgsStatic/musl) build, a forge release
-# asset. The pin was computed from the bytes the url actually serves
-# (`just explore-markl-pin <url>`), not from a reported digest. The url uses the
-# public code.linenisgreat.com host: the forge's own hostname puts release
-# downloads behind a login redirect, which an unattended check cannot follow.
+# Both artifacts come from ONE just-us release (v0.1.1), so the binary and the
+# check for its output format move together: the static (pkgsStatic/musl)
+# `just`, and the recipe-model jq prelude describing what it emits. Pins were
+# computed from the bytes the urls actually serve (`just explore-markl-pin
+# <url>`), not from reported digests. The urls use the public
+# code.linenisgreat.com host: the forge's own hostname puts release downloads
+# behind a login redirect, which an unattended check cannot follow.
 # ---------------------------------------------------------------------------
 
 [artifact.just]
 form = "static"
-url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.0/just-static-x86_64-unknown-linux-musl"
-markl = "conformist-artifact-digest-v1@sha256-yh7nfr5zsyr8s458qrunuwu5tas6ndy08ehwnsfgrlhg7h8muysqx8ftc5"
+url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.1/just-static-x86_64-unknown-linux-musl"
+markl = "conformist-artifact-digest-v1@sha256-rn99vgpre2zl3ltkkfa8h5g02a93rp54x3p06pq4yxuswmzsvzjqkru48l"
+
+[artifact.recipe-model-jq]
+form = "static"
+executable = false
+url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.1/recipe-model-v1.jq"
+markl = "conformist-artifact-digest-v1@sha256-a4kk3vqnc76j7m4xhlp49ww7wl2ypyn74pa46jx2fakty5msd3fq0jp2xs"
 
 # NOTE: the rule logic is NOT an artifact here. It is authored alongside this
 # profile, so it travels inline on the stanza below and inherits this document's
@@ -50,21 +58,13 @@ markl = "conformist-artifact-digest-v1@sha256-yh7nfr5zsyr8s458qrunuwu5tas6ndy08e
 # joins a rule's preludes, in the order it lists them, in front of the rule.
 # ---------------------------------------------------------------------------
 
-# The recipe-model schema/version pin, from just-us's shared jq prelude
-# (nix/justfile-model.nix). Not optional: a rule reading an absent field such as
-# `doc_prelude` would otherwise pass vacuously against any `just` that emitted a
-# different model. It describes just-us's output format, so it moves to a
-# just-us-published data artifact once one exists; inline until then.
+# The recipe-model schema/version pin (`def model`). Not optional: a rule
+# reading an absent field such as `doc_prelude` would otherwise pass vacuously
+# against any `just` that emitted a different model. It describes just-us's
+# output format, so just-us publishes it; its own Nix linters read the same file.
 [prelude.recipe-model]
 rule-tool = "jq"
-rule = '''
-  def model:
-    if .schema != "just-us.recipe-model" then
-      error("unexpected schema '\(.schema // "<absent>")'; expected 'just-us.recipe-model'")
-    elif .version != 1 then
-      error("unsupported recipe-model version '\(.version // "<absent>")'; this rule pins version 1")
-    else . end;
-'''
+artifact = "recipe-model-jq"
 
 # conformist's eng policy over the model's raw data (just-us FDR 0003 policy
 # boundary): what counts as public, and what a recipe's verb is.
