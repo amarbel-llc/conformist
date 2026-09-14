@@ -1,11 +1,13 @@
 # eng-versioning(7) conformance as a whole-tree conformist linter
 # (passes-files=false): verifies version.env at the tree root declares
 # `export <REPO>_VERSION=<semver>`. <REPO> is the explicit `key` option when set,
-# else derived (uppercased, - -> _) from go.mod's module path, else from
+# else derived (uppercased, - -> _) from go.mod's module path, else from go.nix's
+# top-level `module` (igloo FDR 0008 modules have no go.mod), else from
 # Cargo.toml's `[package].name` (conformist#29) — so Rust/Cargo repos can enable
 # the language-agnostic check too. It reads only committed files (version.env,
-# go.mod, Cargo.toml), so it runs in the sandboxed checks.formatting derivation
-# as well as `nix fmt`. See amarbel-llc/conformist#14, #29 and eng-versioning(7).
+# go.mod, go.nix, Cargo.toml), so it runs in the sandboxed checks.formatting
+# derivation as well as `nix fmt`. See amarbel-llc/conformist#14, #29 and
+# eng-versioning(7).
 {
   config,
   lib,
@@ -14,6 +16,7 @@
 }:
 let
   cfg = config.linters.eng-versioning;
+  goNixField = import ../go-nix-field.nix { inherit pkgs; };
 
   check = pkgs.writeShellApplication {
     name = "conformist-eng-versioning";
@@ -21,6 +24,7 @@ let
       coreutils
       gawk
       gnugrep
+      goNixField
     ];
     text = ''
       # cwd is the tree root (conformist runs whole-tree checks there); this
@@ -31,7 +35,8 @@ let
       }
 
       # Derive the canonical version key: explicit `key` option wins, else
-      # go.mod's module path, else Cargo.toml's [package].name (conformist#29).
+      # go.mod's module path, else go.nix's top-level `module` (igloo FDR 0008),
+      # else Cargo.toml's [package].name (conformist#29).
       # No directory/remote fallback: in the sandboxed checks.formatting lane the
       # cwd is a /nix/store/<hash>-source path and .git is absent, so a dirname
       # fallback would derive a wrong key silently — the `key` option is the
@@ -41,6 +46,13 @@ let
         expected=$override
       elif [ -f go.mod ]; then
         module=$(awk '/^module /{print $2; exit}' go.mod)
+        repo=''${module##*/}
+        expected=$(printf '%s' "$repo" | tr '[:lower:]-' '[:upper:]_')_VERSION
+      elif [ -f go.nix ]; then
+        module=$(conformist-go-nix-field module go.nix) || {
+          echo "eng-versioning(7): go.nix present but its top-level module = \"...\"; was not found; set linters.eng-versioning.key" >&2
+          exit 1
+        }
         repo=''${module##*/}
         expected=$(printf '%s' "$repo" | tr '[:lower:]-' '[:upper:]_')_VERSION
       elif [ -f Cargo.toml ]; then
@@ -58,7 +70,7 @@ let
         }
         expected=$(printf '%s' "$repo" | tr '[:lower:]-' '[:upper:]_')_VERSION
       else
-        echo "eng-versioning(7): cannot derive version key (no go.mod or Cargo.toml at tree root); set linters.eng-versioning.key" >&2
+        echo "eng-versioning(7): cannot derive version key (no go.mod, go.nix or Cargo.toml at tree root); set linters.eng-versioning.key" >&2
         exit 1
       fi
 
@@ -82,10 +94,11 @@ in
       example = "JUST_US_VERSION";
       description = ''
         The canonical version variable name required in version.env (e.g.
-        JUST_US_VERSION). When null, it is derived: go.mod module path ->
-        Cargo.toml [package].name, uppercased with `-` -> `_` and suffixed
-        `_VERSION`. Set this for repos where neither file is present, or to pin
-        the key explicitly rather than rely on derivation.
+        JUST_US_VERSION). When null, it is derived: go.mod module path -> go.nix
+        top-level `module` -> Cargo.toml [package].name, uppercased with `-` ->
+        `_` and suffixed `_VERSION`. Set this for repos where none of those
+        files is present, or to pin the key explicitly rather than rely on
+        derivation.
       '';
     };
   };
@@ -96,13 +109,14 @@ in
       # Gate on flake.nix (like every sibling), NOT on version.env alone: a
       # gate of only version.env suppresses the run exactly when version.env
       # is missing, making the "version.env missing" error unreachable
-      # (conformist#92, found 2026-07-19). version.env/go.mod/Cargo.toml stay
-      # listed so edits to any file this check reads invalidate the
+      # (conformist#92, found 2026-07-19). version.env/go.mod/go.nix/Cargo.toml
+      # stay listed so edits to any file this check reads invalidate the
       # whole-tree cache (conformist#16), not just trigger the first run.
       includes = [
         "flake.nix"
         "version.env"
         "go.mod"
+        "go.nix"
         "Cargo.toml"
       ];
       passes-files = false;

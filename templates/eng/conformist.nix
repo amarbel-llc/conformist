@@ -8,9 +8,9 @@
   # and the conformist programs registry.
   programs.nixfmt.enable = true;
 
-  # eng-versioning(7) derives the version key from go.mod / Cargo.toml. This
-  # language-agnostic template has neither, so set the key explicitly. Rename it
-  # to <YOUR_REPO>_VERSION (uppercase, `-`→`_`) and match version.env.
+  # eng-versioning(7) derives the version key from go.mod / go.nix / Cargo.toml.
+  # This language-agnostic template has none of them, so set the key explicitly.
+  # Rename it to <YOUR_REPO>_VERSION (uppercase, `-`→`_`) and match version.env.
   linters.eng-versioning.key = "EXAMPLE_VERSION";
 
   # Prose and generated files are out of scope for code formatters.

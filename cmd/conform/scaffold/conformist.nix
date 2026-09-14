@@ -7,8 +7,8 @@
   # See `man conformist.toml` and the conformist programs registry.
   programs.nixfmt.enable = true;
 
-  # eng-versioning(7) derives the version key from go.mod / Cargo.toml. If your
-  # repo has neither, set it explicitly to match version.env:
+  # eng-versioning(7) derives the version key from go.mod / go.nix / Cargo.toml.
+  # If your repo has none of them, set it explicitly to match version.env:
   #   linters.eng-versioning.key = "<YOUR_REPO>_VERSION";
 
   # Prose and generated files are out of scope for code formatters.

@@ -1406,8 +1406,232 @@ let
 
   ];
 
+  # ---- go.nix modules (igloo FDR 0008): no go.mod in the tree -------------
+  #
+  # A nixfmt-shaped go.nix whose `require` block precedes the top-level fields
+  # and carries its own nested `go`, so a parse that ignored attrset depth would
+  # read the dependency's Go version instead of the module's.
+  goNixManifest =
+    {
+      module,
+      go,
+      requireGo ? "1.26",
+    }:
+    ''
+      {
+        require = {
+          "golang.org/x/tools" = {
+            version = "v0.49.0";
+            hash = "sha256-AAAA";
+            go = "${requireGo}";
+          };
+        };
+        module = "${module}";
+        go = "${go}";
+        flakeInputs = {
+          "code.linenisgreat.com/tommy" = {
+            input = "tommy";
+          };
+        };
+        replace = { };
+      }
+    '';
+
+  goNixLinterFixtures = [
+    (mkLinterFixtureCheck {
+      name = "eng-versioning";
+      label = "go-nix-pass";
+      files = {
+        "go.nix" = goNixManifest {
+          module = "example.com/foo-bar";
+          go = "1.26";
+        };
+        "version.env" = "export FOO_BAR_VERSION=1.2.3\n";
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning";
+      label = "go-nix-wrong-key-fail";
+      files = {
+        "go.nix" = goNixManifest {
+          module = "example.com/foo";
+          go = "1.26";
+        };
+        "version.env" = "export BAR_VERSION=1.2.3\n";
+      };
+      expectFail = true;
+      expectToken = "must declare 'export FOO_VERSION";
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning";
+      label = "go-nix-no-module-fail";
+      files = {
+        "go.nix" = "{\n  go = \"1.26\";\n}\n";
+        "version.env" = "export FOO_VERSION=1.2.3\n";
+      };
+      expectFail = true;
+      expectToken = "go.nix present but";
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning";
+      label = "go-mod-over-go-nix-pass";
+      files = {
+        # Both present: go.mod still decides the key.
+        "go.mod" = "module example.com/foo\n";
+        "go.nix" = goNixManifest {
+          module = "example.com/bar";
+          go = "1.26";
+        };
+        "version.env" = "export FOO_VERSION=1.2.3\n";
+      };
+    })
+    # The gomod2nix drift check has nothing to check without a go.mod: it exits
+    # before invoking gomod2nix, so this runs in the pure sandbox.
+    (mkLinterFixtureCheck {
+      name = "gomod2nix";
+      label = "go-nix-no-go-mod-pass";
+      files = {
+        "go.nix" = goNixManifest {
+          module = "example.com/foo";
+          go = "1.26";
+        };
+      };
+      expectToken = "no go.mod at tree root";
+    })
+  ];
+
+  # Runs the gofumpt formatter module's command on `target` and diffs the result
+  # against `expect`. The cases pair a go.nix module with the equivalent go.mod
+  # module and a no-manifest control, so a -lang/-modpath that never reached
+  # gofumpt shows up as a mismatch rather than an incidental pass.
+  mkGofumptFixture =
+    {
+      label,
+      files,
+      target,
+      expect,
+    }:
+    let
+      mod = lib.evalModule pkgs {
+        enableDefaultExcludes = false;
+        programs.gofumpt.enable = true;
+      };
+      fmt = mod.config.settings.formatter.gofumpt;
+    in
+    pkgs.runCommandLocal "formatter-fixture-gofumpt-${label}" { } ''
+      mkdir fixture && cd fixture
+      ${writeFixtureFiles files}
+      chmod -R u+w .
+
+      ${fmt.command} ${nixlib.escapeShellArgs fmt.options} ${nixlib.escapeShellArg target}
+
+      if ! diff -u ${pkgs.writeText "expected.go" expect} ${nixlib.escapeShellArg target}; then
+        echo "FIXTURE FAIL: gofumpt ${label}: ${target} differs from the expected output" >&2
+        exit 1
+      fi
+
+      touch $out
+    '';
+
+  octalSource = "package p\n\nvar x = 0755\n";
+  octalModern = "package p\n\nvar x = 0o755\n";
+  importsSource = "package p\n\nimport (\n\t\"fmt\"\n\t\"foo/bar\"\n)\n";
+  importsSplit = "package p\n\nimport (\n\t\"fmt\"\n\n\t\"foo/bar\"\n)\n";
+
+  gofumptFixtures = [
+    (mkGofumptFixture {
+      label = "go-nix-lang-new";
+      files = {
+        "go.nix" = goNixManifest {
+          module = "example.com/p";
+          go = "1.26";
+          requireGo = "1.12";
+        };
+        "p.go" = octalSource;
+      };
+      target = "p.go";
+      expect = octalModern;
+    })
+    (mkGofumptFixture {
+      label = "go-nix-lang-old";
+      files = {
+        "go.nix" = goNixManifest {
+          module = "example.com/p";
+          go = "1.12";
+        };
+        "p.go" = octalSource;
+      };
+      target = "p.go";
+      expect = octalSource;
+    })
+    (mkGofumptFixture {
+      label = "go-mod-lang-new";
+      files = {
+        "go.mod" = "module example.com/p\n\ngo 1.26\n";
+        "p.go" = octalSource;
+      };
+      target = "p.go";
+      expect = octalModern;
+    })
+    (mkGofumptFixture {
+      label = "go-mod-lang-old";
+      files = {
+        "go.mod" = "module example.com/p\n\ngo 1.12\n";
+        "p.go" = octalSource;
+      };
+      target = "p.go";
+      expect = octalSource;
+    })
+    (mkGofumptFixture {
+      label = "go-nix-modpath";
+      files = {
+        "go.nix" = goNixManifest {
+          module = "foo";
+          go = "1.26";
+        };
+        "sub/p.go" = importsSource;
+      };
+      target = "sub/p.go";
+      expect = importsSplit;
+    })
+    (mkGofumptFixture {
+      label = "go-mod-modpath";
+      files = {
+        "go.mod" = "module foo\n\ngo 1.26\n";
+        "sub/p.go" = importsSource;
+      };
+      target = "sub/p.go";
+      expect = importsSplit;
+    })
+    (mkGofumptFixture {
+      label = "no-manifest-modpath";
+      files = {
+        "sub/p.go" = importsSource;
+      };
+      target = "sub/p.go";
+      expect = importsSource;
+    })
+    (mkGofumptFixture {
+      label = "go-mod-over-go-nix-modpath";
+      files = {
+        # go.mod names `foo`; a go.nix modpath leaking through would make
+        # foo/bar look like the standard library and leave the group unsplit.
+        "go.mod" = "module foo\n\ngo 1.26\n";
+        "go.nix" = goNixManifest {
+          module = "example.com/other";
+          go = "1.26";
+        };
+        "sub/p.go" = importsSource;
+      };
+      target = "sub/p.go";
+      expect = importsSplit;
+    })
+  ];
+
   allFixtures =
     fixtures
+    ++ goNixLinterFixtures
+    ++ gofumptFixtures
     ++ agentsMdWalkFixtures
     ++ gitRemotesFixtures
     ++ deadnixFixtures
