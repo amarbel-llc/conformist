@@ -8,7 +8,16 @@ import (
 	"strings"
 )
 
-const TreeRootCmd = "git rev-parse --show-toplevel"
+// Binary is the git executable conformist runs. It defaults to `git` looked up
+// on PATH, and conformist's Nix package burns in an absolute store path with
+// `-X code.linenisgreat.com/conformist/git.Binary=…`, so a Nix-built conformist
+// never depends on the caller's environment providing git. Without it the
+// `auto` walker, finding no git, silently walks the plain filesystem instead
+// and lints untracked files. A plain `go build` keeps the PATH lookup.
+var Binary = "git"
+
+// TreeRootCmd is the command that resolves a git worktree's root.
+func TreeRootCmd() string { return Binary + " rev-parse --show-toplevel" }
 
 // OriginRepoName returns the repository name parsed from the `origin` remote
 // URL of the git repo at dir — the last path segment with any trailing `.git`
@@ -21,7 +30,7 @@ const TreeRootCmd = "git rev-parse --show-toplevel"
 // run git at all (e.g. git not on PATH).
 func OriginRepoName(dir string) (string, error) {
 	cmd := exec.CommandContext(
-		context.Background(), "git", "-C", dir, "config", "--get", "remote.origin.url",
+		context.Background(), Binary, "-C", dir, "config", "--get", "remote.origin.url",
 	)
 
 	out, err := cmd.Output()
@@ -60,7 +69,7 @@ func repoNameFromRemoteURL(raw string) string {
 
 func IsInsideWorktree(path string) (bool, error) {
 	// check if the root is a git repository
-	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "--is-inside-work-tree")
+	cmd := exec.CommandContext(context.Background(), Binary, "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = path
 
 	out, err := cmd.Output()

@@ -37,7 +37,7 @@ func StatusEntriesWithUntracked(ctx context.Context, treeRoot string) ([]StatusE
 // statusEntries runs `git status --porcelain -z` with the given
 // --untracked-files mode and parses the toplevel-relative entries.
 func statusEntries(ctx context.Context, treeRoot, untracked string) ([]StatusEntry, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "status", "--porcelain", "-z", "--untracked-files="+untracked)
+	cmd := exec.CommandContext(ctx, Binary, "-C", treeRoot, "status", "--porcelain", "-z", "--untracked-files="+untracked)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -96,7 +96,7 @@ func AddPaths(ctx context.Context, treeRoot string, paths []string) error {
 		args = append(args, ":(top)"+p)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, Binary, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add failed: %w: %s", err, out)
 	}
@@ -136,7 +136,7 @@ func ConflictMarkerPaths(ctx context.Context, treeRoot string, paths []string) (
 	// problem to stdout. That non-zero exit is the signal we want, not a
 	// failure — so an ExitError is expected and its captured stdout is parsed;
 	// only a non-ExitError (git missing, not a repo) is a real error.
-	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	out, err := exec.CommandContext(ctx, Binary, args...).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
@@ -230,12 +230,12 @@ func commitWithPaths(
 		args = append(args, ":(top)"+p)
 	}
 
-	commitCmd := exec.CommandContext(ctx, "git", args...)
+	commitCmd := exec.CommandContext(ctx, Binary, args...)
 	if out, err := commitCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git commit failed: %w: %s", err, out)
 	}
 
-	revCmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "rev-parse", "HEAD")
+	revCmd := exec.CommandContext(ctx, Binary, "-C", treeRoot, "rev-parse", "HEAD")
 
 	out, err := revCmd.Output()
 	if err != nil {
@@ -250,7 +250,7 @@ func commitWithPaths(
 // `git rev-parse --verify --quiet HEAD`: exit 0 = HEAD resolves, a non-zero
 // exit = no commit yet.
 func HeadExists(ctx context.Context, treeRoot string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "rev-parse", "--verify", "--quiet", "HEAD")
+	cmd := exec.CommandContext(ctx, Binary, "-C", treeRoot, "rev-parse", "--verify", "--quiet", "HEAD")
 
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
@@ -272,7 +272,7 @@ func HeadExists(ctx context.Context, treeRoot string) (bool, error) {
 // since the last fetch may not show up.
 func HeadRemoteRefs(ctx context.Context, treeRoot string) ([]string, error) {
 	cmd := exec.CommandContext(
-		ctx, "git", "-C", treeRoot, "branch", "-r", "--contains", "HEAD", "--format=%(refname)",
+		ctx, Binary, "-C", treeRoot, "branch", "-r", "--contains", "HEAD", "--format=%(refname)",
 	)
 
 	out, err := cmd.Output()

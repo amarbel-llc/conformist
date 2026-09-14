@@ -252,26 +252,27 @@ explore-show-config:
 # neutralized MUST flag a real recipe, proving the fetched `just` was found on
 # PATH, dumped this justfile, and the rule ran over it.
 #
-# Both runs use a PATH holding ONLY `git`: jq is unreachable, so the rule's jq
-# must be conformist's embedded one, as in a bare pre-merge hook or on a jq-less
-# host. `git` stays because without it conformist's auto walker falls back to a
-# filesystem walk, which lints untracked files and confounds the result.
+# Every run uses the Nix-built conformist on an EMPTY PATH: no jq and no git are
+# reachable, so the rule's jq must be conformist's embedded one and the tree
+# walk must use the git burned into the package, as in a bare pre-merge hook.
+# A gate that walked the plain filesystem instead (the old no-git fallback)
+# would lint untracked files and fail, so a pass here proves the burned-in git.
 #
 # self-lint conformist through its own profile
 [group("explore")]
-explore-profile-check: build-go
+explore-profile-check:
     #!/usr/bin/env bash
     set -euo pipefail
     d=$(mktemp -d)
     trap 'rm -rf "$d"' EXIT
     mkdir "$d/bare-path"
-    ln -s "$(command -v git)" "$d/bare-path/git"
-    if PATH="$d/bare-path" command -v jq >/dev/null; then
-      echo "CONTROL BROKEN: jq is reachable on the bare PATH" >&2; exit 1
+    if PATH="$d/bare-path" command -v jq >/dev/null || PATH="$d/bare-path" command -v git >/dev/null; then
+      echo "CONTROL BROKEN: jq or git is reachable on the bare PATH" >&2; exit 1
     fi
+    bin="$(nix build --no-link --print-out-paths '.#conformist-bga')/bin/conformist"
     cfg=$(nix build --no-link --print-out-paths '.#conformist-config')
     check() {
-      PATH="$d/bare-path" build/conformist check --config-file "$cfg" --tree-root . --no-cache --profile "$@"
+      PATH="$d/bare-path" "$bin" check --config-file "$cfg" --tree-root . --no-cache --profile "$@"
     }
 
     echo "--- gate: conformist self-lints through its own profile ---"

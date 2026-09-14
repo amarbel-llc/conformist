@@ -423,7 +423,8 @@ func defaultRepairRunner(dir, command string) (bool, error) {
 // not a git worktree) is surfaced so the caller fails loudly rather than
 // silently reporting "no change".
 func gitStatusPorcelain(dir string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", dir,
+	//nolint:gosec // git.Binary is fixed at build time, not input
+	cmd := exec.CommandContext(context.Background(), git.Binary, "-C", dir,
 		"status", "--porcelain", "--untracked-files=all")
 
 	out, err := cmd.Output()

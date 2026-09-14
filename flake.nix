@@ -147,6 +147,12 @@
           # GOTOOLCHAIN = "local" pins to pkgs.go rather than fetching a toolchain.
           go = pkgs.go;
           GOTOOLCHAIN = "local";
+          # Burn in git by store path so the tree walker, tree-root detection and
+          # the --commit/--staged lanes never depend on the caller's PATH having
+          # git (RFC 0005 profile route: a bare pre-merge hook, a jq/git-less
+          # host). Puts git in conformist's runtime closure. The opt-in godyn
+          # build does not get this and keeps looking git up on PATH.
+          ldflags = [ "-X code.linenisgreat.com/conformist/git.Binary=${pkgs.git}/bin/git" ];
           # Integration tests need formatter executables on PATH; run them via
           # `just test-go` / bats outside the sandbox, not in the package build.
           doCheck = false;

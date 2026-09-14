@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +25,10 @@ var (
 	ErrUnsupportedScheme = errors.New("unsupported artifact url scheme (POC v1 fetches file:// and https://)")
 	ErrArtifactTooLarge  = errors.New("artifact exceeds the size limit")
 	ErrCachedCorrupt     = errors.New("cached artifact failed verification")
+	// ErrArtifactNeedsLogin marks a url that sent an anonymous fetch to log in.
+	ErrArtifactNeedsLogin = errors.New(
+		"artifact url is not publicly downloadable (redirected to log in); pin a url that serves it anonymously",
+	)
 )
 
 // maxArtifactBytes bounds a single fetched artifact. A static `just` is a few
@@ -297,10 +302,12 @@ func (r Resolver) fetch(ctx context.Context, raw string) ([]byte, error) {
 }
 
 func (r Resolver) fetchHTTPS(ctx context.Context, rawURL string) ([]byte, error) {
-	client := r.Client
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Minute}
+	client := http.Client{Timeout: 5 * time.Minute}
+	if r.Client != nil {
+		client = *r.Client
 	}
+
+	client.CheckRedirect = refuseLoginRedirects
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -327,6 +334,38 @@ func (r Resolver) fetchHTTPS(ctx context.Context, rawURL string) ([]byte, error)
 	}
 
 	return content, nil
+}
+
+// refuseLoginRedirects stops an artifact fetch that is being sent to log in.
+// A forge that hides release downloads behind authentication answers an
+// anonymous GET with a redirect to its login page, which may hop on to a
+// localhost authorize endpoint. Following that fails anyway, but as a
+// connection error to localhost that reads like a proxy problem. Refusing the
+// hop names the actual cause. A downgrade to plain http is refused too.
+func refuseLoginRedirects(req *http.Request, via []*http.Request) error {
+	const maxRedirects = 10
+
+	switch host := req.URL.Hostname(); {
+	case len(via) >= maxRedirects:
+		return fmt.Errorf("%w: stopped after %d redirects", ErrFetch, maxRedirects)
+	case req.URL.Scheme != "https":
+		return fmt.Errorf("%w: %s redirected to non-https %s", ErrArtifactNeedsLogin, via[0].URL, req.URL)
+	case (host == "localhost" || isLoopback(host)) && req.URL.Host != via[0].URL.Host:
+		// A hop onto a different loopback endpoint (a local authorize
+		// callback). A server that itself lives on loopback may still redirect
+		// within its own host:port.
+		return fmt.Errorf("%w: %s redirected to %s", ErrArtifactNeedsLogin, via[0].URL, req.URL)
+	case strings.Contains(req.URL.Path, "/login") || strings.HasPrefix(req.URL.Path, "/auth/"):
+		return fmt.Errorf("%w: %s redirected to %s", ErrArtifactNeedsLogin, via[0].URL, req.URL)
+	}
+
+	return nil
+}
+
+func isLoopback(host string) bool {
+	ip := net.ParseIP(host)
+
+	return ip != nil && ip.IsLoopback()
 }
 
 // writeFileAtomic writes content beside path and renames it into place, so a

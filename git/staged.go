@@ -14,7 +14,7 @@ import (
 // the working-tree file, which carries additional unstaged edits that must be
 // preserved.
 func StagedBlob(ctx context.Context, treeRoot, path string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "cat-file", "blob", ":"+path)
+	cmd := exec.CommandContext(ctx, Binary, "-C", treeRoot, "cat-file", "blob", ":"+path)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -29,7 +29,7 @@ func StagedBlob(ctx context.Context, treeRoot, path string) ([]byte, error) {
 // The mode is preserved when restaging the formatted blob so the exec bit
 // survives (#40).
 func StagedFileMode(ctx context.Context, treeRoot, path string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "ls-files", "--stage", "-z", "--", path)
+	cmd := exec.CommandContext(ctx, Binary, "-C", treeRoot, "ls-files", "--stage", "-z", "--", path)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -51,7 +51,7 @@ func StagedFileMode(ctx context.Context, treeRoot, path string) (string, error) 
 // returns the resulting object id. Used to materialize a formatted staged blob
 // (#40).
 func HashObject(ctx context.Context, treeRoot, path string, content []byte) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", treeRoot, "hash-object", "-w", "--path", path, "--stdin")
+	cmd := exec.CommandContext(ctx, Binary, "-C", treeRoot, "hash-object", "-w", "--path", path, "--stdin")
 	cmd.Stdin = bytes.NewReader(content)
 
 	out, err := cmd.Output()
@@ -69,7 +69,7 @@ func HashObject(ctx context.Context, treeRoot, path string, content []byte) (str
 // tree's unstaged hunks alone (#40).
 func UpdateIndexCacheinfo(ctx context.Context, treeRoot, mode, oid, path string) error {
 	cmd := exec.CommandContext(
-		ctx, "git", "-C", treeRoot, "update-index", "--cacheinfo", mode+","+oid+","+path,
+		ctx, Binary, "-C", treeRoot, "update-index", "--cacheinfo", mode+","+oid+","+path,
 	)
 
 	if out, err := cmd.CombinedOutput(); err != nil {

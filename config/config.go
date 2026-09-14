@@ -493,10 +493,10 @@ func determineTreeRoot(v *viper.Viper, cfg *Config, logger *log.Logger) error {
 
 		// attempt to resolve with git
 		if cfg.Walk == walk.Auto.String() || cfg.Walk == walk.Git.String() {
-			logger.Infof("attempting to resolve tree root using git: %s", git.TreeRootCmd)
+			logger.Infof("attempting to resolve tree root using git: %s", git.TreeRootCmd())
 
 			// attempt to resolve the tree root with git
-			cfg.TreeRoot, err = execTreeRootCmd(git.TreeRootCmd, cfg.WorkingDirectory)
+			cfg.TreeRoot, err = execTreeRootCmd(git.TreeRootCmd(), cfg.WorkingDirectory)
 			if err != nil && cfg.Walk == walk.Git.String() {
 				return fmt.Errorf("failed to resolve tree root with git: %w", err)
 			}

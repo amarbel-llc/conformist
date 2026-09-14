@@ -157,9 +157,9 @@ func NewGitReader(
 	r, w := io.Pipe()
 
 	// create a command which will execute from the specified sub path within root
-	cmd := exec.CommandContext(
+	cmd := exec.CommandContext( //nolint:gosec // git.Binary is fixed at build time, not input
 		context.Background(),
-		"git", "ls-files", "--cached", "--others", "--exclude-standard", "--stage",
+		git.Binary, "ls-files", "--cached", "--others", "--exclude-standard", "--stage",
 	)
 	cmd.Dir = filepath.Join(root, path)
 	cmd.Stdout = w
