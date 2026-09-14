@@ -215,7 +215,21 @@ let
         git add sub/CLAUDE.md
       '';
       expectFail = true;
-      expectToken = "nested sub/CLAUDE.md should be migrated";
+      expectToken = "nested sub/CLAUDE.md should be migrated to AGENTS.md";
+    })
+
+    # …and one beside an existing AGENTS.md is a finding repair will NOT fix
+    # (merging two orientation docs is a human call), so the check must say so.
+    (mkAgentsMdWalkFixture {
+      label = "tracked-nested-both-exist-fail";
+      setup = ''
+        mkdir -p sub
+        printf 'nested claude\n' > sub/CLAUDE.md
+        printf 'nested agents\n' > sub/AGENTS.md
+        git add sub/CLAUDE.md sub/AGENTS.md
+      '';
+      expectFail = true;
+      expectToken = "nested sub/CLAUDE.md and sub/AGENTS.md both exist";
     })
 
     # conformist#111: a nested directory that is ALREADY migrated — AGENTS.md
@@ -299,6 +313,177 @@ let
         mkdir -p rcm/claude
         printf 'payload\n' > rcm/claude/CLAUDE.md
         git add rcm/claude/CLAUDE.md
+      '';
+    })
+  ]
+  ++ agentsMdRepairFixtures;
+
+  # ---- agents-md repair: nested CLAUDE.md migration ------------------------
+  #
+  # Runs the REPAIR command in a throwaway repo, asserts its exit status and the
+  # resulting tree, then runs the CHECK and asserts the verdict a human would
+  # see next. A repair fixture that only checked the repair's exit code would
+  # pass for a repair that did nothing, so every case asserts the files too.
+  #
+  # label            : fixture label (derivation suffix)
+  # enableModule     : extra options merged into `linters.agents-md`
+  # setup            : shell snippet run after `git init -q`
+  # expectRepairFail : true => the repair MUST exit non-zero (a conflict)
+  # verify           : shell snippet asserting the post-repair tree; exit 1 on
+  #                    a mismatch
+  # expectCheckFail  : true => the check run after repair MUST still fail
+  mkAgentsMdRepairFixture =
+    {
+      label,
+      enableModule ? { },
+      setup,
+      expectRepairFail ? false,
+      verify,
+      expectCheckFail ? false,
+    }:
+    let
+      mod = lib.evalModule pkgs {
+        enableDefaultExcludes = false;
+        linters.agents-md = {
+          enable = true;
+        }
+        // enableModule;
+      };
+      linter = mod.config.settings.linter.agents-md;
+    in
+    pkgs.runCommandLocal "linter-fixture-agents-md-repair-${label}"
+      {
+        nativeBuildInputs = [ pkgs.git ];
+      }
+      ''
+        export HOME="$PWD/home"
+        mkdir -p "$HOME"
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+        mkdir fixture && cd fixture
+        git init -q
+
+        ${setup}
+
+        # Logs live OUTSIDE the repo, or they would show up as untracked files
+        # in the verify step's `git status`.
+        if ${linter."repair-command"} >../repair.log 2>&1; then rc=0; else rc=$?; fi
+        cat ../repair.log
+        ${
+          if expectRepairFail then
+            ''[ "$rc" -ne 0 ] || { echo "FIXTURE FAIL: expected agents-md repair to refuse ${label}" >&2; exit 1; }''
+          else
+            ''[ "$rc" -eq 0 ] || { echo "FIXTURE FAIL: agents-md repair exited $rc for ${label}" >&2; exit 1; }''
+        }
+
+        ${verify}
+
+        if ${linter.command} >../check.log 2>&1; then rc=0; else rc=$?; fi
+        cat ../check.log
+        ${
+          if expectCheckFail then
+            ''[ "$rc" -ne 0 ] || { echo "FIXTURE FAIL: expected check to still fail after repair of ${label}" >&2; exit 1; }''
+          else
+            ''[ "$rc" -eq 0 ] || { echo "FIXTURE FAIL: check exited $rc after repair of ${label}" >&2; exit 1; }''
+        }
+
+        touch $out
+      '';
+
+  agentsMdRepairFixtures = [
+    # The operator's case: a tracked nested CLAUDE.md with no sibling AGENTS.md
+    # is renamed with history (`git mv`, so the index records a rename), leaves
+    # a back-compat symlink, and the check then passes. The root is migrated in
+    # the same run.
+    (mkAgentsMdRepairFixture {
+      label = "nested-and-root-migrated";
+      setup = ''
+        printf 'root\n' > CLAUDE.md
+        mkdir -p sites/site
+        printf 'nested\n' > sites/site/CLAUDE.md
+        git add CLAUDE.md sites/site/CLAUDE.md
+        git -c user.email=f@x -c user.name=f commit -qm init
+      '';
+      verify = ''
+        for d in . sites/site; do
+          [ "$(cat "$d/AGENTS.md")" = "$([ "$d" = . ] && echo root || echo nested)" ] \
+            || { echo "FIXTURE FAIL: $d/AGENTS.md does not hold the original content" >&2; exit 1; }
+          [ -L "$d/CLAUDE.md" ] && [ "$(readlink "$d/CLAUDE.md")" = AGENTS.md ] \
+            || { echo "FIXTURE FAIL: $d/CLAUDE.md is not a symlink to AGENTS.md" >&2; exit 1; }
+        done
+        # Staged, and staged as the ORIGINAL blob: that identical content is what
+        # lets `git log --follow` connect AGENTS.md to CLAUDE.md's history.
+        [ "$(git rev-parse :sites/site/AGENTS.md)" = "$(git rev-parse HEAD:sites/site/CLAUDE.md)" ] \
+          || { echo "FIXTURE FAIL: nested AGENTS.md is not staged as the original CLAUDE.md blob" >&2; exit 1; }
+      '';
+    })
+
+    # A nested CLAUDE.md beside an existing AGENTS.md is a conflict: repair
+    # refuses, leaves BOTH files untouched, and the check keeps reporting it.
+    (mkAgentsMdRepairFixture {
+      label = "nested-both-exist-refused";
+      setup = ''
+        mkdir -p sub
+        printf 'nested claude\n' > sub/CLAUDE.md
+        printf 'nested agents\n' > sub/AGENTS.md
+        git add sub/CLAUDE.md sub/AGENTS.md
+      '';
+      expectRepairFail = true;
+      verify = ''
+        [ ! -L sub/CLAUDE.md ] && [ "$(cat sub/CLAUDE.md)" = 'nested claude' ] \
+          && [ "$(cat sub/AGENTS.md)" = 'nested agents' ] \
+          || { echo "FIXTURE FAIL: a conflicting nested pair was modified" >&2; exit 1; }
+      '';
+      expectCheckFail = true;
+    })
+
+    # exclude-paths opts a payload out of repair as well as the check: an rcm
+    # source deployed as ~/.claude/CLAUDE.md must keep its name.
+    (mkAgentsMdRepairFixture {
+      label = "nested-excluded-untouched";
+      enableModule = {
+        exclude-paths = [ "rcm/claude/CLAUDE.md" ];
+      };
+      setup = ''
+        mkdir -p rcm/claude
+        printf 'payload\n' > rcm/claude/CLAUDE.md
+        git add rcm/claude/CLAUDE.md
+      '';
+      verify = ''
+        [ ! -L rcm/claude/CLAUDE.md ] && [ ! -e rcm/claude/AGENTS.md ] \
+          || { echo "FIXTURE FAIL: an excluded CLAUDE.md was renamed" >&2; exit 1; }
+      '';
+    })
+
+    # A nested CLAUDE.md in a gitignored subtree (a vendored child checkout) is
+    # outside the walk, so repair must not rename it.
+    (mkAgentsMdRepairFixture {
+      label = "nested-gitignored-untouched";
+      setup = ''
+        mkdir -p vendor/child
+        printf 'vendor/\n' > .gitignore
+        printf 'child\n' > vendor/child/CLAUDE.md
+        git add .gitignore
+      '';
+      verify = ''
+        [ ! -L vendor/child/CLAUDE.md ] && [ ! -e vendor/child/AGENTS.md ] \
+          || { echo "FIXTURE FAIL: a gitignored CLAUDE.md was renamed" >&2; exit 1; }
+      '';
+    })
+
+    # Idempotence: running repair on an already-migrated nested directory
+    # changes nothing and succeeds.
+    (mkAgentsMdRepairFixture {
+      label = "nested-already-migrated-noop";
+      setup = ''
+        mkdir -p sub
+        printf 'nested\n' > sub/AGENTS.md
+        ln -s AGENTS.md sub/CLAUDE.md
+        git add sub/AGENTS.md sub/CLAUDE.md
+        git -c user.email=f@x -c user.name=f commit -qm init
+      '';
+      verify = ''
+        [ -z "$(git status --porcelain)" ] \
+          || { echo "FIXTURE FAIL: repair modified an already-migrated tree" >&2; git status --porcelain >&2; exit 1; }
       '';
     })
   ];
