@@ -1,7 +1,8 @@
 ---
 # conformist profile (POC v1): the justfile convention linters, delivered as
-# cache-pulled artifacts rather than through a Nix module. Hand-written; nothing
-# consumes this yet. See docs/rfcs/0005.
+# cache-pulled artifacts rather than through a Nix module. Hand-written, and
+# copied verbatim by each consuming repo (circus, just-us, igloo,
+# cutting-garden). See docs/rfcs/0005.
 ! toml-conformist_profile-v1
 ---
 
