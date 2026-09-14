@@ -1,6 +1,11 @@
 schema = 3
 
 [mod]
+  [mod.'code.linenisgreat.com/hyphence/go']
+    version = 'v0.4.0'
+    hash = 'sha256-HMeJOBTmoABNHhQho2KUazvLAhDvdWCba8ZvMtKiEv8='
+    goVersion = '1.26'
+
   [mod.'code.linenisgreat.com/purse-first/libs/dewey']
     version = 'v0.5.0'
     hash = 'sha256-WaAb5xVdkek2jtlcD8y+99VuZyAoCVzezyIrs5X9Mbg='
@@ -319,6 +324,11 @@ schema = 3
     version = 'v0.42.0'
     hash = 'sha256-bviKbNmkN4Yf2dpgwmP6yNcZEakCcv1R+YyAxCdJGkY='
     goVersion = '1.26.0'
+
+  [mod.'golang.org/x/xerrors']
+    version = 'v0.0.0-20240903120638-7835f813f4da'
+    hash = 'sha256-bE7CcrnAvryNvM26ieJGXqbAtuLwHaGcmtVMsVnksqo='
+    goVersion = '1.18'
 
   [mod.'gopkg.in/check.v1']
     version = 'v1.0.0-20201130134442-10cb98267c6c'

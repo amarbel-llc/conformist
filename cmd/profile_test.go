@@ -217,6 +217,22 @@ func TestCheckProfile(tt *testing.T) {
 		conformist(t, withArgs("check", "--profile", p, "--profile-only"), withNoError(t))
 	})
 
+	// Pinning a key turns signature verification on for a local profile: an
+	// unsigned file must then be refused, not run.
+	tt.Run("--profile-key refuses an unsigned local profile", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+		// papi's §15 vector TEST key: well-formed, so the refusal below is for the
+		// missing signature and not a malformed pin.
+		key := "piggy-piv_auth-v1@ssh_ecdsa_nistp256_pub-q0xr4jwmxnwsf9hkp923ay99rg0c3gaxaepj0ua0f6sds3pxdtc0uxh26y4"
+
+		conformist(t, withArgs("check", "--profile", p, "--profile-key", key),
+			withError(func(as *require.Assertions, err error) {
+				as.ErrorIs(err, cmd.ErrCheckOperational)
+				as.ErrorIs(err, profile.ErrUnsigned)
+			}))
+	})
+
 	tt.Run("--profile-only without --profile is an operational error", func(tt *testing.T) {
 		t := &test_ui.T{T: tt}
 		writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})

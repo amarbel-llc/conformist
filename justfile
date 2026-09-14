@@ -66,7 +66,7 @@ build: build-gomod2nix build-go build-nix
 #
 # regenerate gomod2nix.toml from go.mod/go.sum
 build-gomod2nix:
-    nix develop --command gomod2nix
+    nix develop .#gomod --command gomod2nix
 
 # OPT-IN: regenerate godyn-graph.json, the Go source dependency graph that drives
 # the opt-in native (godyn) build backend (buildGoAuto, igloo#29;
@@ -1458,7 +1458,7 @@ codemod-fmt-conformist:
 
 # `go mod tidy`, then regenerate gomod2nix.toml (the && dependency)
 update-go: && build-gomod2nix
-    nix develop --command go mod tidy
+    nix develop .#gomod --command go mod tidy
 
 # set CONFORMIST_VERSION in version.env (the single source of truth)
 [group("maintenance")]

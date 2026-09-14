@@ -77,9 +77,18 @@ func newCheckCmd(v *viper.Viper, statz *stats.Stats) *cobra.Command {
 	// Local, not persistent, so it never reaches viper's config decoding.
 	cmd.Flags().String(
 		"profile", "",
-		"EXPERIMENTAL (RFC 0005 POC v1): resolve this conformist profile before checking — fetch and "+
-			"verify its pinned artifacts, put the executable ones on PATH, and add its linter stanzas "+
-			"(conformist.toml wins on a name clash). Single-layer and unsigned; not for production use.",
+		"EXPERIMENTAL (RFC 0005): resolve this conformist profile — a local path, or an https URL "+
+			"verified with --profile-key — before checking: fetch and verify its pinned artifacts, put "+
+			"the executable ones on PATH, and add its linter stanzas (conformist.toml wins on a name "+
+			"clash). Single-layer, no delegation; not for production use.",
+	)
+	cmd.Flags().StringArray(
+		"profile-key", nil,
+		"EXPERIMENTAL (RFC 0005): pin a slot-9A signing key the profile must be signed with, as a "+
+			"piggy-piv_auth-v1@ssh_ecdsa_nistp256_pub markl-id; repeatable. Required when --profile is an "+
+			"https URL (e.g. https://api.linenisgreat.com/papi/conformist-profile), where the key must also "+
+			"be published on that domain's /papi/piggy-ids. With a local --profile, the file must then be "+
+			"signed by a pinned key.",
 	)
 	cmd.Flags().Bool(
 		"profile-only", false,

@@ -16,7 +16,50 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var errProfileOnlyWithoutProfile = errors.New("--profile-only requires --profile")
+var (
+	errProfileOnlyWithoutProfile = errors.New("--profile-only requires --profile")
+	errProfileKeyWithoutProfile  = errors.New("--profile-key requires --profile")
+)
+
+// readProfile returns the profile's bytes, verified when it must be. An https
+// profile is fetched and must be signed by a key that is both pinned and
+// published on the serving domain (RFC 0005 §3.2). A local file is read as-is,
+// and must be signed by a pinned key only when keys are pinned. path is made
+// absolute for a local file.
+func readProfile(
+	ctx context.Context, resolver profile.Resolver, path *string, workingDir string, pinned []string,
+) ([]byte, error) {
+	if strings.HasPrefix(*path, "https://") {
+		data, keyID, err := resolver.FetchSignedProfile(ctx, *path, pinned)
+		if err != nil {
+			return nil, fmt.Errorf("fetching signed profile: %w", err)
+		}
+
+		log.Infof("profile %s: signature verified with %s", *path, keyID)
+
+		return data, nil
+	}
+
+	if !filepath.IsAbs(*path) {
+		*path = filepath.Join(workingDir, *path)
+	}
+
+	data, err := os.ReadFile(*path)
+	if err != nil {
+		return nil, fmt.Errorf("reading profile: %w", err)
+	}
+
+	if len(pinned) > 0 {
+		keyID, err := profile.VerifySignature(data, pinned)
+		if err != nil {
+			return nil, fmt.Errorf("verifying profile %s: %w", *path, err)
+		}
+
+		log.Infof("profile %s: signature verified with %s", *path, keyID)
+	}
+
+	return data, nil
+}
 
 // profileSource records what a `check --profile` run took from the profile, so
 // findings can be attributed to it rather than to the config.
@@ -51,29 +94,23 @@ func applyProfile(cmd *cobra.Command, cfg *config.Config, workingDir string) (*p
 
 	only := profileOnlyRequested(cmd)
 
+	pinned, err := cmd.Flags().GetStringArray("profile-key")
+	if err != nil {
+		return nil, fmt.Errorf("reading --profile-key: %w", err)
+	}
+
 	if path == "" {
-		if only {
+		switch {
+		case only:
 			return nil, errProfileOnlyWithoutProfile
+		case len(pinned) > 0:
+			return nil, errProfileKeyWithoutProfile
 		}
 
 		return nil, nil //nolint:nilnil // no --profile: nothing to apply, and not an error
 	}
 
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(workingDir, path)
-	}
-
-	log.Warn("--profile is EXPERIMENTAL (RFC 0005 POC v1): a single local layer, no signature verification")
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading profile: %w", err)
-	}
-
-	doc, err := profile.Parse(path, data)
-	if err != nil {
-		return nil, fmt.Errorf("parsing profile: %w", err)
-	}
+	log.Warn("--profile is EXPERIMENTAL (RFC 0005): a single layer, no delegation")
 
 	cacheDir, err := profile.DefaultCacheDir()
 	if err != nil {
@@ -85,7 +122,19 @@ func applyProfile(cmd *cobra.Command, cfg *config.Config, workingDir string) (*p
 		ctx = context.Background()
 	}
 
-	resolved, err := profile.Resolver{CacheDir: cacheDir}.Resolve(ctx, doc)
+	resolver := profile.Resolver{CacheDir: cacheDir}
+
+	data, err := readProfile(ctx, resolver, &path, workingDir, pinned)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := profile.Parse(path, data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing profile: %w", err)
+	}
+
+	resolved, err := resolver.Resolve(ctx, doc)
 	if err != nil {
 		return nil, fmt.Errorf("resolving profile: %w", err)
 	}

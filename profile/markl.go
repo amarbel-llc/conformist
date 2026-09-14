@@ -87,6 +87,23 @@ func ParseMarklID(s string) (MarklID, error) {
 	return MarklID{Purpose: purpose, Format: format, Digest: digest}, nil
 }
 
+// splitMarklID splits any purpose-full markl-id into its purpose, format and
+// decoded payload, without judging whether the purpose or format is one a
+// caller accepts.
+func splitMarklID(s string) (string, string, []byte, error) {
+	purpose, encoded, ok := strings.Cut(s, "@")
+	if !ok || purpose == "" {
+		return "", "", nil, fmt.Errorf("%w: %q", ErrMarklPurposeMissing, s)
+	}
+
+	format, payload, err := blech32Decode(encoded)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("markl-id %q: %w", s, err)
+	}
+
+	return purpose, format, payload, nil
+}
+
 // String renders the purpose-full spelling.
 func (m MarklID) String() string {
 	return m.Purpose + "@" + blech32Encode(m.Format, m.Digest)

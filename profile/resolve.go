@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -349,6 +350,63 @@ func (r Resolver) fetchHTTPS(ctx context.Context, rawURL string) ([]byte, error)
 	}
 
 	return content, nil
+}
+
+// FetchSignedProfile fetches a profile served over https — canonically at a
+// domain's /papi/conformist-profile (papi RFC-0001 §15.3) — and verifies its
+// signature (RFC 0005 §3.2). The key that verifies must be BOTH pinned by the
+// consumer AND published on the serving domain's /papi/piggy-ids: publication
+// alone would trust whoever controls the host, and a pin alone would keep
+// trusting a key the domain has withdrawn. It returns the verified bytes and
+// the id of the key that verified.
+func (r Resolver) FetchSignedProfile(ctx context.Context, profileURL string, pinned []string) ([]byte, string, error) {
+	if len(pinned) == 0 {
+		return nil, "", ErrNoTrustedKey
+	}
+
+	for _, id := range pinned {
+		if _, err := ParseSigningKey(id); err != nil {
+			return nil, "", err
+		}
+	}
+
+	u, err := url.Parse(profileURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, "", fmt.Errorf("%w: %q (a signed profile is fetched over https)", ErrUnsupportedScheme, profileURL)
+	}
+
+	data, err := r.fetchHTTPS(ctx, profileURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetching profile: %w", err)
+	}
+
+	idsURL := (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/papi/piggy-ids"}).String()
+
+	ids, err := r.fetchHTTPS(ctx, idsURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetching published signing keys: %w", err)
+	}
+
+	published := PublishedSigningKeys(ids)
+
+	var trusted []string
+
+	for _, id := range pinned {
+		if slices.Contains(published, id) {
+			trusted = append(trusted, id)
+		}
+	}
+
+	if len(trusted) == 0 {
+		return nil, "", fmt.Errorf("%w (%s; pinned: %s)", ErrKeyNotPublished, idsURL, strings.Join(pinned, ", "))
+	}
+
+	keyID, err := VerifySignature(data, trusted)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %w", profileURL, err)
+	}
+
+	return data, keyID, nil
 }
 
 // refuseLoginRedirects stops an artifact fetch that is being sent to log in.

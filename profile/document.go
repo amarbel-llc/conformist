@@ -189,61 +189,47 @@ func Parse(path string, data []byte) (*Document, error) {
 	return doc, nil
 }
 
-// parseHyphence reads the metadata section into doc and returns the body.
-// See hyphence(7): a `---` boundary, prefixed metadata lines, a closing `---`,
-// then exactly one blank line before any body.
+// parseHyphence reads the metadata section into doc and returns the body. It
+// parses with the hyphence library, the same one papi's signer uses, so the
+// lines a signature covers are read exactly as they were signed (hyphence(7):
+// a `---` boundary, prefixed metadata lines, a closing `---`, then one blank
+// line before any body).
 func parseHyphence(doc *Document, data []byte) (string, error) {
-	lines := strings.Split(string(data), "\n")
-
-	if lines[0] != "---" {
-		return "", fmt.Errorf("%w: first line must be the `---` boundary", ErrNotHyphence)
+	lines, body, err := readHyphence(data)
+	if err != nil {
+		return "", err
 	}
-
-	closing := slices.Index(lines[1:], "---")
-	if closing < 0 {
-		return "", fmt.Errorf("%w: metadata section has no closing `---` boundary", ErrNotHyphence)
-	}
-
-	closing++
 
 	var (
 		descriptions []string
 		typeLines    int
 	)
 
-	for i, line := range lines[1:closing] {
-		lineNo := i + 2
-
-		if len(line) < 2 || line[1] != ' ' {
-			return "", fmt.Errorf("%w: line %d: expected `<prefix> <content>`", ErrNotHyphence, lineNo)
-		}
-
-		content := line[2:]
-
-		switch line[0] {
+	for _, line := range lines {
+		switch line.Prefix {
 		case '#':
-			descriptions = append(descriptions, content)
-		case '%':
-			// comment: opaque
+			descriptions = append(descriptions, line.Value)
 		case '!':
 			typeLines++
 
-			tag, lock, _ := strings.Cut(content, " ")
+			tag, lock, _ := strings.Cut(line.Value, " ")
 			if tag != TypeTag {
 				return "", fmt.Errorf("%w: found %q, want %q", ErrUnknownType, tag, TypeTag)
 			}
 
 			if lock != "" {
-				return "", fmt.Errorf("line %d: a type-line lock is %w", lineNo, ErrUnsupportedInPOC)
+				return "", fmt.Errorf("a type-line lock is %w", ErrUnsupportedInPOC)
 			}
-		case '-', '<':
-			return "", fmt.Errorf(
-				"line %d: tag/field lines (delegation, RFC 0005 §3.1) are %w", lineNo, ErrUnsupportedInPOC,
-			)
+		case '-':
+			// A signature line is metadata about the document, checked by
+			// VerifySignature; any other `-` line is delegation.
+			if !isSignatureLine(line) {
+				return "", fmt.Errorf("line %q: delegation (RFC 0005 §3.1) is %w", line.Value, ErrUnsupportedInPOC)
+			}
+		case '<':
+			return "", fmt.Errorf("line %q: delegation (RFC 0005 §3.1) is %w", line.Value, ErrUnsupportedInPOC)
 		case '@':
-			return "", fmt.Errorf("line %d: a blob-reference body is %w", lineNo, ErrUnsupportedInPOC)
-		default:
-			return "", fmt.Errorf("%w: line %d: unknown metadata prefix %q", ErrNotHyphence, lineNo, line[0])
+			return "", fmt.Errorf("a blob-reference body is %w", ErrUnsupportedInPOC)
 		}
 	}
 
@@ -253,16 +239,7 @@ func parseHyphence(doc *Document, data []byte) (string, error) {
 
 	doc.Description = strings.Join(descriptions, " ")
 
-	rest := lines[closing+1:]
-	if len(rest) == 0 || (len(rest) == 1 && rest[0] == "") {
-		return "", nil
-	}
-
-	if rest[0] != "" {
-		return "", fmt.Errorf("%w: a blank line must separate the closing `---` from the body", ErrNotHyphence)
-	}
-
-	return strings.Join(rest[1:], "\n"), nil
+	return string(body), nil
 }
 
 func (d *Document) validate() error {

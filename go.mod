@@ -3,6 +3,7 @@ module code.linenisgreat.com/conformist
 go 1.26.1
 
 require (
+	code.linenisgreat.com/hyphence/go v0.4.0
 	code.linenisgreat.com/purse-first/libs/dewey v0.5.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/adrg/xdg v0.5.3
@@ -11,12 +12,14 @@ require (
 	github.com/clarete/langlang/go v0.0.12
 	github.com/gobwas/glob v0.2.3
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
+	github.com/itchyny/gojq v0.12.19
 	github.com/otiai10/copy v1.14.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
+	golang.org/x/crypto v0.57.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
@@ -47,7 +50,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/itchyny/gojq v0.12.19 // indirect
 	github.com/itchyny/timefmt-go v0.1.8 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -69,9 +71,9 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

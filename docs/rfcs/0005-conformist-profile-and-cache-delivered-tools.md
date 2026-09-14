@@ -258,11 +258,26 @@ where immutability matters more than reach.
 
 Requirements:
 
-- The signature and the verifying key MUST both be markl-ids. The
-  `papi-doc-sig-v1` purpose (a slot-9A ECDSA P-256 signature over a PAPI
-  document's canonicalized bytes) and the `piggy-piv_auth-v1` key purpose are
-  the registered pair for a papi-served baseline, and an implementation
-  consuming one SHOULD use them rather than registering a parallel purpose.
+- The signature and the verifying key MUST both be markl-ids. A profile
+  signature uses the conformist-owned purpose `conformist-profile-sig-v1`
+  (format `ecdsa_p256_sig`: a raw 64-byte r‖s slot-9A ECDSA P-256 signature over
+  SHA-256 of the signed input), and the verifying key uses `piggy-piv_auth-v1`
+  (format `ssh_ecdsa_nistp256_pub`, a compressed P-256 point). Purposes are owned
+  by their domain, so conformist registers its own rather than reusing
+  `papi-doc-sig-v1`, which signs a different document shape.
+- The signed input is the one papi RFC-0001 §15.1 defines for any signed
+  hyphence document, body included: drop every `-` line whose value starts with
+  `conformist-profile-sig-v1@`, re-emit the metadata in hyphence canonical form
+  (each line with its leading `%` comments), then the blank separator and the
+  body verbatim. An implementation MUST compute it with the hyphence library or
+  pass papi's §15 conformance vector
+  (`docs/rfcs/vectors/rfc0001-s15-hyphence-sig-v1.json`), so a profile signed by
+  `papi hyphence sign --purpose conformist-profile-sig-v1` verifies byte-for-byte.
+- A papi-served profile is fetched from `GET /papi/conformist-profile`
+  (papi RFC-0001 §15.3), and its verifying keys are the domain's
+  `/papi/piggy-ids` on the same origin.
+- A profile carrying more than one `conformist-profile-sig-v1` line MUST be
+  rejected.
 - The verifying key MUST be **published** by the serving domain, and MUST match
   a key the consuming profile pins. A signature by an unpinned key MUST be
   rejected even if it is otherwise valid — otherwise anyone the domain
@@ -280,9 +295,13 @@ Requirements:
   skipped. The asymmetry is deliberate: papi is describing a person, whereas
   this document decides which binaries get executed.
 
-Multiple pinned keys MUST be supported, so a key rotation can be performed by
-co-signing with the outgoing and incoming keys before the outgoing one is
-withdrawn.
+Multiple pinned keys MUST be supported, so a key can be rotated without breaking
+consumers. Because a profile carries exactly one signature, rotation is not
+co-signing: the domain publishes the incoming key, consumers pin both keys, the
+profile is re-signed with the incoming key, and only then is the outgoing key
+withdrawn from `/papi/piggy-ids` and unpinned. A key that is pinned but no
+longer published MUST be refused, so withdrawal takes effect even for consumers
+that have not yet unpinned it.
 
 ### 4. Linter configuration in the profile
 
@@ -555,7 +574,8 @@ use binary injection via `bats-emo`, never a hardcoded build output path:
 | §3.1, MUST fail on unresolvable delegation | `profile_delegate.bats` | Failure is loud, not a silent drop of baseline rules |
 | §3.2, MUST reject a signature by an unpinned key | `profile_signature.bats` | A validly-signed baseline signed by a published-but-unpinned key is refused |
 | §3.2, MUST reject unsigned and unrecognized-purpose | `profile_signature.bats` | papi's permissive defaults are not inherited |
-| §3.2, MUST accept co-signed rotation | `profile_signature.bats` | Outgoing plus incoming key verifies |
+| §3.2, MUST support rotation across pinned keys | `profile/signature_test.go` | A signature by any one of several pinned keys verifies; a pinned-but-unpublished key is refused |
+| §3.2, signed input matches papi byte-for-byte | `profile/signature_vector_test.go` | papi's §15 conformance vector |
 | §4.3, MUST report each stanza's source | `profile_merge.bats` | Diagnostic output attributes every active stanza |
 
 ## Compatibility

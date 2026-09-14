@@ -51,7 +51,8 @@ not run `just`/`just lint` again right before merging.
   plus the `dewey` custom linter — conformist#10/#22).
 - `just codemod-fmt` — `nix fmt` (write/repair mode on conformist's own tree).
 - `just build-gomod2nix` — regenerate `gomod2nix.toml`; run after changing deps.
-- `just update-go` — `go mod tidy` then regenerate gomod2nix.
+- `just update-go` — `go mod tidy` then regenerate gomod2nix (both lock recipes
+  use the temporary conformist-free `.#gomod` shell).
 - `just explore-show-config` — emit conformist's own generated `conformist.toml`
   from the Nix module without a full check run (debugging the module).
 - `just explore-merge-driver-flake-lock` — end-to-end smoke test of the
@@ -315,7 +316,8 @@ under fail-on-change.
 - `stats/`, `git/`, `jujutsu/` — run statistics and VCS helpers (git runs via
   `git.Binary`, a Nix-burned store path).
 - `profile/` — RFC 0005 POC v1 resolver behind EXPERIMENTAL `check --profile`
-  (rules in its package doc; rule jq is in-process gojq via `rulejq/`).
+  (rules in its package doc; rule jq is in-process gojq via `rulejq/`; https
+  profiles are signature-verified, RFC 0005 §3.2).
   `just explore-profile-check` runs the gate.
 - `test/` — integration harness and fixtures (`test/config`, `test/examples`).
   Fixtures under `test/**` are **deliberately mis-formatted**; they are excluded

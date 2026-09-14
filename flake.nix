@@ -592,6 +592,18 @@
               '';
           };
 
+        # TEMPORARY: a conformist-free shell for the dependency-lock recipes. The
+        # default shell builds conformist (its hook wrappers), so a new Go
+        # dependency not yet in go.sum/gomod2nix.toml breaks that shell and with
+        # it the only recipes that could repair the lock. Drop this once the
+        # godyn migration settles how the lock is regenerated.
+        devShells.gomod = pkgs-master.mkShell {
+          packages = [
+            (pkgs.mkGoEnv { pwd = ./.; })
+            pkgs.go
+          ];
+        };
+
         devShells.default = pkgs-master.mkShell {
           packages = [
             # mkGoEnv puts the gomod2nix-regen `go` wrapper + the gomod2nix CLI
