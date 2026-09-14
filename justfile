@@ -302,7 +302,7 @@ explore-profile-check:
     printf '# strip it\nbuild-release:\n    true\n' >> "$d/orphan/justfile"
     : > "$d/orphan/conformist.toml"
     set +e
-    out=$(PATH="$d/bare-path" build/conformist check --config-file "$d/orphan/conformist.toml" \
+    out=$(PATH="$d/bare-path" "$bin" check --config-file "$d/orphan/conformist.toml" \
       --tree-root "$d/orphan" --walk filesystem --no-cache --profile "$PWD/conformist.profile" 2>&1)
     rc=$?
     set -e

@@ -12,24 +12,32 @@
 # purpose, `conformist-artifact-digest-v1`, in any markl content-digest format
 # (sha256 or blake2b256).
 #
-# Both artifacts come from ONE just-us release (v0.1.1), so the binary and the
-# check for its output format move together: the static (pkgsStatic/musl)
-# `just`, and the recipe-model jq prelude describing what it emits. Pins were
-# computed from the bytes the urls actually serve (`just explore-markl-pin
-# <url>`), not from reported digests. The urls use the public
-# code.linenisgreat.com host: the forge's own hostname puts release downloads
-# behind a login redirect, which an unattended check cannot follow.
+# All artifacts come from ONE just-us release (v0.1.2), so the binaries and the
+# check for their output format move together: the static `just`, one build
+# per system (RFC 0005 §2.3), and the platform-independent recipe-model jq
+# prelude describing what it emits. Pins were computed from the bytes the urls
+# actually serve (`just explore-markl-pin <url>`), not from reported digests.
+#
+# Linux only: macOS cannot be cross-built from Linux, and the only Mac is
+# inactive (RFC 0005 §2.3). A darwin host gets a clear "no build for this
+# system" error rather than a wrong binary.
 # ---------------------------------------------------------------------------
 
 [artifact.just]
 form = "static"
-url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.1/just-static-x86_64-unknown-linux-musl"
-markl = "conformist-artifact-digest-v1@sha256-rn99vgpre2zl3ltkkfa8h5g02a93rp54x3p06pq4yxuswmzsvzjqkru48l"
+
+[artifact.just.system.x86_64-linux]
+url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.2/just-static-x86_64-unknown-linux-musl"
+markl = "conformist-artifact-digest-v1@sha256-c6hhldrmgk8e57kv7a6ptfaf454r053p5udl5g02ue0p2964mqas4q7rq2"
+
+[artifact.just.system.aarch64-linux]
+url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.2/just-static-aarch64-unknown-linux-musl"
+markl = "conformist-artifact-digest-v1@sha256-q9yzyt2gq6wfjye5v959pw89q3zsk85nutkhwjnw4emehx74n2fsff9g0w"
 
 [artifact.recipe-model-jq]
 form = "static"
 executable = false
-url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.1/recipe-model-v1.jq"
+url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.2/recipe-model-v1.jq"
 markl = "conformist-artifact-digest-v1@sha256-a4kk3vqnc76j7m4xhlp49ww7wl2ypyn74pa46jx2fakty5msd3fq0jp2xs"
 
 # NOTE: the rule logic is NOT an artifact here. It is authored alongside this
