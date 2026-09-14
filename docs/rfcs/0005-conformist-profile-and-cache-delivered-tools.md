@@ -118,13 +118,48 @@ verification.
 #### 2.1 Executability, and why `static` is the primary form
 
 An artifact materialized outside `/nix/store` cannot rely on a Nix-built dynamic
-loader or on `runtimeInputs` being present. A `static` artifact therefore MUST be
-a self-contained executable with no dynamic dependencies beyond the host kernel
-ABI, or a non-executable data file (§2.2).
+loader or on `runtimeInputs` being present. A `static` executable therefore MUST
+have no dynamic dependencies beyond what every host of its system provides:
 
-This constraint is verified, not assumed: a `pkgsStatic`/musl build of just-us's
-`just` links statically (`ldd` reports `statically linked`) and emits a valid
-`just-us.recipe-model` v1 payload.
+- On Linux, nothing beyond the kernel ABI — a fully static binary.
+- On macOS, nothing beyond the operating system's own libraries (`libSystem` and
+  the other `/usr/lib` and `/System` libraries). macOS does not support fully
+  static executables, so this is the closest equivalent. It is checked with
+  `otool -L`, which MUST list no path inside `/nix/store` or any other
+  non-system location.
+
+A `static` artifact may instead be a non-executable data file (§2.2).
+
+The Linux constraint is verified, not assumed: a `pkgsStatic`/musl build of
+just-us's `just` links statically (`ldd` reports `statically linked`) and emits
+a valid `just-us.recipe-model` v1 payload. The macOS one is not yet verified.
+
+#### 2.3 Per-system artifacts
+
+A static executable is built for one system, so a profile that should work on
+more than one host needs one build per system. An artifact MAY therefore replace
+its `url` and `markl` with one table per system, keyed by a Nix-style system
+string:
+
+    [artifact.just]
+    form = "static"
+
+    [artifact.just.system.x86_64-linux]
+    url = "https://…/just-static-x86_64-unknown-linux-musl"
+    markl = "conformist-artifact-digest-v1@sha256-…"
+
+    [artifact.just.system.aarch64-darwin]
+    url = "https://…/just-aarch64-apple-darwin"
+    markl = "conformist-artifact-digest-v1@sha256-…"
+
+- An artifact MUST carry either `url` and `markl` or per-system tables, never
+  both. A data artifact that is identical everywhere (a rule file) uses the
+  plain form.
+- An implementation MUST select the table matching the host's system. When the
+  host has no entry it MUST fail with an operational error that names the host
+  system and the systems the profile does provide, and MUST do so before
+  fetching anything.
+- Each per-system entry is pinned and verified exactly as a plain artifact is.
 
 #### 2.2 Artifacts are not necessarily executables
 

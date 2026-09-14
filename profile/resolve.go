@@ -77,6 +77,8 @@ type Resolver struct {
 	CacheDir string
 	// Client fetches https:// artifacts; nil uses a client with a timeout.
 	Client *http.Client
+	// System selects per-system artifact builds; empty means HostSystem().
+	System string
 }
 
 // DefaultCacheDir is `$XDG_CACHE_HOME/conformist/profile` (or the platform
@@ -94,15 +96,28 @@ func DefaultCacheDir() (string, error) {
 // artifact and translates the linter stanzas. Any failure aborts the whole
 // resolution: nothing unverified is ever written to the cache or run.
 func (r Resolver) Resolve(ctx context.Context, doc *Document) (*Resolved, error) {
-	// Check every pin before fetching anything (RFC 0005 §2).
+	system := r.System
+	if system == "" {
+		system = HostSystem()
+	}
+
+	// Select each artifact's build for this system and check every pin before
+	// fetching anything (RFC 0005 §2, §2.3).
+	sources := make(map[string]ArtifactSource, len(doc.Artifacts))
 	pins := make(map[string]MarklID, len(doc.Artifacts))
 
 	for _, name := range sortedKeys(doc.Artifacts) {
-		id, err := ParseMarklID(doc.Artifacts[name].Markl)
+		src, err := doc.Artifacts[name].SourceFor(system)
 		if err != nil {
 			return nil, fmt.Errorf("artifact %q: %w", name, err)
 		}
 
+		id, err := ParseMarklID(src.Markl)
+		if err != nil {
+			return nil, fmt.Errorf("artifact %q: %w", name, err)
+		}
+
+		sources[name] = src
 		pins[name] = id
 	}
 
@@ -113,7 +128,7 @@ func (r Resolver) Resolve(ctx context.Context, doc *Document) (*Resolved, error)
 	for _, name := range sortedKeys(doc.Artifacts) {
 		a := doc.Artifacts[name]
 
-		path, err := r.materialize(ctx, name, a, pins[name])
+		path, err := r.materialize(ctx, name, a, sources[name].URL, pins[name])
 		if err != nil {
 			return nil, err
 		}
@@ -241,7 +256,7 @@ func (r Resolver) writeRule(rule string) (string, error) {
 // materialize returns the cache path of a verified artifact, fetching it when
 // absent. The directory is keyed by the pin, the file named by the artifact, so
 // an executable is reachable by bare name once its directory is on PATH.
-func (r Resolver) materialize(ctx context.Context, name string, a Artifact, id MarklID) (string, error) {
+func (r Resolver) materialize(ctx context.Context, name string, a Artifact, url string, id MarklID) (string, error) {
 	dir := filepath.Join(r.CacheDir, "artifacts", id.Format+"-"+hex.EncodeToString(id.Digest))
 	path := filepath.Join(dir, name)
 
@@ -259,13 +274,13 @@ func (r Resolver) materialize(ctx context.Context, name string, a Artifact, id M
 		return "", fmt.Errorf("artifact %q: reading cache: %w", name, err)
 	}
 
-	content, err := r.fetch(ctx, a.URL)
+	content, err := r.fetch(ctx, url)
 	if err != nil {
 		return "", fmt.Errorf("artifact %q: %w", name, err)
 	}
 
 	if err := id.Verify(content); err != nil {
-		return "", fmt.Errorf("artifact %q from %s: %w", name, a.URL, err)
+		return "", fmt.Errorf("artifact %q from %s: %w", name, url, err)
 	}
 
 	mode := os.FileMode(0o444)

@@ -37,6 +37,8 @@ var (
 	ErrUnknownRuleTool   = errors.New("unsupported rule-tool")
 	ErrUnknownArtifactID = errors.New("reference to an undeclared artifact")
 
+	ErrNoArtifactForSystem = errors.New("profile has no build of this artifact for the host system")
+
 	ErrInvalidPrelude      = errors.New("invalid prelude stanza")
 	ErrUnknownPrelude      = errors.New("reference to an undeclared prelude")
 	ErrPreludeToolMismatch = errors.New("prelude is written for a different rule-tool")
@@ -46,13 +48,41 @@ var (
 // inject a linter name conformist.toml itself would refuse.
 var nameRegex = regexp.MustCompile("^[a-zA-Z0-9_-]+$")
 
-// Artifact is one `[artifact.<name>]` table (RFC 0005 §2).
+// Artifact is one `[artifact.<name>]` table (RFC 0005 §2). A platform-
+// independent artifact carries `url` and `markl` directly; a per-system one
+// carries a `[artifact.<name>.system.<system>]` table per supported system
+// instead (§2.3). Never both.
 type Artifact struct {
 	Form  string `toml:"form"`
 	URL   string `toml:"url"`
 	Markl string `toml:"markl"`
+	// System maps a Nix-style system string (`x86_64-linux`) to that system's
+	// build of the artifact.
+	System map[string]ArtifactSource `toml:"system"`
 	// Executable defaults to true; a data artifact (§2.2) sets it false.
 	Executable *bool `toml:"executable"`
+}
+
+// ArtifactSource is where one build of an artifact is fetched from, and its pin.
+type ArtifactSource struct {
+	URL   string `toml:"url"`
+	Markl string `toml:"markl"`
+}
+
+// SourceFor returns the build of the artifact for system: the artifact's own
+// url/markl when it is platform-independent, else its entry for system.
+func (a Artifact) SourceFor(system string) (ArtifactSource, error) {
+	if len(a.System) == 0 {
+		return ArtifactSource{URL: a.URL, Markl: a.Markl}, nil
+	}
+
+	src, ok := a.System[system]
+	if !ok {
+		return ArtifactSource{}, fmt.Errorf("%w %q (available: %s)",
+			ErrNoArtifactForSystem, system, strings.Join(sortedKeys(a.System), ", "))
+	}
+
+	return src, nil
 }
 
 // IsExecutable reports whether the artifact is materialized executable and put
@@ -240,8 +270,23 @@ func (d *Document) validate() error {
 			return fmt.Errorf("%w %q: missing `form`", ErrInvalidArtifact, name)
 		case a.Form != FormStatic:
 			return fmt.Errorf("artifact %q: form %q is %w", name, a.Form, ErrUnsupportedInPOC)
-		case a.URL == "", a.Markl == "":
-			return fmt.Errorf("%w %q: a static artifact requires `url` and `markl`", ErrInvalidArtifact, name)
+		case len(a.System) > 0 && (a.URL != "" || a.Markl != ""):
+			return fmt.Errorf("%w %q: give either `url`/`markl` or per-system tables, not both", ErrInvalidArtifact, name)
+		case len(a.System) == 0 && (a.URL == "" || a.Markl == ""):
+			return fmt.Errorf("%w %q: a static artifact requires `url` and `markl` (or per-system tables)",
+				ErrInvalidArtifact, name)
+		}
+
+		for _, system := range sortedKeys(a.System) {
+			src := a.System[system]
+
+			switch {
+			case !systemRegex.MatchString(system):
+				return fmt.Errorf("%w %q: system %q is not a Nix-style system string like x86_64-linux",
+					ErrInvalidArtifact, name, system)
+			case src.URL == "", src.Markl == "":
+				return fmt.Errorf("%w %q: system %q requires `url` and `markl`", ErrInvalidArtifact, name, system)
+			}
 		}
 	}
 
