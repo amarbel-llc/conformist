@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -79,6 +81,11 @@ func newCheckCmd(v *viper.Viper, statz *stats.Stats) *cobra.Command {
 			"verify its pinned artifacts, put the executable ones on PATH, and add its linter stanzas "+
 			"(conformist.toml wins on a name clash). Single-layer and unsigned; not for production use.",
 	)
+	cmd.Flags().Bool(
+		"profile-only", false,
+		"With --profile, run ONLY the profile's rules: skip every formatter and linter from the config "+
+			"(which then need not exist), so the exit code is the profile's verdict alone.",
+	)
 
 	return cmd
 }
@@ -100,7 +107,8 @@ func runCheck(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []st
 		return fmt.Errorf("%w: failed to load config: %w", ErrCheckOperational, err)
 	}
 
-	if err := applyProfile(cmd, cfg, workingDir); err != nil {
+	profileSrc, err := applyProfile(cmd, cfg, workingDir)
+	if err != nil {
 		return fmt.Errorf("%w: profile: %w", ErrCheckOperational, err)
 	}
 
@@ -234,11 +242,49 @@ func runCheck(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []st
 
 	if len(findings) > 0 {
 		reportFindings(findings)
+	}
 
+	if profileSrc != nil {
+		reportFindingsBySource(findings, profileSrc)
+	}
+
+	if len(findings) > 0 {
 		return ErrCheckFindings
 	}
 
 	return nil
+}
+
+// reportFindingsBySource prints one verdict line per configuration source. The
+// exit code is shared between a profile and the config it runs beside, so
+// without this a lane cannot tell whether the profile's rules or a
+// pre-existing config finding failed it.
+func reportFindingsBySource(findings []format.Finding, src *profileSource) {
+	var fromProfile, fromConfig []string
+
+	for _, f := range findings {
+		if f.Kind == format.FindingLint && src.linters[f.Tool] {
+			fromProfile = append(fromProfile, f.Tool)
+		} else {
+			fromConfig = append(fromConfig, f.Tool)
+		}
+	}
+
+	fmt.Fprintf(os.Stdout, "profile %s: %s\n", src.path, sourceVerdict(fromProfile))
+
+	if !src.only {
+		fmt.Fprintf(os.Stdout, "config: %s\n", sourceVerdict(fromConfig))
+	}
+}
+
+func sourceVerdict(tools []string) string {
+	if len(tools) == 0 {
+		return "clean"
+	}
+
+	slices.Sort(tools)
+
+	return "findings from " + strings.Join(slices.Compact(tools), ", ")
 }
 
 func reportFindings(findings []format.Finding) {

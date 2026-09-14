@@ -162,6 +162,70 @@ func TestCheckProfile(tt *testing.T) {
 		}))
 	})
 
+	// A profile run beside a config shares one exit code; the per-source lines
+	// must say which side failed. Here only the config's linter does.
+	failingConfig := func() *config.Config {
+		passesFiles := false
+
+		return &config.Config{LinterConfigs: map[string]*config.Linter{
+			"config-only": {Command: "exit 1", Includes: []string{"justfile"}, PassesFiles: &passesFiles},
+		}}
+	}
+
+	tt.Run("verdict is reported per source", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "build"), false, failingConfig())
+
+		conformist(t, withArgs("check", "--profile", p), withError(hasFindings), withStdout(func(out []byte) {
+			require.Contains(t, string(out), "profile "+p+": clean")
+			require.Contains(t, string(out), "config: findings from config-only")
+		}))
+	})
+
+	tt.Run("verdict names the profile when the profile fails", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "oops"), false, &config.Config{})
+
+		conformist(t, withArgs("check", "--profile", p), withError(hasFindings), withStdout(func(out []byte) {
+			require.Contains(t, string(out), "profile "+p+": findings from recipe-names")
+			require.Contains(t, string(out), "config: clean")
+		}))
+	})
+
+	tt.Run("--profile-only skips the config's tools", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "build"), false, failingConfig())
+
+		conformist(t, withArgs("check", "--profile", p, "--profile-only"), withNoError(t), withStdout(func(out []byte) {
+			require.Contains(t, string(out), "profile "+p+": clean")
+			require.NotContains(t, string(out), "config:", "a profile-only run has no config verdict")
+		}))
+	})
+
+	tt.Run("--profile-only still fails on the profile's own findings", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "oops"), false, &config.Config{})
+
+		conformist(t, withArgs("check", "--profile", p, "--profile-only"), withError(hasFindings))
+	})
+
+	tt.Run("--profile-only needs no config file", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+		require.NoError(t, os.Remove("conformist.toml"))
+
+		conformist(t, withArgs("check", "--profile", p, "--profile-only"), withNoError(t))
+	})
+
+	tt.Run("--profile-only without --profile is an operational error", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+
+		conformist(t, withArgs("check", "--profile-only"), withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, cmd.ErrCheckOperational)
+		}))
+	})
+
 	tt.Run("conformist.toml wins a name clash", func(tt *testing.T) {
 		t := &test_ui.T{T: tt}
 		passesFiles := false

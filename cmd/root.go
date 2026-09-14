@@ -307,20 +307,30 @@ func loadConfig(v *viper.Viper, cmd *cobra.Command, workingDir string) error {
 		configFile, _, err = config.FindUp(workingDir, filenames...)
 	}
 
-	// error out if we couldn't find the config file
+	// error out if we couldn't find the config file — except under
+	// `check --profile-only`, which runs the profile's rules alone and so has
+	// no use for a config.
 	if err != nil {
-		cmd.SilenceUsage = true
+		if !profileOnlyRequested(cmd) {
+			cmd.SilenceUsage = true
 
-		return fmt.Errorf("failed to find conformist config file: %w", err)
+			return fmt.Errorf("failed to find conformist config file: %w", err)
+		}
+
+		log.Debugf("no conformist config file found; --profile-only runs without one")
+
+		configFile = ""
 	}
 
-	log.Debugf("using config file: %s", configFile)
+	if configFile != "" {
+		log.Debugf("using config file: %s", configFile)
 
-	// read in the config
-	v.SetConfigFile(configFile)
+		// read in the config
+		v.SetConfigFile(configFile)
 
-	if err := v.ReadInConfig(); err != nil {
-		cobra.CheckErr(fmt.Errorf("failed to read config file '%s': %w", configFile, err))
+		if err := v.ReadInConfig(); err != nil {
+			cobra.CheckErr(fmt.Errorf("failed to read config file '%s': %w", configFile, err))
+		}
 	}
 
 	// configure logging
