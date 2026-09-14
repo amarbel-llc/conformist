@@ -66,6 +66,8 @@ func ParseMarklID(s string) (MarklID, error) {
 		return MarklID{}, fmt.Errorf("%w: %q", ErrMarklPurposeMissing, s)
 	}
 
+	// Judge the purpose before decoding, so a pin with a foreign purpose is
+	// named as such rather than as undecodable.
 	if purpose != PurposeArtifactDigest {
 		return MarklID{}, fmt.Errorf("%w: %q", ErrMarklUnknownPurpose, purpose)
 	}

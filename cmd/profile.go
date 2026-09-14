@@ -21,44 +21,44 @@ var (
 	errProfileKeyWithoutProfile  = errors.New("--profile-key requires --profile")
 )
 
-// readProfile returns the profile's bytes, verified when it must be. An https
-// profile is fetched and must be signed by a key that is both pinned and
-// published on the serving domain (RFC 0005 §3.2). A local file is read as-is,
-// and must be signed by a pinned key only when keys are pinned. path is made
-// absolute for a local file.
+// readProfile returns where the profile was read from (a local path made
+// absolute) and its bytes, verified when it must be. An https profile is
+// fetched and must be signed by a key that is both pinned and published on the
+// serving domain (RFC 0005 §3.2). A local file is read as-is, and must be
+// signed by a pinned key only when keys are pinned.
 func readProfile(
-	ctx context.Context, resolver profile.Resolver, path *string, workingDir string, pinned []string,
-) ([]byte, error) {
-	if strings.HasPrefix(*path, "https://") {
-		data, keyID, err := resolver.FetchSignedProfile(ctx, *path, pinned)
+	ctx context.Context, resolver profile.Resolver, path, workingDir string, pinned []string,
+) (string, []byte, error) {
+	if strings.HasPrefix(path, "https://") {
+		data, keyID, err := resolver.FetchSignedProfile(ctx, path, pinned)
 		if err != nil {
-			return nil, fmt.Errorf("fetching signed profile: %w", err)
+			return "", nil, fmt.Errorf("fetching signed profile: %w", err)
 		}
 
-		log.Infof("profile %s: signature verified with %s", *path, keyID)
+		log.Infof("profile %s: signature verified with %s", path, keyID)
 
-		return data, nil
+		return path, data, nil
 	}
 
-	if !filepath.IsAbs(*path) {
-		*path = filepath.Join(workingDir, *path)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workingDir, path)
 	}
 
-	data, err := os.ReadFile(*path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading profile: %w", err)
+		return "", nil, fmt.Errorf("reading profile: %w", err)
 	}
 
 	if len(pinned) > 0 {
 		keyID, err := profile.VerifySignature(data, pinned)
 		if err != nil {
-			return nil, fmt.Errorf("verifying profile %s: %w", *path, err)
+			return "", nil, fmt.Errorf("verifying profile %s: %w", path, err)
 		}
 
-		log.Infof("profile %s: signature verified with %s", *path, keyID)
+		log.Infof("profile %s: signature verified with %s", path, keyID)
 	}
 
-	return data, nil
+	return path, data, nil
 }
 
 // profileSource records what a `check --profile` run took from the profile, so
@@ -124,7 +124,7 @@ func applyProfile(cmd *cobra.Command, cfg *config.Config, workingDir string) (*p
 
 	resolver := profile.Resolver{CacheDir: cacheDir}
 
-	data, err := readProfile(ctx, resolver, &path, workingDir, pinned)
+	path, data, err := readProfile(ctx, resolver, path, workingDir, pinned)
 	if err != nil {
 		return nil, err
 	}

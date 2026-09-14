@@ -3,8 +3,9 @@
 // document whose TOML body pins cache-delivered artifacts and carries linter
 // stanzas that use them.
 //
-// POC v1 scope (RFC 0005 §7): a single, local, hand-written profile. No layer
-// walk, no delegation, no signatures, and only the `static` artifact form. Every
+// POC scope (RFC 0005 §7): a single profile, local or fetched over https with a
+// verified signature (§3.2, signature.go). No layer walk, no delegation, and
+// only the `static` artifact form. Every
 // construct outside that scope is REJECTED with an error naming it, never
 // silently ignored — a profile that half-loads would run a weaker lint than its
 // author wrote.
