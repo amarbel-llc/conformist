@@ -166,8 +166,14 @@ func Parse(path string, data []byte) (*Document, error) {
 			keys = append(keys, k.String())
 		}
 
+		// The likeliest cause in practice is not a typo but an OLD conformist:
+		// the profile format grows within its v1 tag, and a resolver rejects
+		// every field it predates. `nix run` of a git ref serves a cached build
+		// until refreshed, which is exactly how igloo first hit this.
 		return nil, fmt.Errorf(
-			"%s: %w: %s (formatter stanzas and any field not listed in RFC 0005 §2/§4 are %w)",
+			"%s: %w: %s (formatter stanzas and any field not listed in RFC 0005 §2/§4 are %w). "+
+				"If the profile is newer than this conformist, update conformist; "+
+				"if you ran it with `nix run` of a git ref, retry with `nix run --refresh`",
 			path, ErrUnknownField, strings.Join(keys, ", "), ErrUnsupportedInPOC,
 		)
 	}

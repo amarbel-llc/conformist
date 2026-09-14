@@ -76,6 +76,20 @@ An implementation MUST reject a profile whose type tag it does not recognize,
 and MUST report the tag it found; it MUST NOT attempt a partial read of an
 unknown version. Additive fields within a version do not change the tag.
 
+**Open question — resolver feature requirements.** The two rules above
+conflict in practice. Additive fields keep the `v1` tag, but a resolver MUST
+reject fields it does not know (fail closed, §7). So every addition breaks every
+older resolver, and the failure reads as a malformed profile rather than an
+outdated tool. This happened on the first rollout: igloo ran a cached older
+conformist through `nix run`, which rejected the per-system tables (§2.3) as
+unknown fields. The POC mitigates it with a hint in the error ("update
+conformist; retry `nix run --refresh`"). The candidate fix is a declared
+requirement the resolver checks before reading anything else — e.g. a
+`- requires=per-system` metadata line naming the features the profile uses — so
+an old resolver can say exactly what it lacks. Undecided: the spelling
+(feature names or a minimum resolver version), whether it is required or
+advisory, and whether it lands with POC v2 (§7.1).
+
 A profile MAY delegate to another profile (§3.1).
 
 ### 2. Artifacts

@@ -160,6 +160,19 @@ func TestParseRejections(t *testing.T) {
 	}
 }
 
+// TestParseUnknownFieldSuggestsANewerConformist pins the hint: a profile newer
+// than the resolver fails on fields it predates, and the error must point at
+// updating conformist (or refreshing a cached `nix run`) rather than read as a
+// malformed profile.
+func TestParseUnknownFieldSuggestsANewerConformist(t *testing.T) {
+	src := strings.Replace(validProfile, "passes-files = false", "passes-files = false\nfrom-the-future = 1", 1)
+
+	_, err := profile.Parse("test.profile", []byte(src))
+	require.ErrorIs(t, err, profile.ErrUnknownField)
+	require.ErrorContains(t, err, "update conformist")
+	require.ErrorContains(t, err, "nix run --refresh")
+}
+
 // resolveFixture writes an artifact and a profile pinning pinned (normally the
 // artifact's own bytes), and returns the parsed document and a resolver whose
 // cache lives in a fresh temp dir.
