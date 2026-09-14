@@ -161,6 +161,13 @@ string:
   fetching anything.
 - Each per-system entry is pinned and verified exactly as a plain artifact is.
 
+Current coverage, recorded so a darwin host's error is not a surprise: the
+POC's `just` builds are Linux-only. macOS executables cannot be cross-built
+from a Linux host (nixpkgs has no x86_64-darwin cross target, and aarch64-darwin
+needs Apple SDK binaries with no Linux build path), so darwin entries wait on a
+macOS builder. Until then a darwin host fails with the no-build-for-this-system
+error above, by design.
+
 #### 2.2 Artifacts are not necessarily executables
 
 An implementation MUST support artifacts that are **data files**, not just
