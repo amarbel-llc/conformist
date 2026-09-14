@@ -112,14 +112,6 @@ explore-pre-commit:
     hook=$(nix build --no-link --print-out-paths '.#conformist-pre-commit')
     "$hook/bin/conformist-pre-commit"
 
-# Build conformist's own generated conformist.toml and cat it, to inspect the
-# emitted [formatter.*] / [linter.*] stanzas. Verifies the Nix module's config
-# generation (issue #4) without a full check run.
-#
-# This builds the flake's OWN `conformist-config` package rather than
-# re-evaluating ./nix/conformist.nix standalone. Those two silently diverge the
-# moment flake.nix adds anything to conformistEval — which happened during the
-# just-us linter move, when this recipe reported a config missing eight linters
 # Round-trip a content digest into madder's native markl-id encoding, to verify
 # the artifact-pin format RFC 0005 §2 mandates is actually producible — not just
 # something read about in markl-id(7). The entire profile design rests on that
@@ -167,6 +159,21 @@ explore-markl-pin url:
     echo "bytes  : $(stat -c %s "$f")"
     echo "sha256 : $sha"
     echo "markl  : conformist-artifact-digest-v1@$(printf '%s\n' "$sha" | madder encode-ids sha256)"
+
+# Dry-run conformist.profile's rules against another checkout, to size a
+# rollout candidate before asking its session to adopt it. Read-only: the check
+# never writes the target tree, --no-cache keeps it from writing a cache for
+# it, and --profile-only means the target needs no conformist.toml. Exit 1
+# (findings) is the useful answer here, so it is reported rather than failing.
+#
+# dry-run this repo's profile rules against another checkout
+[group("debug")]
+debug-profile-dryrun root:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$(nix build --no-link --print-out-paths '.#conformist-bga')/bin/conformist"
+    "$bin" check --tree-root "{{ root }}" --no-cache --profile-only --profile "$PWD/conformist.profile" 2>&1
+    echo "exit: $?"
 
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
