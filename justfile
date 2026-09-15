@@ -1450,7 +1450,7 @@ release new_version:
     fj release create "$header" --tag "v{{ new_version }}" --body "$msg"
 
     # Attach the static binaries now rather than waiting for the next merge's
-    # release-assets post-merge target (which does the same, idempotently).
+    # `release` post-merge target (which does the same, idempotently).
     just deploy-release-assets
 
 # Publish the release for the version a merge landed, run by the `release`
@@ -1502,7 +1502,7 @@ deploy-release sha=env_var_or_default("SPINCLASS_MERGED_SHA", "HEAD"):
 # forge release for version.env's version, as conformist-static-x86_64-linux
 # (aarch64 is not built yet: its cross link fails). Idempotent: no release for the version is a clean
 # no-op, and an asset already attached is skipped. Uses smith's ambient forge auth.
-# Run by the `release-assets` post-merge target (sweatfile) and by `release`.
+# Run by `deploy-release` (the `release` post-merge target) and by `release`.
 #
 # attach the static release binaries to the current version's forge release
 deploy-release-assets version="":
