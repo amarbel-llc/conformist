@@ -16,9 +16,10 @@
     igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
 
     # Pinned plain nixpkgs, source of the Go dev tooling in the devShell
-    # (gofumpt/golangci-lint/gopls). The Go *toolchain* itself now comes from
-    # igloo's `pkgs.go` so the buildGoApplication and native (godyn) backends
-    # share one compiler — see igloo#29 / buildGoAuto.
+    # (gofumpt/golangci-lint/gopls). The Go *toolchain* itself comes from
+    # igloo's `pkgs.goToolchain.go` (FDR 0012; `pkgs.go` is plain nixpkgs go)
+    # so the buildGoApplication and native (godyn) backends share one
+    # compiler — see igloo#29 / buildGoAuto.
     nixpkgs-master.url = "github:NixOS/nixpkgs/f13ff45afd1bb73e640eaa08a7066dbed07e3238";
 
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
@@ -101,7 +102,7 @@
         golangciLintDewey = pkgs.buildGoApplication {
           pname = "golangci-lint-dewey";
           version = "dewey";
-          go = pkgs.go;
+          go = pkgs.goToolchain.go;
           src = golangciLintDeweySrc;
           pwd = golangciLintDeweySrc + "/${golangciLintDeweyDir}";
           modRoot = golangciLintDeweyDir;
@@ -142,10 +143,11 @@
             "."
             "cmd/flakeclobber"
           ];
-          # igloo's pkgs.go (1.26.3), shared with the native (godyn) backend so
-          # both build paths use one compiler (igloo#29). go.mod is `go 1.26.1`;
-          # GOTOOLCHAIN = "local" pins to pkgs.go rather than fetching a toolchain.
-          go = pkgs.go;
+          # igloo's registry toolchain (pkgs.goToolchain.go, igloo FDR 0012),
+          # shared with the native (godyn) backend so both build paths use one
+          # compiler (igloo#29). go.mod is `go 1.26.1`; GOTOOLCHAIN = "local"
+          # pins to it rather than fetching a toolchain.
+          go = pkgs.goToolchain.go;
           GOTOOLCHAIN = "local";
           # Burn in git by store path so the tree walker, tree-root detection and
           # the --commit/--staged lanes never depend on the caller's PATH having
@@ -259,7 +261,7 @@
         #
         # subPackages / GOTOOLCHAIN are buildGoApplication-only knobs and so live
         # under bgaArgs (the godyn backend ignores them: its scope is the graph,
-        # and it calls the toolchain directly). go = pkgs.go matches conformistBin
+        # and it calls the toolchain directly). go = pkgs.goToolchain.go matches conformistBin
         # so both backends share one compiler. version/commit are auto-injected
         # from version.env + self.rev — no ldflags here.
         conformist-native = pkgs.buildGoAuto {
@@ -271,7 +273,7 @@
           bgaArgs = {
             pwd = ./.;
             subPackages = [ "." ];
-            go = pkgs.go;
+            go = pkgs.goToolchain.go;
             GOTOOLCHAIN = "local";
             doCheck = false;
           };
@@ -600,7 +602,7 @@
         devShells.gomod = pkgs-master.mkShell {
           packages = [
             (pkgs.mkGoEnv { pwd = ./.; })
-            pkgs.go
+            pkgs.goToolchain.go
           ];
         };
 
@@ -609,10 +611,11 @@
             # mkGoEnv puts the gomod2nix-regen `go` wrapper + the gomod2nix CLI
             # on PATH, so `just build-gomod2nix` / `just update-go` work.
             (pkgs.mkGoEnv { pwd = ./.; })
-            # igloo's pkgs.go (1.26.3), matching conformistBin + the opt-in godyn
-            # backend (igloo#29). godyn-gen runs `go list -deps -json` against
-            # this go, so `just debug-godyn-graph` regenerates the committed graph.
-            pkgs.go
+            # igloo's registry toolchain (pkgs.goToolchain.go, igloo FDR 0012),
+            # matching conformistBin + the opt-in godyn backend (igloo#29).
+            # godyn-gen runs `go list -deps -json` against this go, so
+            # `just debug-godyn-graph` regenerates the committed graph.
+            pkgs.goToolchain.go
             pkgs.godyn-gen
             pkgs-master.gofumpt
             pkgs-master.golangci-lint
