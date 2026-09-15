@@ -485,7 +485,8 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   gate) + the `formatter-*`/`linter-*` registry smoke tests.
 - `lib` = the Nix module library (`conformist.lib.evalModule pkgs { … }`), which
   also carries `lib.presets.{eng,eng-go,eng-impure}` (the one-import eng rosters,
-  see `nix/presets/`); `flakeModule` = `flake-module.nix` (flake-parts
+  see `nix/presets/`) and `lib.profile` (`conformist.profile` as a path — circus
+  signs and serves it from its conformist input); `flakeModule` = `flake-module.nix` (flake-parts
   `perSystem.conformist`).
 - `templates.eng` (`templates/eng/`) — `nix flake init -t
   'git+https://code.linenisgreat.com/conformist.git#eng'` scaffolds an adopter

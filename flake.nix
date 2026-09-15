@@ -612,8 +612,14 @@
 
       # The conformist Nix module library: evalModule / submoduleWith /
       # mkConfigFile / mkWrapper, plus the formatter (programs) and linter
-      # registries. See nix/default.nix.
-      lib = conformistLib;
+      # registries. See nix/default.nix. `lib.profile` is the canonical conformist
+      # profile (RFC 0005) as a store path: consumers read
+      # `${inputs.conformist.lib.profile}` instead of keeping a copy that drifts
+      # (circus signs and serves it at /papi/conformist-profile). A plain path, so
+      # reading it evaluates none of conformist's Go build.
+      lib = conformistLib // {
+        profile = ./conformist.profile;
+      };
 
       # flake-parts module: `perSystem.conformist`. See flake-module.nix.
       flakeModule = ./flake-module.nix;
