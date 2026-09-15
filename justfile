@@ -1377,6 +1377,32 @@ update-go-get module: && update-go
 bump-version new_version:
     sed -E -i "s/^(export CONFORMIST_VERSION)=.*/\1={{ new_version }}/" version.env
 
+# Bump version.env by one semver level (bugfix, minor or major) and commit it as
+# "release vX.Y.Z" on the current branch, BEFORE merging. The `release` post-merge
+# target (just deploy-release) then tags the merged commit, pushes the release
+# line, creates the forge release and attaches the static binary.
+# `bump-version` itself stays the pure mutation eng-versioning(7) requires.
+#
+# bump version.env by one semver level and commit the release bump
+[group("maintenance")]
+bump-version-level level:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    . version.env
+    cur="${CONFORMIST_VERSION:?missing CONFORMIST_VERSION in version.env}"
+    IFS=. read -r major minor patch <<<"$cur"
+    case "{{ level }}" in
+        bugfix) patch=$((patch + 1)) ;;
+        minor) minor=$((minor + 1)); patch=0 ;;
+        major) major=$((major + 1)); minor=0; patch=0 ;;
+        *) echo "bump-version-level: level must be bugfix, minor or major (got '{{ level }}')" >&2; exit 1 ;;
+    esac
+    new="$major.$minor.$patch"
+    just bump-version "$new"
+    git add version.env
+    git commit -m "release v$new"
+    echo "bump-version-level: committed release v$new; merging runs the release post-merge target"
+
 # create, push, and verify a signed vX.Y.Z tag from version.env
 [group("maintenance")]
 tag message:
@@ -1427,6 +1453,51 @@ release new_version:
     # release-assets post-merge target (which does the same, idempotently).
     just deploy-release-assets
 
+# Publish the release for the version a merge landed, run by the `release`
+# post-merge target. Reads version.env from the MERGED commit (SHA, default
+# $SPINCLASS_MERGED_SHA). If its tag already exists it only ensures the assets, so
+# every merge is a safe no-op until `bump-version-level` commits a new version.
+# Otherwise: changelog since the previous tag (minus the bump commit), a signed
+# annotated tag on the merged commit (needs the signing agent), the
+# release/vX.Y line (FDR-0012), the forge release via smith, then the asset.
+#
+# tag, publish and attach assets for the version a merge landed
+deploy-release sha=env_var_or_default("SPINCLASS_MERGED_SHA", "HEAD"):
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git fetch --tags origin
+    sha=$(git rev-parse "{{ sha }}^{commit}")
+    ver=$(git show "$sha:version.env" | sed -n 's/^export CONFORMIST_VERSION=//p')
+    [ -n "$ver" ] || { echo "deploy-release: no CONFORMIST_VERSION in version.env at $sha" >&2; exit 1; }
+    tag="v$ver"
+    if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+        echo "deploy-release: $tag already exists; ensuring its assets"
+        just deploy-release-assets "$ver"
+        exit 0
+    fi
+
+    header="release $tag"
+    prev=$(git tag --sort=-v:refname -l 'v*' --merged "$sha" | sed -n 1p)
+    if [ -n "$prev" ]; then
+        # The bump commit is named "$header"; it MUST NOT appear in the changelog
+        # it announces (eng-versioning(7)).
+        summary=$(git log --format='- %s' "$prev..$sha" | grep -vxF -- "- $header" || true)
+        msg="$header"$'\n\n'"$summary"
+    else
+        msg="$header"
+    fi
+
+    git tag -s -m "$msg" "$tag" "$sha"
+    git push origin "refs/tags/$tag"
+    git tag -v "$tag"
+
+    line="release/v$(cut -d. -f1,2 <<<"$ver")"
+    git push origin "$sha:refs/heads/$line"
+
+    smith -H forge.starbrandshoes.com release -r linenisgreat/conformist \
+        create "$header" --tag "$tag" --body "$msg"
+    just deploy-release-assets "$ver"
+
 # Attach conformist's portable static binary (packages.conformist-static) to the
 # forge release for version.env's version, as conformist-static-x86_64-linux
 # (aarch64 is not built yet: its cross link fails). Idempotent: no release for the version is a clean
@@ -1434,16 +1505,27 @@ release new_version:
 # Run by the `release-assets` post-merge target (sweatfile) and by `release`.
 #
 # attach the static release binaries to the current version's forge release
-deploy-release-assets:
+deploy-release-assets version="":
     #!/usr/bin/env bash
     set -euo pipefail
     . version.env
-    ver="${CONFORMIST_VERSION:?missing CONFORMIST_VERSION in version.env}"
+    ver="{{ version }}"
+    ver="${ver:-${CONFORMIST_VERSION:?missing CONFORMIST_VERSION in version.env}}"
     # conformist's `release` recipe names each release "release vX.Y.Z".
     release="release v$ver"
     smith_release=(smith -H forge.starbrandshoes.com release -r linenisgreat/conformist)
     if ! view=$("${smith_release[@]}" view --by-tag "v$ver" 2>/dev/null); then
         echo "deploy-release-assets: no forge release for v$ver yet; nothing to attach"
+        exit 0
+    fi
+    # Build from the release's TAG, never the checkout: an asset must be the
+    # binary its tag's source produces. A tag older than conformist-static
+    # cannot produce one, so it gets none.
+    rev=$(git rev-parse "v$ver^{commit}")
+    flake="git+file://$(git rev-parse --show-toplevel)?rev=$rev"
+    system=$(nix eval --impure --raw --expr builtins.currentSystem)
+    if [ "$(nix eval "$flake#packages.$system" --apply 'p: p ? conformist-static')" != true ]; then
+        echo "deploy-release-assets: v$ver predates conformist-static; nothing to attach"
         exit 0
     fi
     for pair in "conformist-static:x86_64-linux"; do
@@ -1453,7 +1535,7 @@ deploy-release-assets:
             echo "deploy-release-assets: $asset already attached to $release"
             continue
         fi
-        out=$(nix build --no-link --print-out-paths ".#$attr")
+        out=$(nix build --no-link --print-out-paths "$flake#$attr")
         bin=$(find "$out/bin" -type f -name conformist -print -quit)
         [ -n "$bin" ] || { echo "deploy-release-assets: no conformist binary in $out/bin" >&2; exit 1; }
         "${smith_release[@]}" asset create "$release" "$bin" "$asset"

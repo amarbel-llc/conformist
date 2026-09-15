@@ -76,7 +76,10 @@ not run `just`/`just lint` again right before merging.
   widening can be shown additive rather than assumed so.
 - `just run-nix -- <args>` — `nix run . -- <args>`.
 - `just bump-version` / `just tag` / `just release` — versioning (release only
-  from `master`).
+  from `master`). Release-on-merge: `just bump-version-level bugfix|minor|major`
+  commits the bump before merging; the `release` post-merge target
+  (`just deploy-release`) tags the merged commit, pushes `release/vX.Y`, creates
+  the forge release (smith) and attaches the tag-built static binary.
 
 `conformist check` exits 0 when clean, 1 on findings, 2 on operational error.
 `conformist --commit` (repair + auto-commit, #24) exits 0 when the tree was

@@ -42,14 +42,15 @@ pre-commit = "conformist-pre-commit"
 # default flipping.
 # repair = "conformist-repair"
 
-# Publish the portable static binaries (packages.conformist-static{,-aarch64-linux})
-# as assets on the forge release for version.env's version, so a conformist
-# profile can pin conformist itself by markl digest. `just deploy-release-assets`
-# is idempotent: no release for the version, or assets already attached, is a
-# clean no-op. A local-only (unpushed) merge publishes nothing.
+# Release on merge: `just deploy-release` reads version.env at the merged commit.
+# If that version is not yet tagged (a `just bump-version-level` commit landed),
+# it signs and pushes the tag, the release/vX.Y line and the forge release, then
+# attaches the static binary built FROM THE TAG. Otherwise it only ensures the
+# assets, so every other merge is a no-op. Tag signing needs the signing agent
+# on the merging host. A local-only (unpushed) merge publishes nothing.
 [[post-merge]]
-name = "release-assets"
+name = "release"
 command = """
 [ "$SPINCLASS_MERGE_PUSHED" = 1 ] || exit 0
-just deploy-release-assets
+just deploy-release
 """
