@@ -233,6 +233,46 @@ func TestCheckProfile(tt *testing.T) {
 			}))
 	})
 
+	// Under --profile-only an unset --profile / --profile-key comes from the env,
+	// so a sweatfile-provided pin needs no per-recipe flag expansion.
+	tt.Run("--profile-only takes the profile from CONFORMIST_PROFILE", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+		t.Setenv("CONFORMIST_PROFILE", p)
+
+		conformist(t, withArgs("check", "--profile-only"), withNoError(t), withStdout(func(out []byte) {
+			require.Contains(t, string(out), "profile "+p+": clean")
+		}))
+	})
+
+	// The env is ignored without --profile-only: a fleet-wide env must not change
+	// an ordinary check. A bogus profile path proves it is never read.
+	tt.Run("CONFORMIST_PROFILE is ignored without --profile-only", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+		t.Setenv("CONFORMIST_PROFILE", "/nonexistent/conformist.profile")
+
+		conformist(t, withArgs("check"), withNoError(t), withStdout(func(out []byte) {
+			require.NotContains(t, string(out), "profile ")
+		}))
+	})
+
+	// Keys from the env get the same verification as --profile-key.
+	tt.Run("CONFORMIST_PROFILE_KEYS refuses an unsigned profile", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		p := writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+		t.Setenv("CONFORMIST_PROFILE", p)
+		t.Setenv(
+			"CONFORMIST_PROFILE_KEYS",
+			"piggy-piv_auth-v1@ssh_ecdsa_nistp256_pub-q0xr4jwmxnwsf9hkp923ay99rg0c3gaxaepj0ua0f6sds3pxdtc0uxh26y4",
+		)
+
+		conformist(t, withArgs("check", "--profile-only"), withError(func(as *require.Assertions, err error) {
+			as.ErrorIs(err, cmd.ErrCheckOperational)
+			as.ErrorIs(err, profile.ErrUnsigned)
+		}))
+	})
+
 	// A plain-http profile URL is refused as a URL, not misread as a local path.
 	tt.Run("an http profile URL is refused", func(tt *testing.T) {
 		t := &test_ui.T{T: tt}

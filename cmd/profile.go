@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"code.linenisgreat.com/conformist/config"
 	"code.linenisgreat.com/conformist/profile"
@@ -17,10 +18,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// The env fallbacks for --profile / --profile-key, honored ONLY under
+// --profile-only so a fleet-wide sweatfile env cannot silently change an
+// ordinary `conformist check` lane. An explicit flag always wins.
+const (
+	envProfile     = "CONFORMIST_PROFILE"
+	envProfileKeys = "CONFORMIST_PROFILE_KEYS"
+)
+
 var (
-	errProfileOnlyWithoutProfile = errors.New("--profile-only requires --profile")
+	errProfileOnlyWithoutProfile = errors.New("--profile-only requires --profile (or " + envProfile + ")")
 	errProfileKeyWithoutProfile  = errors.New("--profile-key requires --profile")
 )
+
+// profileKeysFromEnv splits CONFORMIST_PROFILE_KEYS on commas and whitespace.
+func profileKeysFromEnv() []string {
+	return strings.FieldsFunc(os.Getenv(envProfileKeys), func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	})
+}
 
 // readProfile returns where the profile was read from (a local path made
 // absolute) and its bytes, verified when it must be. An https profile is
@@ -100,6 +116,16 @@ func applyProfile(cmd *cobra.Command, cfg *config.Config, workingDir string) (*p
 	pinned, err := cmd.Flags().GetStringArray("profile-key")
 	if err != nil {
 		return nil, fmt.Errorf("reading --profile-key: %w", err)
+	}
+
+	if only {
+		if path == "" {
+			path = os.Getenv(envProfile)
+		}
+
+		if len(pinned) == 0 {
+			pinned = profileKeysFromEnv()
+		}
 	}
 
 	if path == "" {

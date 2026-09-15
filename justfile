@@ -1423,6 +1423,42 @@ release new_version:
     # fj release create is MUST; artifact upload is MAY.
     fj release create "$header" --tag "v{{ new_version }}" --body "$msg"
 
+    # Attach the static binaries now rather than waiting for the next merge's
+    # release-assets post-merge target (which does the same, idempotently).
+    just deploy-release-assets
+
+# Attach conformist's portable static binary (packages.conformist-static) to the
+# forge release for version.env's version, as conformist-static-x86_64-linux
+# (aarch64 is not built yet: its cross link fails). Idempotent: no release for the version is a clean
+# no-op, and an asset already attached is skipped. Uses smith's ambient forge auth.
+# Run by the `release-assets` post-merge target (sweatfile) and by `release`.
+#
+# attach the static release binaries to the current version's forge release
+deploy-release-assets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    . version.env
+    ver="${CONFORMIST_VERSION:?missing CONFORMIST_VERSION in version.env}"
+    # conformist's `release` recipe names each release "release vX.Y.Z".
+    release="release v$ver"
+    smith_release=(smith -H forge.starbrandshoes.com release -r linenisgreat/conformist)
+    if ! view=$("${smith_release[@]}" view --by-tag "v$ver" 2>/dev/null); then
+        echo "deploy-release-assets: no forge release for v$ver yet; nothing to attach"
+        exit 0
+    fi
+    for pair in "conformist-static:x86_64-linux"; do
+        attr="${pair%%:*}"
+        asset="conformist-static-${pair##*:}"
+        if grep -qxF -- "• $asset" <<<"$view" || grep -qF -- " $asset" <<<"$view"; then
+            echo "deploy-release-assets: $asset already attached to $release"
+            continue
+        fi
+        out=$(nix build --no-link --print-out-paths ".#$attr")
+        bin=$(find "$out/bin" -type f -name conformist -print -quit)
+        [ -n "$bin" ] || { echo "deploy-release-assets: no conformist binary in $out/bin" >&2; exit 1; }
+        "${smith_release[@]}" asset create "$release" "$bin" "$asset"
+    done
+
 # --- clean ---
 
 clean: clean-build

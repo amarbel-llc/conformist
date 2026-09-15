@@ -274,6 +274,53 @@
           };
         };
 
+        # conformist as a portable static release binary, published as a forge
+        # release asset by `just deploy-release-assets` (the release-assets
+        # post-merge target). buildGoApplication with cgo off (godyn's shared
+        # stdlib is cgo-on, so godyn cannot link a static net-importing binary
+        # yet), pure-Go net/user, stripped, no git store path, and
+        # allowedReferences = [] so the build fails if any /nix/store path
+        # survives in the binary. x86_64-linux only for now: the aarch64 cross
+        # build links externally with the host gcc even with cgo off.
+        conformist-static = pkgs.buildGoAuto {
+          inherit (godynModuleArgs)
+            pname
+            src
+            manifest
+            inputs
+            ;
+          strategy = "bga";
+          subPackages = [ "." ];
+          tags = [
+            "netgo"
+            "osusergo"
+          ];
+          ldflags = [
+            "-s"
+            "-w"
+          ];
+          # nixpkgs' Go patches embed three data paths. tzdata and mailcap are
+          # prepended to Go's search lists, so stripping them falls back to
+          # /usr/share/zoneinfo and /etc/mime.types. iana-etc REPLACES
+          # /etc/services and /etc/protocols; stripped, those lookups find no
+          # file and fall back to net's built-in tables (the https profile
+          # check passes on the stripped x86_64 binary).
+          nativeBuildInputs = [ pkgs.removeReferencesTo ];
+          postInstall = ''
+            find "$out/bin" -type f -exec remove-references-to \
+              -t ${pkgs.tzdata} \
+              -t ${pkgs.mailcap} \
+              -t ${pkgs.iana-etc} \
+              {} +
+          '';
+          bgaArgs = {
+            GOTOOLCHAIN = "local";
+            CGO_ENABLED = "0";
+            doCheck = false;
+            allowedReferences = [ ];
+          };
+        };
+
         # conformist self-consuming its own module. Replaces the former
         # treefmt-nix `treefmtEval`. The bare default binary is used here — the
         # formatter wrapper and check gate only need the executable. `package`
@@ -321,7 +368,12 @@
         packages = {
           # Default on every system: the godyn build + man pages.
           default = conformist;
-          inherit conformist conformist-bga manpages;
+          inherit
+            conformist
+            conformist-bga
+            conformist-static
+            manpages
+            ;
           # godyn's tests instance (tests = true, tags = [ "test" ]), exposed for
           # its passthru.testWith: `just debug-test-pkg` (godyn-test -A).
           conformist-godyn-tests = conformistTests;

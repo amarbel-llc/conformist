@@ -313,7 +313,9 @@ under fail-on-change.
   `git.Binary`, a Nix-burned store path).
 - `profile/` — RFC 0005 POC v1 resolver behind EXPERIMENTAL `check --profile`
   (rules in its package doc; rule jq is in-process gojq via `rulejq/`; https
-  profiles are signature-verified, RFC 0005 §3.2).
+  profiles are signature-verified, RFC 0005 §3.2). Under `--profile-only`, an
+  unset `--profile`/`--profile-key` falls back to `$CONFORMIST_PROFILE` /
+  `$CONFORMIST_PROFILE_KEYS` (sweatfile-provided pins); plain `check` ignores them.
   `just explore-profile-check` runs the gate.
 - `test/` — integration harness and fixtures (`test/config`, `test/examples`).
   Fixtures under `test/**` are **deliberately mis-formatted**; they are excluded
@@ -466,6 +468,11 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   input-addressed escape hatch (and the bench's other side);
   `conformist-godyn-tests` is the tests instance for `godyn-test -A`.
   Self-consumption evals use the bare binary.
+- `packages.conformist-static` — portable static x86_64 release binary (the
+  `release-assets` post-merge target uploads it; aarch64 cross link fails):
+  bga with `CGO_ENABLED=0`, netgo/osusergo, `-s -w`, the nixpkgs Go
+  patches' tzdata/mailcap/iana-etc paths stripped, `allowedReferences = [ ]`
+  (godyn's cgo-on stdlib can't link static yet).
 - `checks.<sys>.{conformist-tests,vet,lint,dewey-<name>}` — godyn's per-package
   test / go vet / godyn-lint / dewey-vet lanes, from the `tags = [ "test" ]`
   instance (test/test.go imports the tagged `test_ui`).

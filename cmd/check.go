@@ -93,7 +93,9 @@ func newCheckCmd(v *viper.Viper, statz *stats.Stats) *cobra.Command {
 	cmd.Flags().Bool(
 		"profile-only", false,
 		"With --profile, run ONLY the profile's rules: skip every formatter and linter from the config "+
-			"(which then need not exist), so the exit code is the profile's verdict alone.",
+			"(which then need not exist), so the exit code is the profile's verdict alone. Under "+
+			"--profile-only, an unset --profile / --profile-key falls back to $CONFORMIST_PROFILE / "+
+			"$CONFORMIST_PROFILE_KEYS (markl ids separated by commas or whitespace).",
 	)
 
 	return cmd
