@@ -233,6 +233,19 @@ func TestCheckProfile(tt *testing.T) {
 			}))
 	})
 
+	// A plain-http profile URL is refused as a URL, not misread as a local path.
+	tt.Run("an http profile URL is refused", func(tt *testing.T) {
+		t := &test_ui.T{T: tt}
+		writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})
+		key := "piggy-piv_auth-v1@ssh_ecdsa_nistp256_pub-q0xr4jwmxnwsf9hkp923ay99rg0c3gaxaepj0ua0f6sds3pxdtc0uxh26y4"
+
+		conformist(t, withArgs("check", "--profile", "http://unused.invalid/papi/conformist-profile", "--profile-key", key),
+			withError(func(as *require.Assertions, err error) {
+				as.ErrorIs(err, cmd.ErrCheckOperational)
+				as.ErrorIs(err, profile.ErrUnsupportedScheme)
+			}))
+	})
+
 	tt.Run("--profile-only without --profile is an operational error", func(tt *testing.T) {
 		t := &test_ui.T{T: tt}
 		writeProfileTree(t, modelScript(t, "build"), false, &config.Config{})

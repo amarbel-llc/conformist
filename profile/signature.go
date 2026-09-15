@@ -54,8 +54,33 @@ func isSignatureLine(l hyphence.MetadataLine) bool {
 	return l.Prefix == '-' && strings.HasPrefix(l.Value, SignaturePurpose+"@")
 }
 
+// hasClosingBoundary reports whether data's metadata section, opened by its
+// first `---` line, is closed by a second one.
+func hasClosingBoundary(data []byte) bool {
+	rest, ok := bytes.CutPrefix(data, []byte(hyphence.Boundary+"\n"))
+	if !ok {
+		return false
+	}
+
+	for line := range bytes.SplitSeq(rest, []byte("\n")) {
+		if string(line) == hyphence.Boundary {
+			return true
+		}
+	}
+
+	return false
+}
+
 // readHyphence splits a hyphence document into its metadata lines and body.
 func readHyphence(data []byte) ([]hyphence.MetadataLine, []byte, error) {
+	// hyphence v0.4.0's Reader returns no error when the input ends before the
+	// closing boundary, leaving its metadata goroutine unjoined, so a truncated
+	// profile would be half-read. Refuse it here instead; drop this once
+	// hyphence#15 is fixed.
+	if !hasClosingBoundary(data) {
+		return nil, nil, fmt.Errorf("%w: metadata section has no closing %q boundary", ErrNotHyphence, hyphence.Boundary)
+	}
+
 	doc := &hyphence.Document{}
 
 	var body bytes.Buffer

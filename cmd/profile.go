@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,7 +30,9 @@ var (
 func readProfile(
 	ctx context.Context, resolver profile.Resolver, path, workingDir string, pinned []string,
 ) (string, []byte, error) {
-	if strings.HasPrefix(path, "https://") {
+	// Any URL goes to FetchSignedProfile, which refuses every scheme but https;
+	// only a value with no scheme is a local path.
+	if u, err := url.Parse(path); err == nil && u.Scheme != "" {
 		data, keyID, err := resolver.FetchSignedProfile(ctx, path, pinned)
 		if err != nil {
 			return "", nil, fmt.Errorf("fetching signed profile: %w", err)

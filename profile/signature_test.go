@@ -157,6 +157,13 @@ func TestVerifySignature(t *testing.T) {
 	}
 }
 
+// A truncated profile — metadata with no closing boundary — must be refused as
+// not-hyphence, not half-read.
+func TestParseRejectsUnclosedMetadata(t *testing.T) {
+	_, err := Parse("truncated.profile", []byte("---\n# truncated\n! toml-conformist_profile-v1\n"))
+	require.ErrorIs(t, err, ErrNotHyphence)
+}
+
 func TestParseStillRejectsDelegationLines(t *testing.T) {
 	src := strings.Replace(signedTestProfile, "! toml", "- baseline=x\n! toml", 1)
 
