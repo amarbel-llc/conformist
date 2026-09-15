@@ -13,6 +13,8 @@ import (
 // papi docs/rfcs/vectors/rfc0001-s15-hyphence-sig-v1.json (papi e774295). papi
 // runs the same four checks against its own signer, so passing here means a
 // profile papi signs verifies in conformist byte-for-byte.
+//
+//nolint:tagliatelle // field names are fixed by papi's vector file
 type sigVector struct {
 	Purpose                           string `json:"purpose"`
 	PublicKey                         string `json:"public_key"`

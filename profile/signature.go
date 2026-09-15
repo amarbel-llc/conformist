@@ -28,6 +28,8 @@ import (
 const SignaturePurpose = "conformist-profile-sig-v1"
 
 const (
+	schemeHTTPS = "https"
+
 	purposePIVAuth     = "piggy-piv_auth-v1"
 	formatSSHEcdsaP256 = "ssh_ecdsa_nistp256_pub"
 	formatEcdsaP256Sig = "ecdsa_p256_sig"
@@ -158,15 +160,20 @@ func VerifySignature(data []byte, trusted []string) (string, error) {
 		return "", ErrNoTrustedKey
 	}
 
-	keys := make([]*ecdsa.PublicKey, len(trusted))
+	type trustedKey struct {
+		id  string
+		key *ecdsa.PublicKey
+	}
 
-	for i, id := range trusted {
+	keys := make([]trustedKey, 0, len(trusted))
+
+	for _, id := range trusted {
 		key, err := ParseSigningKey(id)
 		if err != nil {
 			return "", err
 		}
 
-		keys[i] = key
+		keys = append(keys, trustedKey{id: id, key: key})
 	}
 
 	lines, body, err := readHyphence(data)
@@ -206,9 +213,9 @@ func VerifySignature(data []byte, trusted []string) (string, error) {
 	r := new(big.Int).SetBytes(sig[:p256CoordLen])
 	s := new(big.Int).SetBytes(sig[p256CoordLen:])
 
-	for i, key := range keys {
-		if ecdsa.Verify(key, digest[:], r, s) {
-			return trusted[i], nil
+	for _, k := range keys {
+		if ecdsa.Verify(k.key, digest[:], r, s) {
+			return k.id, nil
 		}
 	}
 

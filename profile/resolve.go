@@ -310,7 +310,7 @@ func (r Resolver) fetch(ctx context.Context, raw string) ([]byte, error) {
 		}
 
 		return content, nil
-	case "https":
+	case schemeHTTPS:
 		return r.fetchHTTPS(ctx, u.String())
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedScheme, raw)
@@ -371,7 +371,7 @@ func (r Resolver) FetchSignedProfile(ctx context.Context, profileURL string, pin
 	}
 
 	u, err := url.Parse(profileURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	if err != nil || u.Scheme != schemeHTTPS || u.Host == "" {
 		return nil, "", fmt.Errorf("%w: %q (a signed profile is fetched over https)", ErrUnsupportedScheme, profileURL)
 	}
 
@@ -421,7 +421,7 @@ func refuseLoginRedirects(req *http.Request, via []*http.Request) error {
 	switch host := req.URL.Hostname(); {
 	case len(via) >= maxRedirects:
 		return fmt.Errorf("%w: stopped after %d redirects", ErrFetch, maxRedirects)
-	case req.URL.Scheme != "https":
+	case req.URL.Scheme != schemeHTTPS:
 		return fmt.Errorf("%w: %s redirected to non-https %s", ErrArtifactNeedsLogin, via[0].URL, req.URL)
 	case (host == "localhost" || isLoopback(host)) && req.URL.Host != via[0].URL.Host:
 		// A hop onto a different loopback endpoint (a local authorize

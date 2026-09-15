@@ -39,7 +39,7 @@ rule = '''
 '''
 `
 
-func newTestSigningKey(t *testing.T) (*ecdsa.PrivateKey, string) {
+func newTestSigningKey(t *testing.T) (*ecdsa.PrivateKey, string) { //testui:allow // testify helper
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -56,7 +56,7 @@ func newTestSigningKey(t *testing.T) (*ecdsa.PrivateKey, string) {
 // signForTest signs data the way `papi hyphence sign` does: the signature line
 // goes immediately before the `!` line and the document is re-emitted
 // canonically.
-func signForTest(t *testing.T, key *ecdsa.PrivateKey, data string) string {
+func signForTest(t *testing.T, key *ecdsa.PrivateKey, data string) string { //testui:allow // testify helper
 	t.Helper()
 
 	lines, body, err := readHyphence([]byte(data))
@@ -180,7 +180,7 @@ func TestPublishedSigningKeys(t *testing.T) {
 }
 
 // servePAPI serves a profile and a piggy-ids list the way a PAPI domain does.
-func servePAPI(t *testing.T, profileBody, piggyIDs string) (*httptest.Server, Resolver) {
+func servePAPI(t *testing.T, profileBody, piggyIDs string) (*httptest.Server, Resolver) { //testui:allow // testify helper
 	t.Helper()
 
 	mux := http.NewServeMux()

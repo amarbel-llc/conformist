@@ -574,8 +574,8 @@ use binary injection via `bats-emo`, never a hardcoded build output path:
 | §3.1, MUST fail on unresolvable delegation | `profile_delegate.bats` | Failure is loud, not a silent drop of baseline rules |
 | §3.2, MUST reject a signature by an unpinned key | `profile_signature.bats` | A validly-signed baseline signed by a published-but-unpinned key is refused |
 | §3.2, MUST reject unsigned and unrecognized-purpose | `profile_signature.bats` | papi's permissive defaults are not inherited |
-| §3.2, MUST support rotation across pinned keys | `profile/signature_test.go` | A signature by any one of several pinned keys verifies; a pinned-but-unpublished key is refused |
-| §3.2, signed input matches papi byte-for-byte | `profile/signature_vector_test.go` | papi's §15 conformance vector |
+| §3.2, MUST support rotation across pinned keys | `profile/signature_internal_test.go` | A signature by any one of several pinned keys verifies; a pinned-but-unpublished key is refused |
+| §3.2, signed input matches papi byte-for-byte | `profile/signature_vector_internal_test.go` | papi's §15 conformance vector |
 | §4.3, MUST report each stanza's source | `profile_merge.bats` | Diagnostic output attributes every active stanza |
 
 ## Compatibility
