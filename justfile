@@ -15,7 +15,7 @@ validate-devshell:
 
 # --- lint ---
 
-lint: lint-fmt lint-worktree lint-go
+lint: lint-fmt lint-worktree lint-go lint-go-analyzers
 
 # Read-only gate via the self-consumed conformist `checks.formatting` derivation
 # (a `conformist check` run; the read-only counterpart to the writing `nix fmt`).
@@ -38,57 +38,39 @@ lint-worktree:
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
     nix run '.#conformist' -- check --config-file "$cfg" --tree-root .
 
-# Run golangci-lint (stock set per .golangci.yaml: default:all minus the curated
-# disable list, plus dewey's analyzers — conformist#10/#22) via the purse-first
-# custom build. golangci-lint loads packages with the devShell go, so the binary
-# runs inside `nix develop`. Pin the golangci-lint cache to the worktree being
-# linted ($PWD), ignoring any inherited GOLANGCI_LINT_CACHE: golangci-lint
-# replays per-package diagnostics whose embedded absolute paths point at
-# whichever worktree populated the cache, so a cache shared across worktrees —
-# e.g. the merge hook's throwaway .merge-* worktree inheriting the session's
-# sweatfile-pinned $WORKTREE/.tmp path — makes nolint/generated-file suppression
-# fail open and leaks spurious findings, a non-deterministic merge gate
-# (conformist#34). Per-$PWD isolation keeps each worktree's cache self-consistent.
+# godyn's per-package vet (the toolchain's go vet) and lint (godyn-lint: vet
+# passes + staticcheck defaults, //nolint honored) lanes from go.nix,
+# checks.<system>.vet / lint. There is no golangci-lint lane: godyn-lint does not
+# read a .golangci.yaml, and dewey's analyzers run as their own vet lanes
+# (lint-go-analyzers).
 #
-# run golangci-lint over the Go sources
+# vet and lint the Go sources through godyn's per-package lanes
 lint-go:
     #!/usr/bin/env bash
     set -euo pipefail
-    export GOLANGCI_LINT_CACHE="$PWD/.tmp/golangci-lint"
-    bin=$(nix build --no-link --print-out-paths '.#golangci-lint-dewey')/bin/golangci-lint-dewey
-    nix develop --command "$bin" run ./...
+    sys=$(nix eval --impure --raw --expr builtins.currentSystem)
+    nix build ".#checks.$sys.vet" ".#checks.$sys.lint" --no-link --show-trace
+
+# Run one dewey analyzer (defererr, repool, seqerror, testui) as godyn's
+# per-package vet lane with that analyzer as vetTool (checks.<system>.dewey-<name>).
+#
+# run one dewey analyzer as a go vet -vettool
+lint-go-analyzer name:
+    nix build ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).dewey-{{ name }}" --no-link --show-trace
+
+lint-go-analyzers: (lint-go-analyzer "defererr") (lint-go-analyzer "repool") (lint-go-analyzer "seqerror") (lint-go-analyzer "testui")
 
 # --- build ---
 
-build: build-gomod2nix build-go build-nix
+build: build-nix
 
-# Run after changing deps.
+# The built conformist and flakeclobber binaries in build/bin for the debug
+# dev-loop. godyn rebuilds only the edited package cone (no ambient `go build`
+# since go.nix, igloo FDR 0008); version/commit are the real injected values.
 #
-# regenerate gomod2nix.toml from go.mod/go.sum
-build-gomod2nix:
-    nix develop .#gomod --command gomod2nix
-
-# OPT-IN: regenerate godyn-graph.json, the Go source dependency graph that drives
-# the opt-in native (godyn) build backend (buildGoAuto, igloo#29;
-# `.#conformist-native`). bga is the default backend now, so this is only needed
-# when working on the godyn path — hence the debug group, not the `build`
-# pipeline lane. CGO off — conformist is pure-Go — for clean file selection;
-# captures the //go:embed patterns (e.g. cmd/conform/scaffold/*,
-# cmd/init/init.toml). MUST run on x86_64-linux: the graph embeds linux/amd64-only
-# sources, so regenerating on another host corrupts it (igloo#33). Run after
-# changing imports/deps/embeds, then commit; drift-checked by debug-godyn-graph-drift.
-#
-# regenerate godyn-graph.json for the opt-in godyn build backend
-[group("debug")]
-debug-godyn-graph:
-    nix develop --command env CGO_ENABLED=0 godyn-gen . godyn-graph.json
-
-# Out-of-nix go build for a fast inner loop. Version/commit stay dev/unknown
-# here; the nix build injects the real values (eng-versioning(7)).
-#
-# build the conformist binary out-of-nix for a fast inner loop
-build-go: build-gomod2nix
-    nix develop --command go build -o build/conformist .
+# build conformist and flakeclobber into build/ via nix
+build-go:
+    nix build .#default --out-link build/conformist
 
 # full nix build of the default package (injects the real version/commit)
 build-nix:
@@ -437,23 +419,6 @@ explore-clippy-fixture:
 
 # --- debug ---
 
-# Auto-fix the golangci-lint findings that support --fix — notably tagalign
-# struct-tag alignment, which gofumpt does NOT do (gofmt aligns the outer tag
-# column but not the columns WITHIN a tag), so a new/renamed struct-tag key that
-# becomes the longest shifts the toml column and only golangci's fixer knows the
-# target. Same golangci-lint-dewey build and cache isolation as lint-go; run it,
-# then re-check with `just lint-go`. Diagnostic aid for lint-go failures, not in
-# any aggregate / the CI lane.
-#
-# auto-fix the golangci-lint findings that support --fix
-[group("debug")]
-debug-golangci-autofix:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    export GOLANGCI_LINT_CACHE="$PWD/.tmp/golangci-lint"
-    bin=$(nix build --no-link --print-out-paths '.#golangci-lint-dewey')/bin/golangci-lint-dewey
-    nix develop --command "$bin" run --fix ./...
-
 # Build-backend microbench: godyn (native, per-package CA) vs buildGoApplication
 # (bga) across four edit-locality phases, emitting wall-clock build durations to
 # stats-me (stats-me-clients(1)) as |ms timers named
@@ -480,8 +445,8 @@ debug-bench-backends iterations="3":
             exit 1
             ;;
     esac
-    native_target=".#conformist-native"
-    bga_target=".#conformist-native.passthru.bga"
+    native_target=".#default.passthru.native"
+    bga_target=".#default.passthru.bga"
     leaf_file="cmd/init/init.go"   # 1 dependent (init->cmd->main): small cone
     found_file="config/config.go"  # 4 dependents: large transitive cone
 
@@ -637,7 +602,7 @@ debug-flakeparse-bisect target:
     set -uo pipefail
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
     bin="$tmp/flakeclobber"
-    nix develop --command go build -o "$bin" ./cmd/flakeclobber || exit 2
+    bin="$(nix build --no-link --print-out-paths .#default)/bin/flakeclobber" || exit 2
 
     # Capture first, then grep. A `cmd | grep -q` pipeline is WRONG here: under
     # `set -o pipefail` the pipeline inherits flakeclobber's own exit 1, which
@@ -775,18 +740,14 @@ debug-flakeclobber-regression ref="master" root=env_var_or_default("ENG_REPOS", 
     fi
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
-    # Materialise the reference commit WITHOUT touching the working tree or the
+    # Build the reference commit WITHOUT touching the working tree or the
     # worktree's git state (no stash, no `git worktree add`) — a sweep is using
-    # this checkout.
-    mkdir -p "$tmp/ref"
-    git archive "{{ ref }}" | tar -x -C "$tmp/ref" || exit 2
-    # Both builds enter the WORKING TREE's devShell (the reference checkout has
-    # no flake context of its own here) and build in one shell, so this costs
-    # one devShell entry rather than two.
-    nix develop --command sh -c "
-        cd '$tmp/ref' && go build -o '$tmp/fc-ref' ./cmd/flakeclobber || exit 1
-        cd '$PWD'     && go build -o '$tmp/fc-new' ./cmd/flakeclobber
-    " || exit 2
+    # this checkout. Both are nix builds of the flake: the reference from a
+    # git+file ref pinned to its rev, the working tree from `.`. A reference
+    # older than the go.nix cutover still builds (its own flake).
+    rev=$(git rev-parse "{{ ref }}") || exit 2
+    ln -s "$(nix build --no-link --print-out-paths "git+file://$PWD?rev=$rev#default")/bin/flakeclobber" "$tmp/fc-ref" || exit 2
+    ln -s "$(nix build --no-link --print-out-paths .#default)/bin/flakeclobber" "$tmp/fc-new" || exit 2
 
     same=0; differ=0; newly=0
     for f in "{{ root }}"/*/flake.nix; do
@@ -896,8 +857,7 @@ verify-no-remarshal:
 verify-flakeedit-parse:
     #!/usr/bin/env bash
     set -euo pipefail
-    bin="$(mktemp -d)/conformist"
-    nix develop --command go build -o "$bin" .
+    bin="$(nix build --no-link --print-out-paths .#default)/bin/conformist"
     shopt -s nullglob
     fixtures=(test/flakeedit/*.nix)
     if [ "${#fixtures[@]}" -eq 0 ]; then
@@ -939,7 +899,7 @@ verify-flakeclobber-parse:
     # per-fixture mktemp -d without cleanup would accumulate ~7 dirs per run.
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
     bin="$tmp/flakeclobber"
-    nix develop --command go build -o "$bin" ./cmd/flakeclobber
+    bin="$(nix build --no-link --print-out-paths .#default)/bin/flakeclobber"
 
     fail=0
     # fixture:expected-exit:expected-disk-state
@@ -1022,28 +982,6 @@ verify-flakeclobber-parse:
     fi
 
     exit "$fail"
-
-# OPT-IN: drift check for the committed godyn-graph.json — regenerate the graph
-# into a scratch file and diff it against the committed copy, failing if they
-# differ. godyn is opt-in now (bga is the default backend), so this no longer
-# gates the merge; it's a manual check for the godyn path — hence the debug group,
-# not the `verify` pipeline lane. MUST run on x86_64-linux — on another host
-# godyn-gen emits a host-platform graph that always "differs" from the
-# linux-locked committed one (a false positive; igloo#33). Keeps the working tree
-# untouched (unlike debug-godyn-graph, which writes in place).
-#
-# check the committed godyn-graph.json for drift
-[group("debug")]
-debug-godyn-graph-drift:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tmp=$(mktemp)
-    trap 'rm -f "$tmp"' EXIT
-    nix develop --command env CGO_ENABLED=0 godyn-gen . "$tmp"
-    if ! diff -u godyn-graph.json "$tmp"; then
-        echo "debug-godyn-graph-drift: committed godyn-graph.json is stale — run 'just debug-godyn-graph' and commit the result." >&2
-        exit 1
-    fi
 
 # Trace why a build pulls in a package — the diagnostic for the closure-bloat
 # work (conformist#60). Builds TARGET (default the `nix fmt` wrapper, i.e. the
@@ -1221,7 +1159,7 @@ debug-flakeclobber-coverage root=env_var_or_default("ENG_REPOS", ""):
     fi
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
     bin="$tmp/flakeclobber"
-    nix develop --command go build -o "$bin" ./cmd/flakeclobber || exit 2
+    bin="$(nix build --no-link --print-out-paths .#default)/bin/flakeclobber" || exit 2
 
     # ONE classifier for all three passes below. It matches on message text
     # owned by clobber.go/main.go, so a reworded message must be reflected here
@@ -1325,7 +1263,7 @@ debug-flakeclobber-coverage root=env_var_or_default("ENG_REPOS", ""):
     # identifier nothing binds — which --parse cannot catch. This second pass
     # measures the migration as it will actually be run, in throwaway temp dirs.
     conformbin="$tmp/conformist"
-    nix develop --command go build -o "$conformbin" . || exit 2
+    conformbin="$(nix build --no-link --print-out-paths .#default)/bin/conformist" || exit 2
     : > "$tmp/log2"; : > "$tmp/raw2"
     for f in "{{ root }}"/*/flake.nix; do
         [ -e "$f" ] || continue
@@ -1373,19 +1311,21 @@ debug-flakeclobber-coverage root=env_var_or_default("ENG_REPOS", ""):
 
 test: test-go
 
-# run the Go test suite (-tags test); fail if the working tree mutates mid-run (#15)
+# run godyn's per-package go test lane (-tags test); fail if the working tree mutates mid-run (#15)
 test-go:
     #!/usr/bin/env bash
-    # Guard for conformist#15: the cmd integration tests run conformist against
-    # $TMPDIR fixtures. The cmd TestMain sets GIT_CEILING_DIRECTORIES and
-    # CONFORMIST_CEILING_DIRECTORIES so they can't escape into the worktree, but
-    # fail loudly if the working tree is mutated during the run so a regression
-    # can't hide in a commit. No `set -e`: capture the test result, always run
-    # the tree check (even on test failure), then propagate the test status.
-    # -tags test: dewey's test_ui package is behind a `test` build constraint.
+    # godyn's per-package go test lane (checks.<system>.conformist-tests, the
+    # tags = [ "test" ] instance: dewey's test_ui package is behind a `test` build
+    # constraint). There is no ambient `go test ./...`: go.nix (igloo FDR 0008)
+    # leaves no go.mod in the checkout.
+    # Guard for conformist#15: the runs are sandboxed, but keep failing loudly if
+    # the working tree is mutated during the run so a regression can't hide in a
+    # commit. No `set -e`: capture the test result, always run the tree check
+    # (even on test failure), then propagate the test status.
     set -uo pipefail
     before=$(git status --porcelain)
-    nix develop --command go test -tags test ./...
+    sys=$(nix eval --impure --raw --expr builtins.currentSystem)
+    nix build ".#checks.$sys.conformist-tests" --no-link --show-trace
     rc=$?
     after=$(git status --porcelain)
     if [ "$before" != "$after" ]; then
@@ -1394,57 +1334,17 @@ test-go:
     fi
     exit "$rc"
 
-# Reproduce the AF_UNIX failure the merge gate hit on the nixpkgs f13ff45 bump — one a
-# plain `just test-go` can miss, since it depends on the exact LENGTH of $TMPDIR.
-# black's forkserver binds a socket at $TMPDIR/pymp-XXXXXXXX/sock-<12 hex>. CPython
-# 3.14 tries to dodge sun_path (108 on Linux) by falling back to /tmp when $TMPDIR is
-# long, but multiprocessing/util.py:179 budgets only 14 bytes for "/sock-XXXXXXXX"
-# where connection.py:83 emits 18. The four-byte window that leaves —
-# len($TMPDIR) in [76, 79] — passes the fallback check and still overflows on bind,
-# so black exits non-zero and every test running the unmodified fixture roster fails
-# with ErrFormattingFailures. A spinclass session lands on 79 exactly: the worktree's
-# .tmp (62) plus `nix develop`'s own /nix-shell.XXXXXX (17). Note that padding $TMPDIR
-# LONGER hides the bug (the fallback engages and the socket goes to /tmp), which is
-# why this pins $TMPDIR to the window instead of merely making it deep. Runs a CONTROL
-# with black's pool re-enabled, which MUST fail with the AF_UNIX error — otherwise the
-# run proves nothing — then the real run, which MUST pass because cmd's TestMain pins
-# BLACK_NUM_WORKERS=1. Diagnostic only: it evaluates the devShell, not the CI lane.
+# Run one package's go tests (optionally one test via RUN, plus extra
+# test-binary FLAGS such as -test.v) without the full `just test` lane — the
+# tight agent dev-loop while iterating on a single package. Uses godyn-test
+# (igloo FDR 0008): one package's test run built from a git+file: ref of the
+# dirty tree, only the edited cone rebuilds. A NEW file must be `git add -N`'d
+# first or it is invisible. PKG is a module-relative dir.
 #
-# reproduce the sun_path window that makes black fail under a spinclass $TMPDIR
+# run one package's go tests without the full test lane
 [group("debug")]
-debug-test-go-sunpath-window:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    # Pin $TMPDIR to 79 bytes — the top of the [76, 79] window, and exactly what a
-    # spinclass session's devShell produces. A fixed /tmp root keeps the length
-    # independent of where this worktree happens to live.
-    deep="/tmp/conformist-sunpath-window"
-    while [ ${#deep} -lt 79 ]; do deep="${deep}x"; done
-    log="$deep.log"
-    trap 'rm -rf "$deep" "$log"' EXIT
-    mkdir -p "$deep"
-    tests='TestOnUnmatched|TestQuiet|TestCpuProfile'
-
-    # Set $TMPDIR INSIDE the devShell (`--command env VAR=...`, as debug-godyn-graph
-    # does): `nix develop` makes its own $TMPDIR/nix-shell.XXXXXX, so a value exported
-    # before `nix develop` is replaced rather than honoured.
-    echo "=== control: black's pool re-enabled, TMPDIR=${#deep} bytes — MUST fail ==="
-    nix develop --command env TMPDIR="$deep" BLACK_NUM_WORKERS=0 \
-        go test -tags test -run "$tests" ./cmd > "$log" 2>&1
-    rc=$?
-    if [ "$rc" -eq 0 ]; then
-        echo "debug-test-go-sunpath-window: control PASSED — TMPDIR=${#deep} bytes did not trip sun_path, so this run proves nothing. Re-check the [76, 79] window arithmetic against multiprocessing/util.py (or note that a single-CPU host skips the pool regardless)." >&2
-        exit 1
-    fi
-    if ! grep -q 'AF_UNIX path too long' "$log"; then
-        echo "debug-test-go-sunpath-window: control failed for the WRONG reason — no AF_UNIX error in its output:" >&2
-        cat "$log" >&2
-        exit 1
-    fi
-    echo "control failed as expected: OSError: AF_UNIX path too long"
-
-    echo "=== fixed: cmd TestMain pins BLACK_NUM_WORKERS=1 — MUST pass ==="
-    nix develop --command env TMPDIR="$deep" go test -tags test -run "$tests" ./cmd
+debug-test-pkg PKG='profile' RUN='' *FLAGS='':
+    nix run --inputs-from . igloo#godyn-test -- -A "packages.$(nix eval --impure --raw --expr builtins.currentSystem).conformist-godyn-tests" {{ PKG }} -- {{ if RUN == '' { '' } else { quote('-test.run=' + RUN) } }} {{ FLAGS }}
 
 # --- format ---
 
@@ -1456,9 +1356,21 @@ codemod-fmt-conformist:
 
 # --- maintenance ---
 
-# `go mod tidy`, then regenerate gomod2nix.toml (the && dependency)
-update-go: && build-gomod2nix
-    nix develop .#gomod --command go mod tidy
+# Tidy the module's requires through godyn's escape hatch (igloo FDR 0008):
+# `go mod tidy` runs inside nix against the go.mod rendered from go.nix, and the
+# result is ingested back into go.nix (hashes and Go versions included). Needs
+# the impure-derivations nix feature.
+#
+# tidy go.nix's requires via godyn-go (go mod tidy inside nix)
+update-go:
+    nix run --inputs-from . igloo#godyn-go -- -- go mod tidy
+
+# Bump one Go dep to an explicit version through godyn-go, then tidy. Usage:
+#   just update-go-get github.com/google/go-cmp@v0.7.0
+#
+# go get MODULE@VERSION via godyn-go, then tidy go.nix
+update-go-get module: && update-go
+    nix run --inputs-from . igloo#godyn-go -- -- go get {{ module }}
 
 # set CONFORMIST_VERSION in version.env (the single source of truth)
 [group("maintenance")]

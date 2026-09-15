@@ -19,7 +19,7 @@ func wholeTreeStub(t *test_ui.T, dir, marker string) string {
 	t.Helper()
 
 	script := filepath.Join(dir, "whole.sh")
-	body := "#!/usr/bin/env bash\nprintf 'ran\\n' >> '" + marker + "'\nexit 0\n"
+	body := bashShebang(t) + "printf 'ran\\n' >> '" + marker + "'\nexit 0\n"
 	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
 
 	return script
@@ -155,7 +155,7 @@ func TestCheckWholeTreeCacheFindingsNotCached(tt *testing.T) {
 
 	// stub whole-tree check: record a run, then ALWAYS report a finding (exit 1).
 	script := filepath.Join(aux, "whole.sh")
-	body := "#!/usr/bin/env bash\nprintf 'ran\\n' >> '" + marker + "'\nexit 1\n"
+	body := bashShebang(t) + "printf 'ran\\n' >> '" + marker + "'\nexit 1\n"
 	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
 
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "a.go"), []byte("package a\n"), 0o644))

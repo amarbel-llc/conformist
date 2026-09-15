@@ -27,7 +27,7 @@ func codegenStub(t *test_ui.T, dir, dst string) string {
 	t.Helper()
 
 	script := filepath.Join(dir, "codegen-"+strings.ReplaceAll(dst, "/", "_")+".sh")
-	body := "#!/usr/bin/env bash\n" +
+	body := bashShebang(t) +
 		"set -euo pipefail\n" +
 		"mkdir -p \"$(dirname '" + dst + "')\"\n" +
 		"printf '// generated from %s\\n' \"$(cat '" + codegenSrc + "')\" > '" + dst + "'\n" +
@@ -45,7 +45,7 @@ func deleteStub(t *test_ui.T, dir, victim string) string {
 	t.Helper()
 
 	script := filepath.Join(dir, "delete-"+strings.ReplaceAll(victim, "/", "_")+".sh")
-	body := "#!/usr/bin/env bash\n" +
+	body := bashShebang(t) +
 		"set -euo pipefail\n" +
 		"rm -f '" + victim + "'\n" +
 		"exit 0\n"
@@ -64,7 +64,7 @@ func unformattedCodegenStub(t *test_ui.T, dir, dst string) string {
 	t.Helper()
 
 	script := filepath.Join(dir, "codegen-unformatted-"+strings.ReplaceAll(dst, "/", "_")+".sh")
-	body := "#!/usr/bin/env bash\n" +
+	body := bashShebang(t) +
 		"set -euo pipefail\n" +
 		"mkdir -p \"$(dirname '" + dst + "')\"\n" +
 		"printf '// generated from %s   \\n' \"$(cat '" + codegenSrc + "')\" > '" + dst + "'\n" +
@@ -83,7 +83,7 @@ func stripTrailingWSFormatterStub(t *test_ui.T, dir string) string {
 	t.Helper()
 
 	script := filepath.Join(dir, "strip-trailing-ws.sh")
-	body := "#!/usr/bin/env bash\n" +
+	body := bashShebang(t) +
 		"set -euo pipefail\n" +
 		"for f in \"$@\"; do\n" +
 		"  tmp=\"$(mktemp)\"\n" +

@@ -45,7 +45,8 @@ import (
 // only `if workers > 1`); black's own `except OSError` beside that cannot help,
 // because the pool spawns lazily and the error escapes later, at submit(). Repointing
 // $TMPDIR instead would defeat the conformist#15 guard above, which needs it to stay
-// inside the worktree. Reproduce with `just debug-test-go-sunpath-window`.
+// inside the worktree. (The standalone repro recipe went with the go.nix cutover:
+// the tests now run in godyn's sandbox, not a spinclass-length devShell $TMPDIR.)
 func TestMain(m *testing.M) {
 	if tmp, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
 		for _, key := range []string{

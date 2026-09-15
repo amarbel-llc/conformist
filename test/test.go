@@ -83,7 +83,13 @@ func TempExamples(t *test_ui.T) string {
 
 func TempExamplesInDir(t *test_ui.T, dir string) {
 	t.Helper()
-	require.NoError(t, cp.Copy("../test/examples", dir), "failed to copy test data to dir")
+	// Add owner-write: under godyn's test sandbox the fixtures come from the nix
+	// store read-only, and a read-only copy breaks git/jj init and TempDir cleanup.
+	require.NoError(
+		t,
+		cp.Copy("../test/examples", dir, cp.Options{PermissionControl: cp.AddPermission(0o200)}),
+		"failed to copy test data to dir",
+	)
 
 	// we have second precision mod time tracking, so we wait a second before returning, so we don't trigger false
 	// positives for things like fail on change

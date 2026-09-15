@@ -2,11 +2,11 @@
   description = "conformist: the linter and formatter multiplexer";
 
   inputs = {
-    # amarbel-llc/nixpkgs fork. Its overlay carries a patched
-    # buildGoApplication that auto-injects `-X main.version` (read from
-    # version.env in the module dir) and `-X main.commit` (from src.rev),
-    # so no per-repo ldflags wiring is needed. See eng-versioning(7) and
-    # amarbel-llc/nixpkgs#31.
+    # amarbel-llc/nixpkgs fork: the source of conformist's Go build. godyn
+    # (buildGoAuto / buildGodynModule) builds from the go.nix manifest (igloo
+    # FDR 0008) with igloo's registry toolchain (pkgs.goToolchain.go, FDR 0012),
+    # auto-injecting `-X main.version` (version.env) and `-X main.commit`
+    # (src.rev). See eng-versioning(7) and godyn(7).
     igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
     # Apply igloo's overlay to OUR pinned nixpkgs-master (the hydra-vetted
     # sha eng pins) instead of igloo's own committed copy of the same pin.
@@ -15,23 +15,17 @@
     # reads igloo's committed flake.lock and is follows-immune (igloo#37).
     igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
 
-    # Pinned plain nixpkgs, source of the Go dev tooling in the devShell
-    # (gofumpt/golangci-lint/gopls). The Go *toolchain* itself comes from
-    # igloo's `pkgs.goToolchain.go` (FDR 0012; `pkgs.go` is plain nixpkgs go)
-    # so the buildGoApplication and native (godyn) backends share one
-    # compiler — see igloo#29 / buildGoAuto.
+    # Pinned plain nixpkgs, source of the devShell's gofumpt.
     nixpkgs-master.url = "github:NixOS/nixpkgs/f13ff45afd1bb73e640eaa08a7066dbed07e3238";
 
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
 
     # NOTE: conformist deliberately does NOT take purse-first as a flake input.
     # conformist must be strictly UPSTREAM of purse-first (no cycle), but it
-    # still dogfoods purse-first's dewey golangci-lint plugin on its own Go
-    # (conformist#10). It consumes that as a fixed-output source fetch
-    # (golangciLintDeweySrc in outputs, pinned by rev + hash) and builds the
-    # golangci-lint-dewey binary itself — an FOD leaf that pins source by commit
-    # and pulls NO flake graph, so purse-first can import conformist without
-    # closing a loop. See conformist#45 coordination / the upstream-flip plan.
+    # still runs purse-first's dewey analyzers on its own Go (conformist#10). It
+    # builds them from a fixed-output source fetch (deweySrc in outputs, pinned
+    # by rev + hash) — an FOD leaf that pins source by commit and pulls NO flake
+    # graph, so purse-first can import conformist without closing a loop.
     utils.inputs.systems.follows = "igloo/systems";
   };
 
@@ -41,7 +35,7 @@
       igloo,
       nixpkgs-master,
       utils,
-    }:
+    }@inputs:
     let
       # conformist's own Nix module library (issue #4). Exposed as `self.lib` so
       # downstream flakes can `conformist.lib.evalModule pkgs { ... }`, and
@@ -60,114 +54,156 @@
         pkgs = igloo.legacyPackages.${system};
         pkgs-master = import nixpkgs-master { inherit system; };
 
-        # Where the godyn (native) backend can build at all: only x86_64-linux
-        # (godyn(7) LIMITATIONS). The committed godyn-graph.json is generated
-        # there — `go list`'s file/import selection honors GOOS/GOARCH, so the
-        # graph embeds linux/amd64-only sources (e.g. x/sys/unix's *_linux*.go +
-        # asm_linux_amd64.s) that cannot compile on any other system (igloo#33).
-        #
-        # godyn is NO LONGER the default backend anywhere — bga (buildGoApplication
-        # off gomod2nix.toml) is the default on every system, because the
-        # single-platform graph and its hand-committed JSON are immature and the
-        # JSON drifts from source (it broke the Linux build when cmd/conform gained
-        # //go:embed patterns the graph didn't list). godyn stays opt-in via
-        # `.#conformist-native`; this flag now only gates whether that opt-in
-        # package is buildable on the current system. Re-promotion is a future
-        # session, pending igloo#33 (per-system graphs) + dropping the JSON.
-        godynSystem = system == "x86_64-linux";
-
-        # The dewey golangci-lint plugin, consumed WITHOUT a flake input so
-        # conformist stays upstream of purse-first (conformist#10 / the
-        # upstream-flip plan). golangciLintDeweySrc is a fixed-output source
-        # fetch — it pins purse-first by commit + hash and pulls no flake graph,
-        # so there is no conformist->purse-first edge and purse-first may import
-        # conformist without a cycle. Bump rev+hash deliberately to track the
-        # plugin; re-prefetch with `nix-prefetch-github amarbel-llc purse-first
-        # --rev <sha>`.
-        golangciLintDeweySrc = pkgs.fetchFromGitHub {
+        # The dewey analyzers, built WITHOUT a flake input so conformist stays
+        # upstream of purse-first (conformist#10). deweySrc is a fixed-output
+        # source fetch — it pins purse-first by commit + hash and pulls no flake
+        # graph. Bump rev+hash deliberately to track the analyzers; re-prefetch
+        # with `nix-prefetch-github amarbel-llc purse-first --rev <sha>`.
+        deweySrc = pkgs.fetchFromGitHub {
           owner = "amarbel-llc";
           repo = "purse-first";
           rev = "20f89c28ebf95f9ed6bab2f13101d7af8d27cb03";
           hash = "sha256-rCmYppRS2JEBbAXFnHg54I9ecY9AO94ruFgdUvdYd7U=";
         };
 
-        # Build golangci-lint-dewey from the fetched source with the SAME recipe
-        # purse-first uses (gomod.nix), minus the commit/date/version -X ldflags:
-        # dropping them keeps this output reproducible across purse-first commits
-        # (the upstream build stamps -X main.commit/date, which would churn the
-        # hash). cmd/golangci-lint-dewey is a standalone module (own
-        # gomod2nix.toml, GOWORK=off) whose only purse-first coupling is
-        # `replace => ../../libs/dewey`, satisfied by the whole-repo fetch.
-        golangciLintDeweyDir = "cmd/golangci-lint-dewey";
-        golangciLintDewey = pkgs.buildGoApplication {
-          pname = "golangci-lint-dewey";
-          version = "dewey";
-          go = pkgs.goToolchain.go;
-          src = golangciLintDeweySrc;
-          pwd = golangciLintDeweySrc + "/${golangciLintDeweyDir}";
-          modRoot = golangciLintDeweyDir;
-          modules = golangciLintDeweySrc + "/${golangciLintDeweyDir}/gomod2nix.toml";
-          subPackages = [ "." ];
-          GOWORK = "off";
-          ldflags = [
-            "-s"
-            "-w"
-          ];
-          meta = {
-            description = "golangci-lint with the dewey module plugin linked in (built from pinned purse-first source)";
-            mainProgram = "golangci-lint-dewey";
+        # One dewey analyzer (libs/dewey/cmd/<name>, a unitchecker) as a
+        # standalone binary for godyn's vet lane (vetTool). purse-first is a
+        # go.work workspace with one root gomod2nix.toml; the analyzer builds
+        # from the libs/dewey module against that lock with the workspace off.
+        mkDeweyAnalyzer =
+          name:
+          pkgs.buildGoApplication {
+            pname = name;
+            version = "dewey";
+            src = deweySrc;
+            pwd = deweySrc + "/libs/dewey";
+            modRoot = "libs/dewey";
+            modules = deweySrc + "/gomod2nix.toml";
+            subPackages = [ "cmd/${name}" ];
+            GOWORK = "off";
+            ldflags = [
+              "-s"
+              "-w"
+            ];
+            meta.mainProgram = name;
           };
+
+        # The dewey analyzers conformist gates on, each as its own vet lane.
+        deweyAnalyzerNames = [
+          "defererr"
+          "repool"
+          "seqerror"
+          "testui"
+        ];
+
+        # The shared shape of every conformist Go build: godyn over the go.nix
+        # manifest (igloo FDR 0008). go.mod, gomod2nix.toml and the package graph
+        # are rendered or derived inside nix — nothing is committed, so none of
+        # them can drift. version + commit are injected automatically.
+        godynModuleArgs = {
+          pname = "conformist";
+          src = self;
+          manifest = ./go.nix;
+          inherit inputs system;
         };
 
-        # bga (buildGoApplication) build — the ca-derivations-free backend behind
-        # `.#conformist-bga` and the DEFAULT on every system (godynSystem above;
-        # godyn is opt-in via `.#conformist-native`).
-        conformistBin = pkgs.buildGoApplication {
-          pname = "conformist";
-          # `src = self` lets the fork's buildGoApplication resolve
-          # `-X main.commit` from self.rev and read version.env (carried in
-          # src) for `-X main.version`. version + commit are injected
-          # automatically — no ldflags here.
-          src = self;
-          pwd = ./.;
-          modules = ./gomod2nix.toml;
-          # flakeclobber (RFC 0004, the fleet-migration sweeper) is built here
-          # so it cannot rot unnoticed: it shipped non-functional precisely
-          # because nothing built or ran it. It stays a
-          # SEPARATE binary — a one-shot destructive sweep tool, never wired
-          # into `conform`. Deliberately NOT added to conformist-native's
-          # bgaArgs below: godyn's committed graph.json enumerates per-package
-          # sources by hand, so a new subpackage there would need a graph
-          # regen, and godyn is opt-in (igloo#33).
+        # Burn in git by store path so the tree walker, tree-root detection and
+        # the --commit/--staged lanes never depend on the caller's PATH having
+        # git (RFC 0005 profile route: a bare pre-merge hook, a jq/git-less
+        # host). Puts git in conformist's runtime closure.
+        gitBinaryLdflags = [ "-X code.linenisgreat.com/conformist/git.Binary=${pkgs.git}/bin/git" ];
+
+        # conformist and flakeclobber (RFC 0004, the fleet-migration sweeper —
+        # built here so it cannot rot unbuilt; a SEPARATE one-shot binary, never
+        # wired into `conform`). buildGoAuto with no `strategy` picks godyn on
+        # every system igloo supports (godyn(7) buildGoAuto) and keeps
+        # buildGoApplication reachable as passthru.bga (`.#conformist-bga`, the
+        # ca-derivations-free escape hatch). godyn's per-package outputs are
+        # content-addressed, so building conformist needs the ca-derivations
+        # feature. Integration tests run in their own tests instance below.
+        conformistBin = pkgs.buildGoAuto {
+          inherit (godynModuleArgs)
+            pname
+            src
+            manifest
+            inputs
+            ;
           subPackages = [
             "."
             "cmd/flakeclobber"
           ];
-          # igloo's registry toolchain (pkgs.goToolchain.go, igloo FDR 0012),
-          # shared with the native (godyn) backend so both build paths use one
-          # compiler (igloo#29). go.mod is `go 1.26.1`; GOTOOLCHAIN = "local"
-          # pins to it rather than fetching a toolchain.
-          go = pkgs.goToolchain.go;
-          GOTOOLCHAIN = "local";
-          # Burn in git by store path so the tree walker, tree-root detection and
-          # the --commit/--staged lanes never depend on the caller's PATH having
-          # git (RFC 0005 profile route: a bare pre-merge hook, a jq/git-less
-          # host). Puts git in conformist's runtime closure. The opt-in godyn
-          # build does not get this and keeps looking git up on PATH.
-          ldflags = [ "-X code.linenisgreat.com/conformist/git.Binary=${pkgs.git}/bin/git" ];
-          # Integration tests need formatter executables on PATH; run them via
-          # `just test-go` / bats outside the sandbox, not in the package build.
-          doCheck = false;
+          ldflags = gitBinaryLdflags;
+          bgaArgs = {
+            GOTOOLCHAIN = "local";
+            doCheck = false;
+          };
         };
+
+        # godyn's per-package go test lane (checks.conformist-tests). The test
+        # graph is derived at eval time and each tested package's run is its
+        # own content-addressed derivation, so an unchanged test cone never
+        # re-runs. `tags = [ "test" ]`: dewey's test_ui package sits behind a
+        # `test` build constraint, so the tests build from this second instance
+        # (untouched packages are shared, CA). The runs shell out to real
+        # formatters, git, jj and gofmt; testFiles places the module files the
+        # tests read from outside their package (test/examples, test/config,
+        # templates/eng, conformist.profile).
+        conformistTests = pkgs.buildGodynModule (
+          godynModuleArgs
+          // {
+            tags = [ "test" ];
+            tests = true;
+            nativeCheckInputs = [
+              # The tests write helper scripts and resolve bash by absolute path
+              # (the sandbox has no /usr/bin/env).
+              pkgs.bash
+              pkgs.git
+              pkgs.goToolchain.go
+              pkgs.just
+              pkgs.shellcheck
+            ]
+            ++ (import ./nix/packages/conformist/formatters.nix pkgs);
+            testPreRun = ''
+              export HOME="$TMPDIR"
+            '';
+            testFiles = {
+              "cmd" = [
+                "test/examples"
+                "test/config"
+              ];
+              "cmd/conform" = [ "templates/eng" ];
+              "config" = [ "test/examples" ];
+              "profile" = [ "conformist.profile" ];
+              "walk" = [
+                "test/examples"
+                "test/config"
+              ];
+            };
+          }
+        );
+
+        # One dewey analyzer as godyn's per-package vet lane with that analyzer
+        # as vetTool. The instances share every compile (content-addressed), so
+        # the added cost is the vet runs. `tags = [ "test" ]` like the tests
+        # instance: test/test.go uses dewey's test_ui, which only exists under
+        # that tag, so an untagged instance fails to type-check it.
+        deweyAnalyzerVet =
+          name:
+          (pkgs.buildGodynModule (
+            godynModuleArgs
+            // {
+              tags = [ "test" ];
+              vetTool = mkDeweyAnalyzer name;
+            }
+          )).passthru.vetAll;
 
         # Man pages, built by Nix per eng-manpages(7) PRINCIPLE 4 (not a justfile
         # recipe, not CI): scdoc compiles the hand-written section-5/7 sources in
         # doc/, and `conformist gen-man` renders the section-1 CLI reference from
         # the cobra command tree (PRINCIPLE 3). This derivation IS the man-page
         # lint — a malformed .scd fails the build. Rendered roff is never committed.
-        # Man pages factory, parameterised by the conformist binary used to run
-        # `gen-man` — so each backend's package bundles man pages built with its
-        # own binary, without dragging in the other backend.
+        # Parameterised by the conformist binary used to run `gen-man`, so each
+        # backend's package bundles man pages built with its own binary.
         mkManpages =
           bin:
           pkgs.runCommand "conformist-manpages"
@@ -205,98 +241,55 @@
               conformist gen-man "$out/share/man/man1"
             '';
 
-        # Man pages per backend: the bga default needs no ca-derivations; the
-        # opt-in godyn package carries its own (manpages, built from conformist-native).
-        manpages = mkManpages conformist-native;
-        manpagesBga = mkManpages conformistBin;
+        manpages = mkManpages conformistBin;
 
-        # The opt-in godyn package: the godyn (native) binary plus its man pages.
-        # NOT the default — bga is (see conformistDefault below). Kept reachable
-        # for the future godyn re-promotion work (igloo#33). `meta.mainProgram`
-        # keeps `nix run` / `lib.getExe` resolving to bin/conformist.
+        # The default package: the godyn binaries plus their man pages.
+        # `meta.mainProgram` keeps `nix run` / `lib.getExe` resolving to
+        # bin/conformist.
         conformist = pkgs.symlinkJoin {
           name = "conformist";
           paths = [
-            conformist-native
-            manpages
-          ];
-          meta = (conformist-native.meta or { }) // {
-            mainProgram = "conformist";
-          };
-        };
-
-        # The bga package: the single input-addressed buildGoApplication
-        # derivation + bga-built man pages. ca-derivations-free and platform-
-        # agnostic (no per-system graph), so it is the DEFAULT backend on every
-        # system (see conformistDefault below) and what `.#conformist-bga` names
-        # explicitly. See the backend bench (`just debug-bench-backends`) for the
-        # godyn-vs-bga tradeoffs.
-        conformist-bga = pkgs.symlinkJoin {
-          name = "conformist-bga";
-          paths = [
             conformistBin
-            manpagesBga
+            manpages
           ];
           meta = (conformistBin.meta or { }) // {
             mainProgram = "conformist";
           };
+          # godyn-go (`just update-go`) builds packages.<system>.default and needs
+          # goRun / ingest from the manifest build.
+          inherit (conformistBin) passthru;
         };
 
-        # The default package and self-consumption binary: bga on every system.
-        # godyn is opt-in (`.#conformist-native` / the `conformist` join), never
-        # the default — see the godynSystem comment above.
-        conformistDefault = conformist-bga;
-        selfBin = conformistBin;
-
-        # Opt-in native (godyn) build of the bare binary, driven by the committed
-        # godyn-graph.json (igloo#29). buildGoAuto with strategy = "dev" selects
-        # igloo's per-package godyn backend (`go tool compile`/`link` directly,
-        # no `go build`). NO LONGER the default backend — bga is (conformistDefault
-        # above); kept reachable via the `conformist` join (man pages) and
-        # `.#conformist-native` (bare binary) for the fast inner loop, the backend
-        # bench, and the future godyn re-promotion work. Its per-package outputs
-        # are content-addressed, so building it requires the ca-derivations feature;
-        # the input-addressed bga build is `.#conformist-bga`. Only builds on
-        # x86_64-linux (godynSystem) until igloo#33 lands.
-        #
-        # subPackages / GOTOOLCHAIN are buildGoApplication-only knobs and so live
-        # under bgaArgs (the godyn backend ignores them: its scope is the graph,
-        # and it calls the toolchain directly). go = pkgs.goToolchain.go matches conformistBin
-        # so both backends share one compiler. version/commit are auto-injected
-        # from version.env + self.rev — no ldflags here.
-        conformist-native = pkgs.buildGoAuto {
-          pname = "conformist";
-          src = self;
-          graphFile = ./godyn-graph.json;
-          modules = ./gomod2nix.toml;
-          strategy = "dev";
-          bgaArgs = {
-            pwd = ./.;
-            subPackages = [ "." ];
-            go = pkgs.goToolchain.go;
-            GOTOOLCHAIN = "local";
-            doCheck = false;
+        # The buildGoApplication escape hatch from the godyn default: the same
+        # go.nix, input-addressed, no ca-derivations. Also the bga side of the
+        # backend bench (`just debug-bench-backends`).
+        conformist-bga = pkgs.symlinkJoin {
+          name = "conformist-bga";
+          paths = [
+            conformistBin.passthru.bga
+            (mkManpages conformistBin.passthru.bga)
+          ];
+          meta = (conformistBin.passthru.bga.meta or { }) // {
+            mainProgram = "conformist";
           };
         };
 
         # conformist self-consuming its own module. Replaces the former
-        # treefmt-nix `treefmtEval`. The bare default-backend binary (selfBin) is
-        # used here — the formatter wrapper and check gate only need the
-        # executable, and reusing the default backend avoids building the other
-        # backend during lint. `package` is required because conformist is not
-        # in nixpkgs.
+        # treefmt-nix `treefmtEval`. The bare default binary is used here — the
+        # formatter wrapper and check gate only need the executable. `package`
+        # is required because conformist is not in nixpkgs.
         conformistEval = conformistLib.evalModule pkgs {
           imports = [ ./nix/conformist.nix ];
-          package = selfBin;
+          package = conformistBin;
         };
 
         # IMPURE self-check config: git-state whole-tree checks (e.g. git-remotes)
         # that need a live .git and so cannot run in the sandboxed
-        # checks.formatting. `just check-worktree` builds this config and runs
+        # checks.formatting. `just lint-worktree` builds this config and runs
         # `conformist check` against the working tree. See nix/conformist-impure.nix.
         conformistImpureEval = conformistLib.evalModule pkgs {
           imports = [ ./nix/conformist-impure.nix ];
-          package = selfBin;
+          package = conformistBin;
         };
 
         # Eval-only smoke test over the full program + linter registries:
@@ -326,24 +319,12 @@
       in
       {
         packages = {
-          # Default on every system: the bga (buildGoApplication) build + man
-          # pages. Platform-agnostic, ca-derivations-free, no per-system graph.
-          default = conformistDefault;
-          conformist = conformistDefault;
-          # The bga build + man pages, named explicitly. Same derivation as the
-          # default above; kept as a stable name for the `conformist-bga` vs
-          # `conformist-native` A/B (and the backend bench).
-          conformist-bga = conformist-bga;
-          # Opt-in: the bare godyn (native) binary for the fast edit loop and the
-          # backend bench (`nix build .#conformist-native`,
-          # `.#conformist-native.passthru.bga`); no man pages. NOT the default —
-          # see conformist-native above. Only builds on godynSystem (x86_64-linux)
-          # until igloo#33 lands (linux-generated graph).
-          conformist-native = conformist-native;
-          # The compiled man pages on their own, for inspection
-          # (`nix build .#manpages`); built with the bga default backend's binary,
-          # and also bundled into the conformist package.
-          manpages = manpagesBga;
+          # Default on every system: the godyn build + man pages.
+          default = conformist;
+          inherit conformist conformist-bga manpages;
+          # godyn's tests instance (tests = true, tags = [ "test" ]), exposed for
+          # its passthru.testWith: `just debug-test-pkg` (godyn-test -A).
+          conformist-godyn-tests = conformistTests;
           # conformist's own generated conformist.toml for the PURE lane, consumed
           # by `just explore-show-config`. Exposed so that recipe inspects the
           # config conformist ACTUALLY uses, rather than re-deriving one by
@@ -354,7 +335,7 @@
           # linter move.
           conformist-config = conformistEval.config.build.configFile;
           # The generated config for the impure (git-state) self-checks, consumed
-          # by `just check-worktree`.
+          # by `just lint-worktree`.
           conformist-impure-config = conformistImpureEval.config.build.configFile;
           # conformist's own store-pinned pre-commit hook (issue #47):
           # `conformist --staged --exit-zero-on-fix` wrapped with the generated
@@ -371,13 +352,6 @@
           # on the devShell PATH as `conformist-repair` for use as a spinclass
           # pre-merge repair hook (`repair = "conformist-repair"`).
           conformist-repair = conformistEval.config.build.repair;
-          # The custom golangci-lint carrying dewey's analyzers, built locally
-          # from pinned purse-first source (golangciLintDewey above) so `just
-          # lint-go` builds it via `.#golangci-lint-dewey` (binary:
-          # bin/golangci-lint-dewey). No longer re-exported from a purse-first
-          # flake input — that edge was removed to keep conformist upstream of
-          # purse-first (conformist#10 / upstream-flip).
-          golangci-lint-dewey = golangciLintDewey;
           # The git merge drivers for generated files (conformist-git(7) MERGE
           # DRIVERS). Exposed as packages because they are installed onto PATH
           # fleet-wide and registered once in git config — they are invoked by
@@ -395,8 +369,22 @@
         checks =
           registryChecks
           // linterFixtureChecks
+          // builtins.listToAttrs (
+            map (name: {
+              name = "dewey-${name}";
+              value = deweyAnalyzerVet name;
+            }) deweyAnalyzerNames
+          )
           // {
             formatting = conformistEval.config.build.check self;
+
+            # godyn's per-package lanes from go.nix: the go test runs (`just
+            # test-go`), the toolchain's go vet and godyn-lint (vet passes +
+            # staticcheck defaults, //nolint honored) (`just lint-go`). The
+            # dewey-<name> vet lanes above are `just lint-go-analyzers`.
+            conformist-tests = conformistTests.passthru.checkAll;
+            vet = conformistTests.passthru.vetAll;
+            lint = conformistTests.passthru.lintAll;
 
             # Regression test for the sandbox-safe script-linter helper
             # (conformist#19). Packages an example `#!/usr/bin/env bash` script via
@@ -594,32 +582,15 @@
               '';
           };
 
-        # TEMPORARY: a conformist-free shell for the dependency-lock recipes. The
-        # default shell builds conformist (its hook wrappers), so a new Go
-        # dependency not yet in go.sum/gomod2nix.toml breaks that shell and with
-        # it the only recipes that could repair the lock. Drop this once the
-        # godyn migration settles how the lock is regenerated.
-        devShells.gomod = pkgs-master.mkShell {
-          packages = [
-            (pkgs.mkGoEnv { pwd = ./.; })
-            pkgs.goToolchain.go
-          ];
-        };
-
         devShells.default = pkgs-master.mkShell {
           packages = [
-            # mkGoEnv puts the gomod2nix-regen `go` wrapper + the gomod2nix CLI
-            # on PATH, so `just build-gomod2nix` / `just update-go` work.
-            (pkgs.mkGoEnv { pwd = ./.; })
-            # igloo's registry toolchain (pkgs.goToolchain.go, igloo FDR 0012),
-            # matching conformistBin + the opt-in godyn backend (igloo#29).
-            # godyn-gen runs `go list -deps -json` against this go, so
-            # `just debug-godyn-graph` regenerates the committed graph.
-            pkgs.goToolchain.go
-            pkgs.godyn-gen
+            # No ambient `go`, gopls or gomod2nix: dependencies live in go.nix
+            # (igloo FDR 0008). go commands run through `godyn-go -- <cmd>`
+            # (inside nix, results patched back), one package's tests through
+            # `godyn-test <dir> -- <flags>`.
+            pkgs.godyn-go
+            pkgs.godyn-test
             pkgs-master.gofumpt
-            pkgs-master.golangci-lint
-            pkgs-master.gopls
             pkgs.just
             # conformist's own config-specific, toolchain-hermetic hook wrappers
             # (build.preCommit / build.repair), on PATH as `conformist-pre-commit`
@@ -627,17 +598,12 @@
             # self-consumption templates/eng prescribes to adopters (#47/#54/#59).
             conformistEval.config.build.preCommit
             conformistEval.config.build.repair
-            # A real linter for dogfooding `conformist check` and for the
-            # check/linter test paths (RFC 0001).
+            # A real linter for dogfooding `conformist check` (RFC 0001).
             pkgs.shellcheck
             # scdoc for ad-hoc local man-page preview; the authoritative build
             # is the `manpages` Nix derivation (eng-manpages(7) PRINCIPLE 4).
             pkgs.scdoc
-          ]
-          # Formatter binaries + test-fmt-* helpers the Go test suite shells
-          # out to (cmd/root_test.go, format/formatter_test.go). Run via
-          # `just test-go`, which evaluates this devShell fresh.
-          ++ (import ./nix/packages/conformist/formatters.nix pkgs);
+          ];
         };
       }
     ))

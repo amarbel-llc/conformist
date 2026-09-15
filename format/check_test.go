@@ -3,7 +3,9 @@ package format_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"code.linenisgreat.com/conformist/config"
@@ -14,8 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// envBashShebang is the shebang the stub scripts below are written with. The
+// godyn test sandbox has no /usr/bin/env, so writeFile swaps it for bash's
+// absolute path.
+const envBashShebang = "#!/usr/bin/env bash\n"
+
 func writeFile(t *test_ui.T, root, rel, content string, mode os.FileMode) string {
 	t.Helper()
+
+	if rest, ok := strings.CutPrefix(content, envBashShebang); ok {
+		bash, err := exec.LookPath("bash")
+		require.NoError(t, err)
+
+		content = "#!" + bash + "\n" + rest
+	}
 
 	path := filepath.Join(root, rel)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
