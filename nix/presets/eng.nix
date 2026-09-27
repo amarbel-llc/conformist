@@ -44,12 +44,25 @@
 #
 # conformist self-consumes this preset (nix/conformist.nix), so it can't drift.
 # See conformist-nix(7), conformist-justfile(7), eng-versioning(7).
-{ ... }:
+{ config, ... }:
 {
   # eng-versioning(7): version.env declares the canonical <REPO>_VERSION; no
   # deprecated version.txt / flake.nix named version var.
   linters.eng-versioning.enable = true;
   linters.eng-versioning-deprecated-file.enable = true;
+
+  # conformist#124: the generic codegen-repair lane. Repair-only — its read-only
+  # command is a no-op, so it is inert in this pure preset's sandboxed
+  # checks.formatting lane, and only `nix fmt` / --staged / --commit do work. A repo
+  # whose checks carry no passthru.codegenPatch gets a no-op, which is why it can be
+  # on by default: onboarding a generator later needs no conformist change.
+  #
+  # `package` is wired from the module's own option so an adopter gets the hermetic
+  # store path without configuring anything. The linter itself defaults it to null
+  # (conformist from PATH) so nix/checks.nix's registry smoke eval — which sets no
+  # top-level package — keeps evaluating.
+  linters.codegen-repair.enable = true;
+  linters.codegen-repair.package = config.package;
 
   # conformist-nix(7): flake outputs formal accepts all inputs; flake.lock committed.
   linters.flake-outputs.enable = true;

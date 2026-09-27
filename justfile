@@ -1307,6 +1307,97 @@ debug-flakeclobber-coverage root=env_var_or_default("ENG_REPOS", ""):
     echo '=== after conform THEN flakeclobber --new "" (delete) — the completing path ==='
     tally "$tmp/log3"
 
+# Time the codegen-repair discovery eval — the open question from conformist#124's
+# design review. It measures what enumerating `checks.<system>` costs on a CLEAN
+# tree versus a DIRTY one, and whether nix's eval cache applies, because that is
+# what decides whether the linter's fire-triggers can later be relaxed toward
+# "every commit". It also answers igloo#80 note 5 directly: does a dirty tree make
+# the discovery eval BUILD something (a godyn graph via IFD) before it can answer?
+#
+# The subject is `conformist codegen-repair --list`, which performs exactly the
+# discovery eval and applies nothing. Each phase is timed ITERATIONS times; the
+# first run of a phase is the cold one. A phase is repeated with the eval cache
+# disabled so a caching effect can be told apart from a warm page cache. A run that
+# EXITS NON-ZERO is reported as ERR rather than timed, so a broken subject cannot
+# masquerade as a fast one (--list fails loudly by design, and a fast failure is
+# the classic way a timing harness lies).
+#
+# Dirtying is done by appending a newline to a tracked Go file and restoring it
+# from a trap; the recipe refuses to run if that file already has uncommitted
+# changes.
+#
+# time the codegen-repair discovery eval, clean vs dirty, cached vs not
+[group("debug")]
+debug-codegen-eval-cost ITERATIONS='3':
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    iters={{ ITERATIONS }}
+    probe=main.go
+
+    if ! git diff --quiet -- "$probe"; then
+        echo "debug-codegen-eval-cost: $probe already has uncommitted changes; refusing to modify it" >&2
+        exit 2
+    fi
+
+    sys=$(nix eval --impure --raw --expr builtins.currentSystem)
+    bin=$(nix build ".#default" --no-link --print-out-paths)/bin/conformist
+
+    attrs=$(nix eval --json ".#checks.$sys" --apply 'cs: builtins.length (builtins.attrNames cs)' 2>/dev/null)
+    echo "subject:            $bin codegen-repair --list"
+    echo "system:             $sys"
+    echo "checks.<system>:    ${attrs:-?} attrs"
+    echo "tree at start:      $(git status --porcelain | wc -l) uncommitted path(s)"
+    echo
+
+    time_phase() {
+        label=$1
+        shift
+        printf '%-24s' "$label"
+        for _ in $(seq 1 "$iters"); do
+            start=$(date +%s%N)
+            if [ $# -gt 0 ]; then
+                env "$@" "$bin" codegen-repair --list >/dev/null 2>&1
+            else
+                "$bin" codegen-repair --list >/dev/null 2>&1
+            fi
+            rc=$?
+            end=$(date +%s%N)
+            if [ "$rc" != 0 ]; then
+                printf ' %9s' "ERR($rc)"
+            else
+                printf ' %7sms' "$(( (end - start) / 1000000 ))"
+            fi
+        done
+        printf '\n'
+    }
+
+    echo "per-run wall clock ($iters run(s) per phase; the first is cold)"
+    time_phase 'clean'
+    time_phase 'clean, no eval-cache' NIX_CONFIG='eval-cache = false'
+
+    restore() { git checkout -- "$probe" 2>/dev/null || true; }
+    trap restore EXIT
+
+    printf '\n' >> "$probe"
+
+    time_phase 'dirty'
+    time_phase 'dirty, no eval-cache' NIX_CONFIG='eval-cache = false'
+
+    # igloo#80 note 5, measured rather than assumed: capture one dirty-tree
+    # discovery's stderr and count the derivations nix had to build to answer.
+    # Assigned to a variable first — a pipeline ending in grep under pipefail
+    # would inherit the left-hand side's status and report the opposite.
+    echo
+    err=$("$bin" codegen-repair --list 2>&1 >/dev/null)
+    building=$(printf '%s\n' "$err" | grep "^building '")
+    if [ -z "$building" ]; then
+        echo "derivations built during a dirty-tree discovery: 0"
+    else
+        echo "derivations built during a dirty-tree discovery: $(printf '%s\n' "$building" | wc -l)"
+        printf '%s\n' "$building" | sed 's/^/  /'
+    fi
+
 # --- test ---
 
 test: test-go
