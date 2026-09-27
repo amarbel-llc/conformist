@@ -66,6 +66,12 @@ not run `just`/`just lint` again right before merging.
   emitting per-build durations to stats-me as `gobuild.conformist.<backend>.<phase>`
   timers (a protocol shared with igloo's dewey bench; uses `nixgc` for cold
   rebuilds). Diagnostic only — not in the CI lane.
+- `just debug-codegen-eval-cost [iterations]` — time the `codegen-repair`
+  discovery eval (`conformist codegen-repair --list`) clean vs dirty and with the
+  nix eval cache disabled, and count the derivations a dirty-tree discovery has to
+  build. It reports a non-zero run as `ERR` rather than timing it, so a fast
+  failure cannot pass for a fast eval. The current numbers and what they decided
+  are recorded in `docs/features/0001-generic-codegen-repair-linter.md`.
 - Fleet-migration diagnostics, all debug-grouped and all taking the fleet root
   from `$ENG_REPOS` (or `root=…`): `just debug-flakeclobber-coverage` tallies
   which repos flakeclobber recognizes and why each refusal refuses, over both
@@ -139,7 +145,14 @@ under fail-on-change.
   files the run changed — the pre/post `git status` delta — as
   `chore: conformist fmt+fix`; dirty-tree policy in `commitPreflight`);
   subcommands `check` (`check.go`), `identity` (`identity.go` — prints the
-  resolved config/toolchain identity hash, conformist#76) and `version`
+  resolved config/toolchain identity hash, conformist#76), `codegen-repair`
+  (`codegenrepair.go` + `cmd/codegen/` — the generic codegen-repair engine, #124:
+  walks `checks.<system>`, builds every check carrying `passthru.codegenPatch`
+  (the igloo#80 contract), and applies each patch with `git apply -p2`, one patch
+  per pass with a re-discovery between them because each patch is a diff against
+  its own check's `src`. Config-free by design, so the same code can ship as the
+  standalone static artifact; fail-soft on discovery — it runs inside a git
+  pre-commit hook, where exiting non-zero blocks the commit) and `version`
   (`version.go`) dispatch
   separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
   eng shape — writes every absent shape file (`conformist.nix`, a `version.env`
@@ -411,9 +424,20 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   `extra-args`, `deny`, `allow`. Behavioral fixtures live in a separate
   `clippy-fixtures` aggregate built by `just explore-clippy-fixture`, kept out of
   the verify/CI lane so CI stays Rust-free).
+  `codegen-repair` (conformist#124 — the generic codegen-repair lane: its
+  `repair-command` is conformist's own `codegen-repair` subcommand, applying every
+  flake check's `passthru.codegenPatch`. **Repair-only**: the read-only `command`
+  is a deliberate no-op, because the drift check carrying the passthru is already
+  the check-mode gate — which is also what makes it safe in the PURE `eng` preset
+  despite needing live nix and git, since check mode never invokes a repair. Opts
+  into all three staging tiers (#55/#56/#57) so a patch's rewritten, created and
+  deleted outputs land in the triggering commit. `package` is `nullOr` and defaults
+  to null because `nix/checks.nix`'s registry smoke eval sets no top-level
+  `package`; `presets/eng.nix` wires the real one. Design, limitations and the
+  measured discovery cost: `docs/features/0001-generic-codegen-repair-linter.md`).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`,
-  `git-merge-drivers`, the
+  `git-merge-drivers`, `codegen-repair`, the
   seven `justfile-*`), `eng-go.nix` (the canonical Go formatter chain: `goimports`
   priority 1 then `gofumpt` priority 2 — the sequence the fleet converged on,
   eng #18; kept separate from `eng` so a non-Go repo never pulls a Go toolchain),
@@ -551,5 +575,7 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   the matching `eng-*(7)` manpage (`eng-design_patterns-justfile(7)`,
   `eng-versioning(7)`, `eng-manpages(7)`) — the linters in `nix/linters/` will
   fail the build otherwise.
-- `docs/` (mkdocs site + RFCs) is prose and is excluded from code formatters; do
-  not expect `nix fmt` to touch it.
+- `docs/` (mkdocs site + RFCs + FDRs under `docs/features/`, per the `eng:fdr`
+  skill) is prose and is excluded from code formatters; do not expect `nix fmt` to
+  touch it. Only `docs/site/` is part of the mkdocs build, so `docs/rfcs/` and
+  `docs/features/` need no nav wiring.

@@ -391,10 +391,11 @@ func (s *session) converge(ctx context.Context) error {
 // landed) needs more, hence the doubling. Anything past that is not a chain but a
 // cycle: two generators each undoing the other, which would loop forever and must
 // instead fail where someone can see it.
+//
+// Only called with checks >= 1 (a run with none returns before this), so the
+// smallest bound is 4 passes.
 func passLimit(checks int) int {
-	const floor = 4
-
-	return max(floor, 2*checks+2)
+	return 2*checks + 2
 }
 
 // reportIncludes surfaces the trigger globs the discovered checks declare. The

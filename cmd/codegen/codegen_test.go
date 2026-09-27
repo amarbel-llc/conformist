@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -58,12 +59,8 @@ func bashShebang(t *test_ui.T) string {
 // The temp-file swap avoids GNU/BSD `sed -i` divergence, matching the formatter
 // stubs in cmd/staged_repair_test.go.
 func rewriteLine(n int, text string) string {
-	return "swap=$(mktemp); sed '" + itoa(n) + "s/.*/" + text + "/' \"$target\" > \"$swap\"; " +
+	return "swap=$(mktemp); sed '" + strconv.Itoa(n) + "s/.*/" + text + "/' \"$target\" > \"$swap\"; " +
 		"mv \"$swap\" \"$target\""
-}
-
-func itoa(n int) string {
-	return string(rune('0' + n))
 }
 
 // nixStub writes a stand-in `nix` covering the two invocations the engine makes:
