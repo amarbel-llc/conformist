@@ -66,6 +66,10 @@ was BUILT but will not apply is different: the contract says it was generated fr
 this very tree, so a refusal means something is genuinely inconsistent, and that
 fails. `--strict` promotes the soft failures for a lane that would rather stop.
 
+**Those exit codes and warnings are only visible when the command is run
+directly.** See "Signals that do not reach the operator yet" under Limitations —
+through the linter wiring, both are currently swallowed.
+
 ### The linter
 
 `linters.codegen-repair` wires the subcommand as a whole-tree
@@ -127,6 +131,27 @@ Repairing by hand, failing loudly rather than warning:
 
 **Repair-only.** `conformist check` does not run this. The repo's own drift check
 reports staleness; this only fixes it.
+
+**Signals that do not reach the operator yet.** Run directly, the command exits 2
+on a patch that will not apply and warns on a soft failure. Run as a linter's
+`repair-command` — which is how the lane actually runs — both are swallowed by
+plumbing that predates this feature:
+
+- `format.Linter.Repair` discards the non-zero-exit flag `invocation.run` returns
+  (`format/exec.go` maps a non-zero exit to `nonzero=true, err=nil`), so the exit 2
+  never becomes an error and the commit proceeds.
+- The same function logs the command's captured output at `Debug` while the default
+  log level is `Warn`, so every warning needs `-vv` to appear — and no hook passes
+  `-vv`.
+
+The consequence is not an unsafe tree: a patch that will not apply leaves the
+generated file stale, which the drift check still catches at the merge gate. The
+consequence is that the lane is *quieter than documented*, and that
+`linters.codegen-repair.strict = true` cannot fail a hook — it converts soft
+failures into the same swallowed exit 2. Making either effective means changing how
+conformist surfaces repair-command exits and output for ALL linters (a non-zero
+`cargo clippy --fix` with unfixable lints left over is deliberately not fatal
+today), which is a conformist-wide decision rather than part of this feature.
 
 **A module root in a subdirectory is refused, not repaired.** A codegenPatch's paths
 are relative to its check's module root, which may be a repo subdirectory (a repo
@@ -206,13 +231,23 @@ What this shows:
   building at that moment", not "a dirty tree never triggers an IFD build". The
   cold-store variant is unmeasured. Any structural fix belongs to igloo#81.
 
-**Conclusion: the triggers stay.** Since the cost is per-invocation and the eval
-cache offers no relief, relaxing the triggers to "every commit" would add ~2s to
-every commit in an adopting repo, including commits that touch only prose. The
-trigger gate genuinely prevents that: both the whole-tree repair path and the
-whole-tree check path skip a linter whose matched set is empty, so a commit staging
-no `*.go`/`flake.lock`/`go.nix` file pays nothing. A full-tree `nix fmt` walks
-everything and so always pays it once.
+**Discovery runs once per convergence pass, not once per run.** `converge`
+re-discovers at the top of every iteration, so a run that applies _n_ patches pays
+_n+1_ discoveries plus one patch build per outstanding check per pass. A repo with
+three repairable checks that all need applying therefore pays about four
+discoveries — on the order of 8s — not two. Re-discovering is deliberate (a patch
+can in principle change the flake, and so the set of checks), but it means the
+figures above are the floor, not the typical cost of a repairing run.
+
+**Conclusion: the triggers stay.** Since the cost is per-invocation, scales with the
+number of patches applied, and the eval cache offers no relief, relaxing the
+triggers to "every commit" would add seconds to every commit in an adopting repo,
+including commits that touch only prose. The trigger gate genuinely prevents that:
+both the whole-tree repair path and the whole-tree check path skip a linter whose
+matched set is empty (`format/repair.go`'s `RepairLinter` returns early on an empty
+file list, and `format/check.go`'s `Finalize` `continue`s), so a commit staging no
+`*.go`/`flake.lock`/`go.nix` file pays nothing. A full-tree `nix fmt` walks
+everything, so it always pays at least one discovery.
 
 ## Tuning Levers
 
@@ -220,7 +255,7 @@ everything and so always pays it once.
 |---|---|---|---|
 | trigger globs | `*.go`, `flake.lock`, `go.nix` | What actually moves a generated file: a changed type or config struct, and the two lockfiles through which a producer's new output reaches a consumer. Kept narrow because discovery costs ~2s per run and is not cached. | A repo finds drift landing that the triggers missed, or the measured discovery cost drops far enough that "every commit" becomes affordable |
 | convergence pass limit | `max(4, 2*checks+2)` | One apply per check would do for independent checks; the doubling allows a legitimate chain, where one generator's output is another's input. Beyond that is a cycle, not a chain. | A real repo hits the limit with generators that are chained rather than cyclic |
-| `strict` default | `false` | The lane runs in a pre-commit hook, where exiting non-zero blocks the commit; an unreachable nix must not block a whole repo when the drift check still catches the staleness. | Repos routinely discover staleness the lane silently failed to repair |
+| `strict` default | `false` | The lane runs in a pre-commit hook, where exiting non-zero blocks the commit; an unreachable nix must not block a whole repo when the drift check still catches the staleness. Note the option is currently inert through the linter wiring — see Limitations. | Repos routinely discover staleness the lane silently failed to repair |
 | nix stderr kept on failure | last 2000 bytes | nix puts the actual cause last, and a commit hook's output has to stay readable. | Diagnoses routinely need context the tail cuts off |
 
 ## More Information

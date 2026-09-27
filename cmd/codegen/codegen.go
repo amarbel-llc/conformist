@@ -35,12 +35,23 @@
 // FAIL-SOFT ON DISCOVERY, FAIL-LOUD ON APPLY. This runs inside a git pre-commit
 // hook, where a non-zero exit blocks the commit. A flaky or unavailable nix (no
 // flake, offline, an eval error in an unrelated check) must therefore NOT block
-// every commit in the repo: discovery and per-check build failures warn loudly and
-// return success, leaving the drift check to catch any resulting staleness. A
-// patch that was built but will not APPLY is different — the contract says it was
-// generated from this very tree, so a refusal means something is genuinely
-// inconsistent — and that exits non-zero. `--strict` promotes the soft failures to
-// hard ones for a gate that would rather stop than proceed uncertain.
+// every commit in the repo: discovery and per-check build failures warn and return
+// success, leaving the drift check to catch any resulting staleness. A patch that
+// was built but will not APPLY is different — the contract says it was generated
+// from this very tree, so a refusal means something is genuinely inconsistent —
+// and that exits non-zero. `--strict` promotes the soft failures to hard ones for
+// a gate that would rather stop than proceed uncertain.
+//
+// BUT NOTE WHERE THOSE SIGNALS CURRENTLY STOP. Both the exit code and the warnings
+// above reach a human only when this command is run DIRECTLY. Invoked as a
+// conformist linter's `repair-command` they are swallowed by plumbing that predates
+// this feature: [format.Linter.Repair] discards the non-zero-exit flag that
+// invocation.run returns, so the exit 2 never becomes an error, and it logs the
+// command's captured output at Debug while the default log level is Warn, so the
+// warnings are invisible without -vv. Until that changes, the drift check remains
+// the only signal an operator actually sees for BOTH outcomes, and
+// `linters.codegen-repair.strict` cannot fail a hook. Tracked separately; see
+// docs/features/0001-generic-codegen-repair-linter.md.
 package codegen
 
 import (
@@ -265,7 +276,7 @@ func (o *Options) Resolve() error {
 	}
 
 	if o.TreeRoot == "" {
-		root, err := gitToplevel()
+		root, err := defaultTreeRoot()
 		if err != nil {
 			return err
 		}
@@ -276,9 +287,49 @@ func (o *Options) Resolve() error {
 	return nil
 }
 
-// gitToplevel resolves the git worktree root of the working directory. A
-// codegenPatch's paths are rooted at the flake root, so applying it from anywhere
-// else would silently write to the wrong prefix.
+// defaultTreeRoot resolves where nix runs and patches are applied: the git
+// worktree root, but only when it is also the working directory.
+//
+// Both matter, and they are not the same thing. `nix eval .#checks` resolves `.`
+// against the directory nix runs in, so that directory decides WHICH flake is
+// enumerated; a codegenPatch's paths are rooted at that flake's root. conformist
+// invokes a whole-tree repair with the cwd set to ITS tree root, which a repo can
+// point somewhere other than the git toplevel (--tree-root, --tree-root-file).
+// Taking the toplevel unconditionally would then enumerate the OUTER flake of a
+// nested layout and apply its patches at the outer root, while the linter's own
+// `[ -f flake.nix ]` gate had checked the inner one — repairing a flake nobody
+// asked about. Refuse that instead: the case is rare, and there is no safe guess
+// between two flakes.
+func defaultTreeRoot() (string, error) {
+	top, err := gitToplevel()
+	if err != nil {
+		return "", err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot resolve the working directory: %w", ErrRepairFailed, err)
+	}
+
+	// Compare the resolved forms on BOTH sides: either path may reach the same
+	// directory through a symlink (eng-design_patterns-paths(7)), and a spurious
+	// mismatch here would refuse a perfectly ordinary repo.
+	realTop, topErr := filepath.EvalSymlinks(top)
+	realCwd, cwdErr := filepath.EvalSymlinks(cwd)
+
+	if topErr == nil && cwdErr == nil && realTop != realCwd {
+		return "", fmt.Errorf(
+			"%w: the flake to repair is ambiguous — this command was run in %s but the git"+
+				" worktree root is %s, and a codegen patch is rooted at the flake nix resolves"+
+				" from the directory it runs in. Pass --tree-root to name the one you mean",
+			ErrRepairFailed, cwd, top,
+		)
+	}
+
+	return top, nil
+}
+
+// gitToplevel resolves the git worktree root of the working directory.
 func gitToplevel() (string, error) {
 	out, err := exec.Command(git.Binary, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
@@ -322,12 +373,14 @@ func Run(ctx context.Context, opts Options) error {
 
 // session carries one run's mutable state across convergence passes: the paths it
 // made visible to nix with `git add --intent-to-add` (undone before returning),
-// and the checks it gave up on (warned, not fatal).
+// the checks it gave up on (warned, not fatal), and the checks whose patches it
+// applied — named rather than counted so a run that fails to converge can say what
+// it already wrote to the tree.
 type session struct {
-	opts        Options
-	intentAdded []string
-	unrepaired  []string
-	applied     int
+	opts         Options
+	intentAdded  []string
+	unrepaired   []string
+	appliedNames []string
 }
 
 // converge runs repair passes until no check has a non-empty patch left.
@@ -366,11 +419,16 @@ func (s *session) converge(ctx context.Context) error {
 		}
 
 		if pass > limit {
+			// Name what was already applied: this path leaves the tree MUTATED by
+			// every patch that landed before the loop gave up, and nothing reverts
+			// them. Whoever untangles an oscillating pair of generators needs to
+			// know which ones wrote, in order.
 			return fmt.Errorf(
-				"%w: repair did not converge in %d passes over %d check(s), having applied %d"+
-					" patch(es) — two generators are most likely overwriting each other's output."+
-					" Inspect them with `conformist codegen-repair --list` and their patches by hand",
-				ErrRepairFailed, limit, len(checks), s.applied,
+				"%w: repair did not converge in %d passes over %d check(s) — two generators are"+
+					" most likely overwriting each other's output. The tree still holds the"+
+					" patches applied along the way, in this order: %s. Nothing was reverted;"+
+					" inspect them with `conformist codegen-repair --list` and by hand",
+				ErrRepairFailed, limit, len(checks), strings.Join(s.appliedNames, ", "),
 			)
 		}
 
@@ -441,9 +499,9 @@ func (s *session) discover(ctx context.Context, pass int) ([]Check, bool, error)
 		)
 	} else {
 		log.Warnf(
-			"codegen-repair: discovery failed after applying %d patch(es), so the tree may be"+
-				" only partly repaired: %v",
-			s.applied, err,
+			"codegen-repair: discovery failed after applying %d patch(es) (%s), so the tree may"+
+				" be only partly repaired: %v",
+			len(s.appliedNames), strings.Join(s.appliedNames, ", "), err,
 		)
 	}
 
@@ -480,7 +538,7 @@ func (s *session) pass(ctx context.Context, checks []Check) (bool, error) {
 		}
 
 		if applied {
-			s.applied++
+			s.appliedNames = append(s.appliedNames, check.Name)
 
 			log.Infof("codegen-repair: applied %s's codegen patch", check.Name)
 
@@ -510,7 +568,7 @@ func (s *session) result(total int) error {
 		)
 	}
 
-	log.Debugf("codegen-repair: converged after applying %d patch(es)", s.applied)
+	log.Debugf("codegen-repair: converged after applying %d patch(es)", len(s.appliedNames))
 
 	return nil
 }
@@ -751,10 +809,16 @@ func (s *session) explainRefusal(
 	)
 }
 
-// missingTargets lists the paths a patch would touch that do not exist in the
-// tree. `git apply --numstat` reports each path with the -p strip and any
-// --directory prefix already applied, so this asks git where the patch would land
-// rather than re-deriving that from the diff here.
+// missingTargets lists the paths a patch would touch that it expects to ALREADY
+// EXIST but that are absent from the tree. `git apply --numstat` reports each path
+// with the -p strip and any --directory prefix already applied, so this asks git
+// where the patch would land rather than re-deriving that from the diff here.
+//
+// Paths the patch CREATES are excluded, because their absence is what a creation
+// hunk means. Without that exclusion any patch containing a new file would look
+// like a wrong-prefix patch, and a root-rooted check that merely conflicted would
+// be misdiagnosed as a subdirectory-module problem — a confidently wrong
+// diagnosis, which is worse than the generic one it would replace.
 func (s *session) missingTargets(ctx context.Context, check Check, patch string) []string {
 	out, err := s.gitOutput(ctx, s.applyArgs(check, patch, "--numstat")...)
 	if err != nil {
@@ -762,6 +826,8 @@ func (s *session) missingTargets(ctx context.Context, check Check, patch string)
 
 		return nil
 	}
+
+	created := s.createdTargets(ctx, check, patch)
 
 	var missing []string
 
@@ -778,12 +844,52 @@ func (s *session) missingTargets(ctx context.Context, check Check, patch string)
 			continue
 		}
 
+		if _, isNew := created[path]; isNew {
+			continue
+		}
+
 		if _, err := os.Lstat(filepath.Join(s.opts.TreeRoot, path)); err != nil {
 			missing = append(missing, path)
 		}
 	}
 
 	return missing
+}
+
+// createdTargets is the set of paths a patch creates, as `git apply --summary`
+// reports them ("create mode <mode> <path>"), with the same -p strip and
+// --directory prefix applied as missingTargets sees. Deletions are deliberately
+// NOT collected: a deletion hunk's target must already exist, so its absence is
+// real evidence.
+func (s *session) createdTargets(
+	ctx context.Context, check Check, patch string,
+) map[string]struct{} {
+	created := map[string]struct{}{}
+
+	out, err := s.gitOutput(ctx, s.applyArgs(check, patch, "--summary")...)
+	if err != nil {
+		// Without the summary the caller falls back to treating every absent path
+		// as missing, so say so rather than diagnosing from a partial picture.
+		log.Debugf(
+			"codegen-repair: could not list the files %s's patch creates, so its"+
+				" wrong-prefix diagnosis may over-report: %v",
+			check.Name, err,
+		)
+
+		return created
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(strings.TrimRight(line, "\r"))
+
+		// " create mode 100644 <path>" — the path is the remainder, so rejoin it
+		// in case it contains spaces.
+		if len(fields) >= 4 && fields[0] == "create" && fields[1] == "mode" {
+			created[strings.Join(fields[3:], " ")] = struct{}{}
+		}
+	}
+
+	return created
 }
 
 // applyArgs builds one `git apply` argument list. It is rebuilt per invocation

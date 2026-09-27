@@ -471,6 +471,150 @@ func TestMissingTargetsUsesGitsOwnStrip(tt *testing.T) {
 	)
 }
 
+// createHunk creates `fresh.txt`, a file that legitimately does not exist in the
+// tree. Its absence must NOT be read as evidence of a wrong patch root.
+const createHunk = `diff --git a/src/fresh.txt b/work/fresh.txt
+new file mode 100644
+--- /dev/null
++++ b/work/fresh.txt
+@@ -0,0 +1 @@
++fresh
+`
+
+// TestMissingTargetsExcludesCreatedFiles pins the fix for the wrong-prefix
+// diagnosis over-reporting. A creation hunk's target is absent BY DEFINITION, so
+// counting it as missing would make any patch containing a new file look
+// subdirectory-rooted. `git apply --summary` is asked which paths the patch
+// creates, and those are excluded.
+func TestMissingTargetsExcludesCreatedFiles(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	aux := t.TempDir()
+
+	initRepo(t, dir, map[string]string{"present.txt": "here\n"})
+
+	// present.txt exists; fresh.txt is created by the patch; config_tommy.go is
+	// neither — it is the genuinely wrong-rooted one.
+	patch := `diff --git a/src/present.txt b/work/present.txt
+--- a/src/present.txt
++++ b/work/present.txt
+@@ -1 +1 @@
+-here
++there
+` + createHunk + subdirPatch
+
+	patchPath := filepath.Join(aux, "patch")
+	as.NoError(os.WriteFile(patchPath, []byte(patch), 0o644))
+
+	s := &session{opts: options("nix", dir)}
+
+	as.Equal(
+		[]string{"config_tommy.go"},
+		s.missingTargets(context.Background(), Check{Name: "probe"}, patchPath),
+	)
+}
+
+// TestConflictWithNewFileGetsGenericRefusal is the same fix seen from the outside:
+// a root-rooted check whose patch genuinely conflicts must be reported as a
+// conflict, even when the patch also creates a file. Diagnosing it as a
+// subdirectory-module problem would send the operator after a module root that does
+// not exist — a confidently wrong diagnosis, which this repo treats as worse than
+// the honest ambiguous one.
+func TestConflictWithNewFileGetsGenericRefusal(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	aux := t.TempDir()
+
+	// The tree's content does not match what the patch's hunk expects, so neither
+	// the forward nor the reverse --check can apply: a real conflict.
+	initRepo(t, dir, map[string]string{"a.txt": "actual\n"})
+
+	conflicting := `diff --git a/src/a.txt b/work/a.txt
+--- a/src/a.txt
++++ b/work/a.txt
+@@ -1 +1 @@
+-expected
++rewritten
+` + createHunk
+
+	nix, _ := nixStub(t, aux,
+		[]Check{{Name: "rooted"}},
+		[]stubSpec{{name: "rooted", patch: conflicting}},
+	)
+
+	err := Run(context.Background(), options(nix, dir))
+
+	as.ErrorIs(err, ErrRepairFailed)
+	as.Contains(err.Error(), "changed under the build")
+	as.NotContains(err.Error(), "codegenPrefix")
+
+	// Nothing was applied, including the creation hunk.
+	as.Equal("actual\n", readFile(t, filepath.Join(dir, "a.txt")))
+	as.NoFileExists(filepath.Join(dir, "fresh.txt"))
+}
+
+// TestResolveRefusesAmbiguousFlakeRoot pins the fix for the nested-flake hazard.
+// nix resolves `.#checks` from the directory it runs in, and conformist invokes a
+// whole-tree repair with the cwd set to ITS tree root — which a repo may point
+// somewhere other than the git toplevel. Silently preferring the toplevel would
+// enumerate a different flake than the linter's own `[ -f flake.nix ]` gate
+// checked, and apply its patches at a different root.
+func TestResolveRefusesAmbiguousFlakeRoot(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	initRepo(t, dir, map[string]string{"nested/flake.nix": "{ outputs = _: { }; }\n"})
+
+	// Stand where a nested flake would put conformist's tree root.
+	t.Chdir(filepath.Join(dir, "nested"))
+
+	opts := Options{System: "x86_64-linux", Nix: "nix"}
+	err := opts.Resolve()
+
+	as.ErrorIs(err, ErrRepairFailed)
+	as.Contains(err.Error(), "ambiguous")
+	as.Contains(err.Error(), "--tree-root")
+
+	// An explicit --tree-root resolves it rather than being second-guessed.
+	explicit := Options{System: "x86_64-linux", Nix: "nix", TreeRoot: dir}
+	as.NoError(explicit.Resolve())
+	as.Equal(dir, explicit.TreeRoot)
+}
+
+// TestNonConvergenceNamesWhatItApplied pins that the give-up path says what it
+// already wrote. That path leaves the tree mutated by every patch that landed
+// before the bound was hit, and nothing reverts them, so the names are the only
+// handle anyone has on the damage.
+func TestNonConvergenceNamesWhatItApplied(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	aux := t.TempDir()
+
+	initRepo(t, dir, map[string]string{"gen.txt": "stale\n"})
+
+	nix, _ := nixStub(t, aux,
+		[]Check{{Name: "alpha"}, {Name: "beta"}},
+		[]stubSpec{
+			{name: "alpha", file: "gen.txt", gen: rewriteLine(1, "alpha")},
+			{name: "beta", file: "gen.txt", gen: rewriteLine(1, "beta")},
+		},
+	)
+
+	err := Run(context.Background(), options(nix, dir))
+
+	as.ErrorIs(err, ErrRepairFailed)
+	as.Contains(err.Error(), "alpha")
+	as.Contains(err.Error(), "beta")
+	as.Contains(err.Error(), "Nothing was reverted")
+}
+
 // TestCheckValidateRejectsUnsafePrefix pins the guard on codegenPrefix: it becomes
 // a `git apply --directory` argument, so an absolute or climbing value would write
 // outside the tree. A prefix this engine does not understand is a contract

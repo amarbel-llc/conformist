@@ -108,11 +108,17 @@ in
         of warning and proceeding. The default is lenient because this lane runs
         inside a git pre-commit hook, where a non-zero exit blocks the commit and
         an unreachable nix would block every commit in the repo; the drift check
-        still catches any staleness that results. Turn it on for a lane that would
-        rather stop than let a possibly-stale output through.
+        still catches any staleness that results.
 
-        A patch that was BUILT but will not apply fails the repair either way — it
-        was generated from this very tree, so a refusal is a real inconsistency.
+        CURRENTLY INERT THROUGH THIS WIRING. conformist discards a
+        `repair-command`'s non-zero exit (`format.Linter.Repair` drops the flag
+        that `invocation.run` returns), so neither this option nor the command's
+        own exit 2 on an unappliable patch can fail a run today; both only take
+        effect when `conformist codegen-repair` is invoked directly. It is kept so
+        the intent is recorded and so it works once that changes — making it
+        effective is a conformist-wide decision about repair-command exits, not a
+        change this linter can make. See
+        docs/features/0001-generic-codegen-repair-linter.md.
       '';
     };
 
