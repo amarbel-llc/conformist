@@ -111,14 +111,16 @@ type Check struct {
 	// under go/) needs the prefix to land its patch in the right place. The field
 	// is read optimistically: the contract does not publish it yet, and until it
 	// does a subdirectory-rooted check is refused rather than misapplied (see
-	// [session.explainRefusal] and docs/features/0001-generic-codegen-repair.md).
+	// [session.explainRefusal] and
+	// docs/features/0001-generic-codegen-repair-linter.md).
 	Prefix string `json:"prefix"`
 	// Includes is the check's own `passthru.codegenIncludes` (igloo#80): the
 	// trigger globs a generator declares next to its check for inputs that are
-	// not Go sources. It is reported here rather than acted on — see the TRIGGERS
-	// section of docs/features/0001-generic-codegen-repair.md for why the union
-	// with the linter's own `includes` cannot be computed inside the consumer's
-	// own module eval.
+	// not Go sources. It is reported here rather than acted on — see the
+	// Limitations section of
+	// docs/features/0001-generic-codegen-repair-linter.md for why the union with
+	// the linter's own `includes` cannot be computed inside the consumer's own
+	// module eval.
 	Includes []string `json:"includes"`
 }
 

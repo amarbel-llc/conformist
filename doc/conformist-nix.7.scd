@@ -78,6 +78,53 @@ set --- so it still fires when _go.mod_/_go.sum_ change.
 The *gomod2nix* CLI has no native non-writing check mode; the regenerate-and-
 diff check is a workaround pending amarbel-llc/gomod2nix#14.
 
+# CODEGEN DRIFT
+
+A flake check that detects stale generated output SHOULD also say how to fix it,
+by carrying a *passthru.codegenPatch* derivation whose _$out/patch_ brings the
+tree back in line (empty when it is already current).
+
+Such a check is otherwise only half a mechanism: it tells an author that a
+generated file is stale, at the merge gate, and leaves them to discover this
+repo's particular regenerate incantation and amend. Since every generator
+differs --- a config header, a facade export, a lockfile's downstream stamp ---
+there is no one command to run, but there IS one thing they share: the check
+that already detects the drift.
+
+Consumed by the *codegen-repair* linter, which walks _checks.<system>_,
+builds every attr carrying that passthru, and applies each patch to the working
+tree. It is enabled by *conformist.lib.presets.eng*, so an eng repo has the lane
+without configuring anything, and a repo whose checks carry no
+*passthru.codegenPatch* gets a no-op. Nothing in it names a generator.
+
+The linter is *repair-only*: its read-only *command* is a deliberate no-op,
+because the drift check carrying the passthru is already the check-mode gate.
+Running a second copy of it would double-report every finding, pay for a second
+build, and leave two places to debug. That is also why the lane is safe in the
+PURE *eng* preset despite needing live _nix_ and _git_ --- check mode never
+invokes a repair.
+
+The patch is applied with *git apply -p2*, rooted at the tree root, or at
+*passthru.codegenPrefix* when the check declares one (its module root, which may
+be a repo subdirectory). A patch from a subdirectory-rooted module whose check
+declares NO prefix is refused rather than applied at the wrong prefix.
+
+Discovery and per-check build failures WARN and exit 0, because the lane runs in
+a git pre-commit hook where a non-zero exit blocks the commit: an unreachable
+_nix_ must not stop a repo from committing, and the drift check still catches
+whatever staleness results. A patch that was built but will not APPLY exits 2 ---
+it was generated from this very tree, so a refusal is a real inconsistency. The
+*strict* option promotes the warnings.
+
+Because a *codegenPatch* rewrites, creates and deletes generated files, the
+linter opts into all three staging tiers (*restage-repair-outputs*,
+*stage-new-outputs*, *stage-deleted-outputs*; see *conformist.toml*(5)) so those
+outputs land in the commit that triggered the repair.
+
+See *conformist*(1) *codegen-repair* for the subcommand, and
+_docs/features/0001-generic-codegen-repair-linter.md_ for the design, its
+deliberate limitations, and the measured cost of discovery.
+
 # SEE ALSO
 
 *conformist*(7), *conformist.toml*(5)
