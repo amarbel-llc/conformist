@@ -15,6 +15,9 @@ The rules are deliberately narrow. They cover flake *hygiene* that a static
 check can verify from committed files alone (_flake.nix_, _flake.lock_), not Nix
 style, evaluation, or the authoring of justfile recipes that invoke nix.
 
+MODULE LIBRARY, at the end, is the other half of this page: the reference for the
+module a consumer evaluates to get those linters in the first place.
+
 See *conformist*(7) for conformist's concepts and *conformist.toml*(5) for the
 configuration format.
 
@@ -140,6 +143,99 @@ outputs land in the commit that triggered the repair.
 See *conformist*(1) *codegen-repair* for the subcommand, and
 _docs/features/0001-generic-codegen-repair-linter.md_ for the design, its
 deliberate limitations, and the measured cost of discovery.
+
+# MODULE LIBRARY
+
+The rules above are enforced by linters shipped in conformist's Nix module. This
+section is the reference for the module library itself --- what a consumer calls, and
+what it gets back. *conformist*(7) NIX MODULE is the one-paragraph overview.
+
+The library is *self-consumed*: conformist lints and formats its own tree with its
+own module, with no treefmt-nix dependency (conformist#4). So the module cannot rot
+separately from the tool.
+
+## Entry points
+
+_nix/default.nix_ is the pure library:
+
+*evalModule*, *submoduleWith*, *mkConfigFile*, *mkWrapper*
+	The core: evaluate a module, render a _conformist.toml_, wrap the binary.
+
+*mkFormatterModule*
+	Ported near-verbatim from treefmt-nix, so a _programs/<name>.nix_ module ports
+	unchanged.
+
+*mkLinterModule*
+	Its linter analogue, emitting a *[linter.<name>]* stanza with optional
+	*repair-command* / *repair-options*.
+
+*writeCheckScript* (_nix/write-check-script.nix_)
+	Packages a local script as a sandbox-safe linter command, via *patchShebangs*
+	and a wrapper (conformist#19). A bare script in the tree does not survive the
+	read-only _/nix/store_ check sandbox.
+
+*wrapWithToolchain* (_nix/wrap-with-toolchain.nix_)
+	One conformist wrapper carrying its formatter toolchain on PATH --- the
+	non-module hermetic *nix fmt* / *--staged* hook for a repository with a
+	hand-written _conformist.toml_ (conformist#51).
+
+*mkToolchainHooks* (_nix/mk-toolchain-hooks.nix_)
+	Returns three named wrappers, *{ formatter, preCommit, repair }*, installed as
+	*conformist* / *conformist-pre-commit* / *conformist-repair*. It is the
+	TOML-consumer mirror of the module's *build.{wrapper,preCommit,repair}*, so a
+	hand-written-config repository wires its hooks exactly as a module adopter does
+	(conformist#59). See *conformist*(7) MODES for how a hook uses them and why a
+	bare binary skips file types whose formatter is off PATH.
+
+*module-options.nix*
+	Declares the settings surface and the
+	*build.{devShell,configFile,wrapper,preCommit,repair,programs,check}* outputs.
+	The per-tool submodule is *freeform*, so a field conformist's config struct
+	understands but the module does not declare explicitly --- *repair-command*,
+	*repair-must-succeed*, the staging tiers --- can be set without a module change.
+
+## Registries
+
+_nix/programs/_ with _programs.nix_ is the formatter registry; _nix/linters/_ with
+_linters.nix_ is the linter registry. Both auto-discover: adding
+_nix/linters/<name>.nix_ registers that linter.
+
+## Remarshal-free config generation
+
+*mkTomlFormat* and *mkYamlFormat* replace *pkgs.formats.toml* and
+*pkgs.formats.yaml*, whose *.generate* serializes through remarshal and so drags
+*matplotlib* --- and through it *ffmpeg* --- into EVERY generated config as a
+build-time dependency (conformist#60).
+
+They keep *pkgs.formats.<fmt>.type* for value validation and swap *.generate* for a
+*yj* json-to-toml/yaml step. They are passed to all modules via *defaultSpecialArgs*,
+so every TOML and YAML config generator is remarshal-free: conformist's own config
+plus the statix, stylua, taplo, yamllint and similar settings files.
+*just verify-no-remarshal* guards against a new direct *pkgs.formats.{toml,yaml}* use
+creeping back in.
+
+## Presets
+
+A consumer enables a whole convention roster with one import rather than enabling
+each linter by hand. Exposed as *conformist.lib.presets.{eng,eng-go,eng-impure}*:
+
+*eng*
+	The pure lane: the language-agnostic eng-convention enforcers, which read only
+	committed files and so run inside the sandboxed *checks.formatting*.
+
+*eng-go*
+	The canonical Go formatter chain, *goimports* at priority 1 then *gofumpt* at
+	priority 2 --- the sequence the fleet converged on. Kept separate so a non-Go
+	repository importing *eng* never pulls a Go toolchain.
+
+*eng-impure*
+	The git-state lane, which needs a live _.git_ and so runs against the working
+	tree rather than the sandbox.
+
+conformist self-consumes all three (_nix/conformist.nix_ and
+_nix/conformist-impure.nix_), so a preset cannot drift from what conformist itself
+runs. A downstream consumer MUST set *conformist.package*: conformist is not in
+nixpkgs, so the module's *package* option has no default.
 
 # SEE ALSO
 

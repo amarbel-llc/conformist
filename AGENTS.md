@@ -171,32 +171,11 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
 **self-consumed**: conformist lints/formats its own tree with its own module
 (no treefmt-nix dependency — issue #4).
 
-- `nix/default.nix` — the pure library: `evalModule` / `submoduleWith` /
-  `mkConfigFile` / `mkWrapper`, plus `mkFormatterModule` (ported ~verbatim from
-  treefmt-nix, so `programs/<name>.nix` modules port unchanged) and its linter
-  analog `mkLinterModule` (emits `[linter.<name>]` with optional
-  `repair-command`/`repair-options`), `writeCheckScript`
-  (`nix/write-check-script.nix`) for packaging a local script as a sandbox-safe
-  linter command (`patchShebangs` + wrap, #19), `wrapWithToolchain`
-  (`nix/wrap-with-toolchain.nix`) for a single conformist wrapper carrying its
-  formatter toolchain on PATH — the non-module hermetic `nix fmt`/`--staged` hook
-  for a repo with a hand-written `conformist.toml` (#51), and `mkToolchainHooks`
-  (`nix/mk-toolchain-hooks.nix`) which returns the three named wrappers
-  `{ formatter, preCommit, repair }` (named `conformist` /
-  `conformist-pre-commit` / `conformist-repair`) — the TOML-consumer mirror of
-  the module's `build.{wrapper,preCommit,repair}`, so a hand-written-config repo
-  wires its hooks 1:1 with how a module adopter does (#59), and
-  `mkTomlFormat`/`mkYamlFormat` — remarshal-free replacements for
-  `pkgs.formats.toml`/`pkgs.formats.yaml` (whose `.generate` serializes via
-  remarshal, dragging `matplotlib`→`ffmpeg` into EVERY generated config as a
-  build-time dep — #60). They keep `pkgs.formats.<fmt>.type` for value validation
-  and swap `.generate` for a `yj` json→toml/yaml step; passed to all modules via
-  `defaultSpecialArgs` so every TOML/YAML config generator (the conformist config
-  itself plus statix/stylua/taplo/yamllint/… settings files) is remarshal-free.
-  `just verify-no-remarshal` guards against new direct `pkgs.formats.{toml,yaml}`
-  uses creeping back in. `module-options.nix`
-  declares the settings surface and the
-  `build.{devShell,configFile,wrapper,preCommit,repair,programs,check}` outputs.
+- **The module library is documented in `conformist-nix(7)` MODULE LIBRARY**
+  (`doc/conformist-nix.7.scd`): `evalModule`, `mkFormatterModule`/`mkLinterModule`,
+  `writeCheckScript`, `wrapWithToolchain`, `mkToolchainHooks`, the freeform
+  per-tool submodule, the remarshal-free `mkTomlFormat`/`mkYamlFormat`, and the
+  `presets.{eng,eng-go,eng-impure}` rosters.
 - `nix/programs/` + `programs.nix` — the formatter registry.
 - `nix/linters/` + `linters.nix` — the linter registry. Beyond general linters
   (shellcheck, ruff, statix, deadnix, typos, yamllint, …), this holds the
