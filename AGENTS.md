@@ -72,48 +72,16 @@ rationale a doc comment has no room for.
   (`just deploy-release`) tags the merged commit, pushes `release/vX.Y`, creates
   the forge release (smith) and attaches the tag-built static binary.
 
-`conformist check` exits 0 when clean, 1 on findings, 2 on operational error.
-`conformist --commit` (repair + auto-commit, #24) exits 0 when the tree was
-already conformant, 3 when it applied fixes and committed them
-(`chore: conformist fmt+fix`, plus any `--trailer` lines — #26), 2 when
-refused (dirty tree without `--allow-dirty`, or no git worktree). Before
-committing in any `--commit` mode it also refuses (exit 2) when the
-to-be-committed content carries leftover merge-conflict markers
-(`<<<<<<<`/`=======`/`>>>>>>>`, or diff3 `|||||||`) — detected via
-`git diff --check` over the files it would commit — rather than burying a
-non-building commit (especially via `--amend`) in history (#67); a conflict is
-not a fixable issue, so `--exit-zero-on-fix` (below) never swallows it.
-`conformist --commit --amend` (#33) folds the run's fixes into HEAD via
-`git commit --amend --no-edit` (keeping HEAD's message) instead of a fresh
-commit, exiting 3 on amend; it additionally refuses (exit 2) when HEAD has no
-commit to amend or is already pushed (`git branch -r --contains HEAD`).
-`--exit-zero-on-fix` (#35/#39) exits 0 instead of 3 when fixes were
-committed/amended/restaged (refusals/failures stay nonzero), so a caller that
-gates on "nonzero = abort" — e.g. a spinclass pre-merge repair hook or a git
-pre-commit hook — treats a successful repair as success. It pairs with
-`--commit` and with `--staged` (the canonical pre-commit-hook command is
-`conformist --staged --exit-zero-on-fix`).
-`conformist --staged` (lint-staged restage, #25/#40) exits 0/3/2 analogously:
-formats only index-staged files and restages the formatted content, creating
-no commit. A fully-staged file is formatted in the working tree and `git add`ed;
-a partially staged file (staged with additional unstaged edits) is no longer
-refused — its STAGED blob is formatted in isolation and restaged via the object
-store (`git hash-object` + `git update-index --cacheinfo`), leaving the working
-tree's unstaged hunks untouched (#40). A whole-tree codegen-repair linter
-(`passes-files=false` + `repair-command`) that sets `restage-repair-outputs`
-also has the (tracked) files its repair regenerates restaged — even when they
-were never staged — detected by a git-status delta taken around that linter's
-repair, so a stale generated sibling does not strand the commit (#55). Adding
-`stage-new-outputs` (tier 3, #56) additionally stages the brand-new (untracked)
-files such a linter's repair creates — the delta is then taken with
-`--untracked-files=all`; it is a distinct opt-in because staging untracked files
-is more dangerous, so `restage-repair-outputs` alone never stages them. Adding
-`stage-deleted-outputs` (tier 4, #57) additionally stages the deletions such a
-linter's repair performs (e.g. a package-move codegen removing a relocated
-file); it is the most destructive mutation, so it too is a distinct opt-in and
-the default now excludes deletions from the restage set (tiers 2–3 never stage a
-removal). It still refuses (exit 2) outside a git worktree, in stdin mode, or
-under fail-on-change.
+**Modes and exit codes are documented in the man pages, not here** (conformist#120).
+`conformist(7)` MODES is normative for repair, `--commit`, `--amend`,
+`--exit-zero-on-fix` and `--staged` — including partial staging, the
+conflict-marker refusal, and `check`'s 0/1/2 — and `conformist.toml(5)` LINTER
+SECTIONS for the staging tiers (`restage-repair-outputs`, `stage-new-outputs`,
+`stage-deleted-outputs`) and `repair-must-succeed`. Read them as
+`doc/conformist.7.scd` and `doc/conformist.toml.5.scd` — the in-repo sources. The
+`manpages` derivation builds them, but they do not resolve via `man` in an agent
+session and are absent from the hoisted manpage index, so the `.scd` file is the
+reachable copy.
 
 ## Architecture
 
@@ -138,146 +106,23 @@ under fail-on-change.
   `docs/features/0001-generic-codegen-repair-linter.md`) and `version`
   (`version.go`) dispatch
   separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
-  eng shape — writes every absent shape file (`conformist.nix`, a `version.env`
-  whose key is derived from the repo name — git origin remote, else the directory
-  basename, via `git.OriginRepoName` — and, greenfield, a complete
-  `flake.nix`/`justfile`; all `//go:embed`-ed from `cmd/conform/scaffold/`, the
-  flake.nix/justfile kept byte-identical to `templates/eng/` by a drift test —
-  #41). An existing `flake.nix` that is the recognized `eachDefaultSystem` shape
-  is edited **in place** to splice the `conformist` and `just-us` inputs (the
-  latter supplying both the devShell's `just` and the
-  `justfile-orphan-summary` linter module) and the per-system outputs wiring
-  (`cmd/conform/flakeedit/`, #61); any other shape (or
-  `--no-edit`) falls back to printing the wiring to paste, and an existing
-  justfile is never edited (its recipes are printed). The shared PEG
-  infrastructure — **three** grammars, navigation helpers,
-  splice types, and `ParseFlake` — lives in `cmd/conform/flakeparse/` (modelled
-  on amarbel-llc/doppelgang's `nixedit`); flakeedit imports it for its
-  wiring-specific logic. `nix.peg` is the FIRST pass (locates the `outputs`
-  value's byte span, everything else opaque); `outputs.peg` is the SECOND
-  (parses the recognized shape within that span); `shared.peg` holds the
-  lexical layer both of them pull in by name via langlang's
-  `@import <names> from "./shared.peg"` — dependencies resolve transitively, so
-  an importer lists only what it references directly, and `compileMatcher`
-  registers it with the loader alongside the entrypoint. shared.peg is never an
-  entrypoint and defines no `File` rule. Those rules were previously COPIED
-  into both grammars under a "self-contained" policy that nothing enforced, and
-  they silently diverged: the atomic-word fix (consume identifiers whole so
-  keyword lookaheads are only tested at token boundaries — without it `bin`,
-  `plugin`, `origin`, `writeShellScriptBin` end a `let` run mid-word) and the
-  `with <expr>;` construct both landed in `outputs.peg` only, leaving the FIRST
-  pass carrying both defects (conformist#106). Because a disagreement between
-  the passes about where a value ENDS is the worst bug class in a tool that
-  rewrites `flake.nix` in place, prefer adding to `shared.peg` over
-  reintroducing a local copy — and that is **enforced**, not advisory:
-  `compileMatcher` refuses an entrypoint that locally defines any name
-  `shared.peg` defines. Not paranoia about a hypothetical — langlang resolves
-  such a collision silently in favour of the LOCAL rule (it parses the importing
-  file first, and `GrammarNode.AddDefinition` is a no-op when the name is already
-  taken, `langlang/go@v0.0.12` `grammar_ast.go:732`), so a re-added copy would
-  shadow its way straight back to conformist#106 with no diagnostic at all;
-  reported as langlang#30. The recognized shape tolerates a redundant paren
-  wrapping the whole `eachDefaultSystem` application (`(utils.lib.eachDefaultSystem
-  (…))`) — in Nix that paren is identity, so refusing it was a parser limitation
-  rather than a roster choice (conformist#101) — a top-level `with <expr>;` in a
-  binding value (conformist#103; its `;` belongs to the `with`, not the binding,
-  the same defect class as the nested `let … in`) — and the **eng-hybrid `//`
-  merge** in either spelling (conformist#65): the merge attrset may lead
-  (`{ mods } // each (…)`, circus) or trail (`each (…) // { mods }`,
-  just-us/piggy), and composes with the paren (dodder/piggy are both). Across
-  the fleet the merge side carries only system-independent outputs
-  (`nixosModules`, `homeManagerModules`, `lib`), so the per-system attrset is
-  the unambiguous splice target. But `//` is a **shallow** update giving its
-  right operand precedence, so a *trailing* merge redefining a top-level attr
-  conformist wires (`formatter`/`checks`/`packages`/`devShells`) would silently
-  override wiring spliced into the per-system body — `ParsedOutputs.MergeShadows`
-  compares root segments and callers report a conflict (flakeedit) or refuse
-  (flakeclobber's `ErrShadowedTarget`) rather than writing dead wiring. Still
-  refused, deliberately: flake-parts, raw `forAllSystems`/`genAttrs`, the
-  `eachSystem` variant, and a `rec { … }` per-system return (structurally
-  splicable, but `rec` puts every sibling attr in scope, so an inserted attr
-  could be captured by or shadow a name the repo already binds — "we could
-  splice it" is not "it is safe to"). Also accepted: an **at-pattern** argument
-  in either spelling (`{ … }@inputs:` / `inputs@{ … }:`, conformist#104 — the
-  bound name is added to `ArgNames` because Nix rejects a formal that collides
-  with it), and a **chained `let … in let … in`** per-system body
-  (conformist#105 — sibling blocks, distinct from the nested-in-a-value case;
-  `LetExisting` is the UNION across blocks so the idempotency sentinel cannot
-  misfire, and the splice point is the LAST `in` so a new binding can reference
-  anything bound earlier). flakeedit splices by byte offset so the rest of the
-  file is preserved verbatim; it is per-target
-  idempotent and never clobbers an output attr it did not write. A flake
-  carrying only SOME of the `conformistPkg`/`justPkg`/`eval`/`impureEval` let
-  bindings is discriminated rather than refused outright (conformist#100): when
-  every binding conformist has always written (`conformistPkg`, `eval`,
-  `impureEval`) is present, it is conformist's own **outdated wiring** and the
-  missing bindings are spliced in individually — that is exactly the fleet
-  migration population, which the old blanket refusal blocked. Any other partial
-  state is still a foreign name collision → print-only. The pre-existing `eval`
-  body is opaque to this parser and so is left alone, reported as a conflict. An existing
-  `devShells.default` is merged into (conformist's tools spliced into its
-  `packages` list) and an existing `formatter` is replaced only under
-  `--force-formatter`; otherwise a pre-existing attr is reported as a conflict
-  to reconcile by hand (#63). `just verify-flakeedit-parse` (in the `verify`
-  lane) runs `conform` over the `test/flakeedit/` fixtures and
-  `nix-instantiate --parse`s each rewrite, so a splice regression that yields
-  unparseable Nix fails CI. A `flake.nix`/`justfile` that ALREADY carries the
-  conformist wiring is detected (conformance sentinels: a justfile `lint-fmt`
-  recipe / `checks.${system}.formatting`; a flake referencing
-  `conformist.lib.evalModule`) and left silent instead of nagging with the paste
-  snippet (#42(i)). To finish converging a brownfield tree, `conform` prints the
-  single `RepairCommand` — `nix fmt` (pure formatter + file-linter repair) then
-  the eng-impure lane's linters (`agents-md`, `gomod2nix`, …) in repair mode over
-  the working tree — that delegates the real content edits to conformist's own
-  linters; `conform --repair` runs that SAME command inline (working-tree only,
-  NO commit, leaving changes for the operator to review — the adoption-wave
-  zero-action path), the emitted and executed forms being one string
-  (`cmd/conform/conform.go`, #42(ii)). Idempotent
-  overall, exits 3 when it wrote/edited/repaired files (`ErrScaffolded`), 0 when
-  the tree is already conformant. `conform <domain>` / `conform <domain>#<id>` is
-  a distinct mode (#43): it resolves a flake template advertised by that domain's
-  PAPI document (`cmd/conform/papi/` — fetch `https://<domain>/.well-known/papi`,
-  follow `resources.templates` within the operator's own DNS tree, read the
-  visible `templates[]` of the `{data,meta}` collection per PAPI RFC-0001 §7/§8),
-  surfaces the resolved `flakeref`, and runs `nix flake init -t <flakeref>` (a
-  bare domain with one template uses it, several prompts via `huh` on a TTY and
-  otherwise fails listing the ids, refusing to guess); it maps operational
-  failures to exit 2 (`ErrConformFailed`) and refuses a non-empty target without
-  `--overwrite`.
+  eng shape and edits a recognized `flake.nix` in place. **That machinery is
+  documented in `conformist-conform(7)`** (`doc/conformist-conform.7.scd`) — the
+  two-pass PEG parser and why `shared.peg` is enforced rather than copied, the
+  recognized-shape roster and the deliberate refusals, `//`-merge shadowing,
+  splicing and partial-state discrimination, the PAPI template mode, and
+  flakeclobber including its sweep order. Read that page before changing anything
+  that rewrites a consumer's flake.
   A hidden `gen-man` (`genman.go`) renders the section-1 man pages
   from the cobra tree at build time; `--init` writes a starter config via
   `cmd/init`, `--completion` emits shell completions. Config flags live on
   **persistent** flags so `check` inherits tree-root/walk/excludes/config-file.
 - `cmd/flakeclobber/` — a separate binary for fleet migration (RFC 0004,
-  conformist#99/#100). Applies targeted list-element replacements in
-  `devShells.default.packages` across a fleet of repos (e.g. `pkgs.just` →
-  `justPkg`). Shares the PEG infrastructure from `cmd/conform/flakeparse/`.
-  Dry-run by default (`--apply` to write); verifies each rewrite with
-  `nix-instantiate --parse` before writing to disk — passing `-` (NOT
-  `/dev/stdin`, which Go's os.Pipe-backed stdin makes nix reject as a
-  nonexistent path, silently reducing every `--apply` to a no-op).
-  `--old`/`--new` must be paired one-for-one; deleting takes an explicit
-  `--new ""` so a missing flag can never become an implicit deletion. Writes are
-  **two-phase**: all rewrites are computed and parse-gated first, and a
-  parse-gate failure writes nothing at all (a per-file shape refusal fails only
-  that file). Refuses (leaving `src` untouched) on: unrecognized shape, no
-  devShell, partial state, an element appearing twice (a single-span splice
-  would half-apply), and a replacement identifier that is **not bound** in the
-  flake — the conformist#100 guard, since `--parse` is syntax-only and will
-  happily accept a flake referencing an undefined variable. Exit codes: 0 =
-  success (including already-migrated and not-applicable), 1 = migration or
-  parse-gate failure, 2 = operational error. Do NOT wire into `conform` — it is
-  an intentionally separate one-shot sweep tool. Built by the bga package
-  (`subPackages`) so it cannot rot unbuilt again, and gated end-to-end by
-  `just verify-flakeclobber-parse` over `test/flakeclobber/` fixtures.
-
-  **Sweep order matters.** The additive half is `conform`'s job (the `just-us`
-  input, the `justPkg` let binding); the destructive half is flakeclobber's.
-  Run destructive-first and the result references an unbound `justPkg` — hence
-  the binding guard. Because `conform` merges `justPkg` into the devShell list
-  while `pkgs.just` is still present, the correct post-`conform` operation is a
-  **deletion** (`--old pkgs.just --new ""`), not a replacement; a replacement
-  then sees both and refuses as ambiguous.
+  conformist#99/#100), sharing the parser from `cmd/conform/flakeparse/`. Its
+  behaviour, refusals, exit codes and the sweep-order trap are in
+  `conformist-conform(7)`. Do NOT wire it into `conform` — it is an intentionally
+  separate one-shot sweep tool. Built by the bga package (`subPackages`) so it
+  cannot rot unbuilt again.
 - `config/` — viper + TOML config loading. Config discovery searches upward for
   `conformist.toml`/`.conformist.toml`, with `treelint.toml` as a legacy
   fallback from the pre-rename `treelint` name (env: `CONFORMIST_CONFIG`).

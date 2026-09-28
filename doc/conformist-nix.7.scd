@@ -143,4 +143,5 @@ deliberate limitations, and the measured cost of discovery.
 
 # SEE ALSO
 
-*conformist*(7), *conformist.toml*(5)
+*conformist*(7), *conformist.toml*(5), *conformist-conform*(7),
+*conformist-git*(7)
