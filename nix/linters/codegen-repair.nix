@@ -108,17 +108,14 @@ in
         of warning and proceeding. The default is lenient because this lane runs
         inside a git pre-commit hook, where a non-zero exit blocks the commit and
         an unreachable nix would block every commit in the repo; the drift check
-        still catches any staleness that results.
+        still catches any staleness that results. Turn it on for a lane that would
+        rather stop than let a possibly-stale output through.
 
-        CURRENTLY INERT THROUGH THIS WIRING. conformist discards a
-        `repair-command`'s non-zero exit (`format.Linter.Repair` drops the flag
-        that `invocation.run` returns), so neither this option nor the command's
-        own exit 2 on an unappliable patch can fail a run today; both only take
-        effect when `conformist codegen-repair` is invoked directly. It is kept so
-        the intent is recorded and so it works once that changes — making it
-        effective is a conformist-wide decision about repair-command exits, not a
-        change this linter can make. See
-        docs/features/0001-generic-codegen-repair-linter.md.
+        A patch that was BUILT but will not apply fails the repair either way — it
+        was generated from this very tree, so a refusal is a real inconsistency.
+        Both that refusal and this option reach the caller because the linter sets
+        `repair-must-succeed` (below), without which conformist discards a
+        repair-command's exit status entirely.
       '';
     };
 
@@ -179,6 +176,16 @@ in
       "restage-repair-outputs" = true;
       "stage-new-outputs" = true;
       "stage-deleted-outputs" = true;
+
+      # This lane exists to leave generated files consistent with their sources,
+      # so a repair that could NOT do its job must stop the commit or merge it is
+      # gating rather than let it through silently. conformist otherwise discards a
+      # repair-command's exit status (most repairs are best-effort — `cargo clippy
+      # --fix` deliberately exits non-zero with an unfixable remainder), so this
+      # opt-in is what makes `strict` and the engine's own refusal on an
+      # unappliable patch actually block. The reason travels in the error, which
+      # matters because repair output is logged below the default level.
+      "repair-must-succeed" = true;
     };
   };
 }

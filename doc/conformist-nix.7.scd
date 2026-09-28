@@ -120,13 +120,17 @@ whatever staleness results. A patch that was built but will not APPLY exits 2 --
 it was generated from this very tree, so a refusal is a real inconsistency. The
 *strict* option promotes the warnings.
 
-Those signals currently reach a human only when *conformist codegen-repair* is
-run DIRECTLY. conformist discards a _repair-command_'s non-zero exit and logs its
-captured output at debug level, so through the linter wiring the exit 2 does not
-fail the run, the warnings need *-vv* to appear, and *strict* is inert. The drift
-check therefore remains the signal an operator actually sees. Making them
-effective is a conformist-wide decision about how repair-command exits and output
-are surfaced for every linter.
+A FAILURE blocks the commit or merge it gates, because the linter sets
+*repair-must-succeed* (see *conformist.toml*(5)): conformist otherwise discards a
+_repair-command_'s exit status, most repairs being best-effort. With it set, the
+non-zero exit becomes an operational failure carrying the command's output, so the
+run stops at exit 2 and reports why.
+
+A soft failure still exits 0, and today does so silently: repair output is logged
+at debug level, below the default, so a discovery failure is indistinguishable
+from a clean no-op until the drift check catches it at the merge gate. Surfacing
+it needs conformist to stop merging a tool's stdout and stderr, which is a
+conformist-wide change rather than a property of this linter.
 
 Because a *codegenPatch* rewrites, creates and deletes generated files, the
 linter opts into all three staging tiers (*restage-repair-outputs*,

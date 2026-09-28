@@ -40,7 +40,8 @@ var (
 // staging, not a git worktree, leftover conflict markers #67, a refused
 // config-identity mismatch #76) to 2; `conform` (#17) also exits 3 when it
 // scaffolds files; `codegen-repair` (#124) exits 2 on a patch that would not
-// apply; all other errors exit 1.
+// apply, as does any repair-must-succeed linter whose repair exits non-zero
+// (format.ErrRepairFailed); all other errors exit 1.
 func ExitCode(err error) int {
 	switch {
 	case err == nil:
@@ -53,6 +54,7 @@ func ExitCode(err error) int {
 		errors.Is(err, formatCmd.ErrStagedRefused),
 		errors.Is(err, formatCmd.ErrIdentityMismatch),
 		errors.Is(err, codegen.ErrRepairFailed),
+		errors.Is(err, format.ErrRepairFailed),
 		errors.Is(err, ErrConformFailed):
 		return 2
 	case errors.Is(err, formatCmd.ErrFixesCommitted),

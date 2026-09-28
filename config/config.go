@@ -162,6 +162,22 @@ type Linter struct {
 	// does. Has effect only when RestageRepairOutputs is also true; ignored
 	// otherwise. Attribution is by the same git-status delta. Default false.
 	StageDeletedOutputs bool `mapstructure:"stage-deleted-outputs,omitempty" toml:"stage-deleted-outputs,omitempty"`
+	// RepairMustSucceed makes a non-zero exit from RepairCommand an operational
+	// failure that stops the run (exit 2), instead of being discarded.
+	//
+	// The default is false because that is the established behaviour and several
+	// repairs rely on it: `cargo clippy --fix` is deliberately invoked without a
+	// trailing `-D` so an unfixable remainder does not abort the repair, and a
+	// repair that partially succeeded is usually better than none. But a repair
+	// whose whole purpose is to leave the tree consistent — a codegen lane that
+	// applies generated-file patches (conformist#124) — has the opposite need: if
+	// it could not do its job, the commit or merge it is gating must not proceed
+	// as though it had.
+	//
+	// The repair command's output is included in the returned error, so the reason
+	// is visible even though repair output is otherwise logged at debug level.
+	// Has effect only on a linter with a repair-command; ignored otherwise.
+	RepairMustSucceed bool `mapstructure:"repair-must-succeed,omitempty" toml:"repair-must-succeed,omitempty"`
 	// WorkingDir is an optional subdirectory (relative to the tree root) in which
 	// to run this linter's check/repair commands, e.g. a Go submodule whose
 	// codegen must run from there. Empty (the default) runs at the tree root,

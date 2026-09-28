@@ -42,15 +42,19 @@
 // and that exits non-zero. `--strict` promotes the soft failures to hard ones for
 // a gate that would rather stop than proceed uncertain.
 //
-// BUT NOTE WHERE THOSE SIGNALS CURRENTLY STOP. Both the exit code and the warnings
-// above reach a human only when this command is run DIRECTLY. Invoked as a
-// conformist linter's `repair-command` they are swallowed by plumbing that predates
-// this feature: [format.Linter.Repair] discards the non-zero-exit flag that
-// invocation.run returns, so the exit 2 never becomes an error, and it logs the
-// command's captured output at Debug while the default log level is Warn, so the
-// warnings are invisible without -vv. Until that changes, the drift check remains
-// the only signal an operator actually sees for BOTH outcomes, and
-// `linters.codegen-repair.strict` cannot fail a hook. Tracked separately; see
+// THE FAILURE REACHES THE CALLER ONLY BECAUSE THE LINTER OPTS IN. conformist
+// discards a `repair-command`'s exit status by default — most repairs are
+// best-effort — so nix/linters/codegen-repair.nix sets `repair-must-succeed`, which
+// turns a non-zero exit into an operational failure carrying this command's output.
+// Without it the exit 2 below would vanish and a commit would proceed over an
+// inconsistent tree.
+//
+// THE SOFT FAILURES, THOUGH, ARE STILL SILENT. The warnings go to this process's
+// stderr, which conformist captures and logs at Debug while the default level is
+// Warn — so a discovery failure looks exactly like a clean no-op unless someone
+// passes -vv, which no hook does. Raising the level is not the fix (Warn would be
+// wrong for a successful repair's chatter); it needs conformist to stop fusing
+// stdout and stderr. Tracked separately; see
 // docs/features/0001-generic-codegen-repair-linter.md.
 package codegen
 

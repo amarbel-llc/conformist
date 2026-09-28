@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/conformist/cmd"
 	"code.linenisgreat.com/conformist/cmd/codegen"
 	"code.linenisgreat.com/conformist/config"
 	"code.linenisgreat.com/conformist/test"
@@ -98,11 +99,10 @@ deleted file mode 100644
 }
 
 // codegenNixStub writes a stand-in `nix` answering the two invocations the engine
-// makes: discovery (`nix eval … --apply`) and one patch build per check.
-func codegenNixStub(t *test_ui.T, dir string) string {
+// makes: discovery (`nix eval … --apply`), advertising exactly the named checks, and
+// one patch build per check from codegenPatches.
+func codegenNixStub(t *test_ui.T, dir string, names ...string) string {
 	t.Helper()
-
-	names := []string{"extra", "facade", "pruned"}
 
 	var cases strings.Builder
 
@@ -114,7 +114,12 @@ func codegenNixStub(t *test_ui.T, dir string) string {
 		cases.WriteString("    ;;\n")
 	}
 
-	discovery := `[{"name":"extra"},{"name":"facade"},{"name":"pruned"}]`
+	entries := make([]string, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, `{"name":"`+name+`"}`)
+	}
+
+	discovery := "[" + strings.Join(entries, ",") + "]"
 
 	script := filepath.Join(dir, "nix")
 	body := bashShebang(t) +
@@ -220,7 +225,7 @@ func TestStagedCodegenRepairRestagesEveryOutputKind(tt *testing.T) {
 	as.NoError(os.WriteFile("flake.nix", []byte("{ outputs = _: { }; }\n"), 0o644))
 
 	aux := t.TempDir()
-	nix := codegenNixStub(t, aux)
+	nix := codegenNixStub(t, aux, "extra", "facade", "pruned")
 	repair := codegenRepairCommand(t, aux, nix, tempDir)
 
 	passesFiles := false
@@ -301,4 +306,112 @@ func TestStagedCodegenRepairRestagesEveryOutputKind(tt *testing.T) {
 
 	// No commit was created: the commit is the caller's.
 	as.Equal(head, git("rev-parse", "HEAD"))
+}
+
+// TestStagedCodegenRepairBlocksWhenPatchWillNotApply is the other half of the
+// contract: when the lane CANNOT do its job, it must stop the commit rather than let
+// a stale generated file through quietly.
+//
+// conformist otherwise discards a repair-command's exit status — most repairs are
+// best-effort — so the `repair-must-succeed` opt-in is what carries the failure out.
+// The subtest without that flag is the control: it proves the blocking comes from the
+// opt-in and not from something incidental about a failing subprocess, which is the
+// difference between a real gate and one that is merely believed.
+func TestStagedCodegenRepairBlocksWhenPatchWillNotApply(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+
+	stagedConflictingCodegen(t, true, withError(func(as *require.Assertions, err error) {
+		as.Error(err, "a repair that could not do its job must stop the commit")
+		// Exit 2, an operational failure: the repair could not run to completion.
+		// Distinct from exit 1 ("a tool reported findings"), so a gate can tell the
+		// two apart.
+		as.Equal(2, cmd.ExitCode(err), "a blocked repair must exit 2")
+		// The repair command's own output travels in the error. That matters
+		// because conformist logs repair output below the default level, so the
+		// error is the only place the operator learns WHY the commit stopped.
+		as.ErrorContains(err, "does not apply to this tree")
+	}))
+}
+
+// TestStagedCodegenRepairProceedsWithoutMustSucceed is the control for the test
+// above. The SAME failing repair, with only `repair-must-succeed` turned off, lets
+// the commit proceed — which is what proves the blocking comes from that opt-in
+// rather than from something incidental about a subprocess exiting non-zero. Without
+// this pairing, the blocking test would pass for a reason nobody had established.
+func TestStagedCodegenRepairProceedsWithoutMustSucceed(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+
+	stagedConflictingCodegen(t, false, withNoError(t))
+}
+
+// stagedConflictingCodegen builds a fixture whose codegen patch cannot apply — the
+// committed generated file was hand-edited, so the patch's hunk matches neither
+// forwards nor in reverse — stages an unrelated source edit, and runs the real
+// `--staged` lane over it. The caller's assertion carries the expectation.
+func stagedConflictingCodegen(t *test_ui.T, repairMustSucceed bool, assert option) {
+	t.Helper()
+
+	as := require.New(t)
+
+	tempDir := t.TempDir()
+	test.ChangeWorkDir(t, tempDir)
+
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "conformist-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "conformist-test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "conformist-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "conformist-test@example.invalid")
+
+	git := func(args ...string) string {
+		t.Helper()
+
+		out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput()
+		as.NoError(err, "git %v: %s", args, out)
+
+		return strings.TrimSpace(string(out))
+	}
+
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "internal"), 0o755))
+	as.NoError(os.MkdirAll(filepath.Join(tempDir, "pkgs"), 0o755))
+	as.NoError(os.WriteFile(filepath.Join("internal", "foo.src"), []byte("original\n"), 0o644))
+
+	// The `facade` patch's hunk expects "// generated from original"; this content
+	// is something else, so the patch cannot apply in either direction.
+	as.NoError(os.WriteFile(
+		filepath.Join("pkgs", "foo.generated"), []byte("hand-edited\n"), 0o644,
+	))
+	as.NoError(os.WriteFile("flake.nix", []byte("{ outputs = _: { }; }\n"), 0o644))
+
+	aux := t.TempDir()
+	nix := codegenNixStub(t, aux, "facade")
+	repair := codegenRepairCommand(t, aux, nix, tempDir)
+
+	passesFiles := false
+	test.WriteConfig(t, filepath.Join(tempDir, "conformist.toml"), &config.Config{
+		LinterConfigs: map[string]*config.Linter{
+			"codegen-repair": {
+				Command:              "true",
+				RepairCommand:        repair,
+				Includes:             []string{"internal/*"},
+				PassesFiles:          &passesFiles,
+				RestageRepairOutputs: true,
+				RepairMustSucceed:    repairMustSucceed,
+			},
+		},
+	})
+
+	git("init")
+	git("add", ".")
+	git("commit", "-m", "init")
+
+	as.NoError(os.WriteFile(filepath.Join("internal", "foo.src"), []byte("edited\n"), 0o644))
+	git("add", "internal/foo.src")
+
+	conformist(t, withArgs("--staged", "--exit-zero-on-fix", "--no-cache"), assert)
+
+	// Either way the hand-edited file is untouched — the patch never applied.
+	content, err := os.ReadFile(filepath.Join("pkgs", "foo.generated"))
+	as.NoError(err)
+	as.Equal("hand-edited\n", string(content))
 }

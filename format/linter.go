@@ -2,6 +2,7 @@ package format
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -85,16 +86,45 @@ func (l *Linter) Check(ctx context.Context, files []*walk.File) (findings bool, 
 	return l.run(ctx, l.commandInv, l.config.Options, files)
 }
 
+// ErrRepairFailed reports that a linter's repair command exited non-zero and that
+// the linter opts into treating that as an operational failure
+// (repair-must-succeed). It is a sentinel so cmd.ExitCode can map it to exit 2
+// rather than the generic 1: a repair that could not do its job is a different
+// thing from a tool that found something.
+var ErrRepairFailed = errors.New("linter repair command failed")
+
+// RepairMustSucceed reports whether a non-zero exit from this linter's repair
+// command should stop the run (conformist#124). Meaningless without a repair
+// command, so it is gated on having one.
+func (l *Linter) RepairMustSucceed() bool {
+	return l.config.RepairMustSucceed && l.HasRepair()
+}
+
 // Repair runs the linter's autofix command over files (it may write to them).
 // It is a no-op when no repair command is configured.
+//
+// A non-zero exit is DISCARDED unless the linter sets repair-must-succeed: most
+// repairs are best-effort (`cargo clippy --fix` intentionally exits non-zero with
+// an unfixable remainder), and failing every run on that would be worse than
+// letting the matching check report it. A linter whose repair exists to leave the
+// tree consistent opts in, and then the exit becomes ErrRepairFailed carrying the
+// command's output — which also makes the reason visible, since repair output is
+// otherwise logged below the default level.
 func (l *Linter) Repair(ctx context.Context, files []*walk.File) error {
 	if l.config.RepairCommand == "" {
 		return nil
 	}
 
-	_, output, err := l.run(ctx, l.repairInv, l.config.RepairOptions, files)
+	nonzero, output, err := l.run(ctx, l.repairInv, l.config.RepairOptions, files)
 	if err != nil {
 		return err
+	}
+
+	if nonzero && l.RepairMustSucceed() {
+		return fmt.Errorf(
+			"%w: %s exited non-zero and this linter requires its repair to succeed: %s",
+			ErrRepairFailed, l.config.RepairCommand, strings.TrimSpace(output),
+		)
 	}
 
 	if output != "" {

@@ -67,9 +67,14 @@ was BUILT but will not apply is different: the contract says it was generated fr
 this very tree, so a refusal means something is genuinely inconsistent, and that
 fails. `--strict` promotes the soft failures for a lane that would rather stop.
 
-**Those exit codes and warnings are only visible when the command is run
-directly.** See "Signals that do not reach the operator yet" under Limitations —
-through the linter wiring, both are currently swallowed.
+Run as a linter's `repair-command`, a failure reaches the caller because the linter
+sets `repair-must-succeed`: conformist otherwise discards a repair command's exit
+status, since most repairs are best-effort (`cargo clippy --fix` deliberately exits
+non-zero with an unfixable remainder). With it set, a non-zero exit becomes an
+operational failure carrying the command's output, so the run stops at exit 2 and
+says why — blocking both the commit a pre-commit hook gates and the merge a
+pre-merge repair hook gates. A soft failure still exits 0 and, today, does so
+silently; see Limitations.
 
 ### The linter
 
@@ -83,6 +88,7 @@ anything, and a repo whose checks carry no `codegenPatch` gets a no-op.
 | `enable` | false (true via `presets.eng`) | |
 | `package` | `null` | The conformist whose subcommand runs. Null resolves `conformist` from PATH; `presets.eng` sets it from the module's own `package`, giving a hermetic store path. |
 | `strict` | `false` | Pass `--strict`. |
+| `repair-must-succeed` | set to `true` | Makes a failed repair an operational failure (exit 2) rather than a discarded exit status, so it blocks the commit or merge it gates. A general `[linter.<name>]` option, default false. |
 | `includes` | `[ "*.go" "flake.lock" "go.nix" ]` | Fire-trigger globs. |
 | `extra-includes` | `[ ]` | Appended to `includes`. |
 
@@ -133,26 +139,23 @@ Repairing by hand, failing loudly rather than warning:
 **Repair-only.** `conformist check` does not run this. The repo's own drift check
 reports staleness; this only fixes it.
 
-**Signals that do not reach the operator yet.** Run directly, the command exits 2
-on a patch that will not apply and warns on a soft failure. Run as a linter's
-`repair-command` — which is how the lane actually runs — both are swallowed by
-plumbing that predates this feature:
+**A soft failure is silent.** When discovery fails — nix unreachable, offline, an
+eval error in an unrelated check — the lane warns and exits 0 by design, but that
+warning does not reach the operator. `format.Linter.Repair` logs a repair command's
+captured output at `Debug` while the default log level is `Warn`, so it needs `-vv`,
+which no git hook passes. A silent soft failure is therefore indistinguishable from
+"ran fine, nothing to do", and the staleness surfaces later at the merge gate.
 
-- `format.Linter.Repair` discards the non-zero-exit flag `invocation.run` returns
-  (`format/exec.go` maps a non-zero exit to `nonzero=true, err=nil`), so the exit 2
-  never becomes an error and the commit proceeds.
-- The same function logs the command's captured output at `Debug` while the default
-  log level is `Warn`, so every warning needs `-vv` to appear — and no hook passes
-  `-vv`.
+Making it visible is not a matter of raising the log level: `Debug` and `Info` are
+both below the default, and `Warn` would be wrong for a *successful* repair's
+ordinary chatter. The real fix is to stop fusing the streams — `format/exec.go` uses
+`CombinedOutput()`, so conformist cannot tell "the tool is narrating" from "the tool
+is complaining" — which means changing `invocation.run`, shared by every formatter
+and every linter's check path. That is a conformist-wide change with fleet-wide
+output consequences, so it is tracked separately rather than ridden in here.
 
-The consequence is not an unsafe tree: a patch that will not apply leaves the
-generated file stale, which the drift check still catches at the merge gate. The
-consequence is that the lane is *quieter than documented*, and that
-`linters.codegen-repair.strict = true` cannot fail a hook — it converts soft
-failures into the same swallowed exit 2. Making either effective means changing how
-conformist surfaces repair-command exits and output for ALL linters (a non-zero
-`cargo clippy --fix` with unfixable lints left over is deliberately not fatal
-today), which is a conformist-wide decision rather than part of this feature.
+A repair FAILURE is not affected: it travels as an error carrying the command's
+output, so its reason is reported (see `repair-must-succeed` under Interface).
 
 **A subdirectory module root is repaired only when the check publishes it.** A
 codegenPatch's paths are relative to its check's module root, which may be a repo
@@ -263,7 +266,7 @@ everything, so it always pays at least one discovery.
 |---|---|---|---|
 | trigger globs | `*.go`, `flake.lock`, `go.nix` | What actually moves a generated file: a changed type or config struct, and the two lockfiles through which a producer's new output reaches a consumer. Kept narrow because discovery costs ~2s per run and is not cached. | A repo finds drift landing that the triggers missed, or the measured discovery cost drops far enough that "every commit" becomes affordable |
 | convergence pass limit | `max(4, 2*checks+2)` | One apply per check would do for independent checks; the doubling allows a legitimate chain, where one generator's output is another's input. Beyond that is a cycle, not a chain. | A real repo hits the limit with generators that are chained rather than cyclic |
-| `strict` default | `false` | The lane runs in a pre-commit hook, where exiting non-zero blocks the commit; an unreachable nix must not block a whole repo when the drift check still catches the staleness. Note the option is currently inert through the linter wiring — see Limitations. | Repos routinely discover staleness the lane silently failed to repair |
+| `strict` default | `false` | The lane runs in a pre-commit hook, where exiting non-zero blocks the commit; an unreachable nix must not block a whole repo when the drift check still catches the staleness. | Repos routinely discover staleness the lane silently failed to repair |
 | nix stderr kept on failure | last 2000 bytes | nix puts the actual cause last, and a commit hook's output has to stay readable. | Diagnoses routinely need context the tail cuts off |
 
 ## More Information
