@@ -63,6 +63,11 @@ func rewriteLine(n int, text string) string {
 		"mv \"$swap\" \"$target\""
 }
 
+// prefix builds a non-nil codegenPrefix. The field is a pointer because the
+// contract distinguishes an ASSERTED root ("") from an UNKNOWN one (null), so a
+// test has to be able to express both.
+func prefix(s string) *string { return &s }
+
 // nixStub writes a stand-in `nix` covering the two invocations the engine makes:
 // `nix eval … --apply` (answered with a canned discovery result) and `nix build …
 // passthru.codegenPatch` (answered with a freshly computed patch). It returns the
@@ -326,13 +331,65 @@ func TestPrefixPlacesPatchUnderModuleRoot(tt *testing.T) {
 	initRepo(t, dir, map[string]string{"go/config_tommy.go": "package stale\n"})
 
 	nix, _ := nixStub(t, aux,
-		[]Check{{Name: "tommy-codegen", Prefix: "go"}},
+		[]Check{{Name: "tommy-codegen", Prefix: prefix("go")}},
 		[]stubSpec{{name: "tommy-codegen", patch: subdirPatch}},
 	)
 
 	as.NoError(Run(context.Background(), options(nix, dir)))
 
 	as.Equal("package fresh\n", readFile(t, filepath.Join(dir, "go", "config_tommy.go")))
+	as.NoFileExists(filepath.Join(dir, "config_tommy.go"))
+}
+
+// TestAssertedRootPrefixAppliesAtTreeRoot covers the second of the contract's three
+// states (igloo#83): an explicit "" means the check ASSERTS its module is the repo
+// root. It must behave exactly like the root case — no --directory — rather than
+// being mistaken for an unset field.
+func TestAssertedRootPrefixAppliesAtTreeRoot(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	aux := t.TempDir()
+
+	initRepo(t, dir, map[string]string{"gen.txt": "stale\n"})
+
+	nix, _ := nixStub(t, aux,
+		[]Check{{Name: "rooted", Prefix: prefix("")}},
+		[]stubSpec{{name: "rooted", file: "gen.txt", gen: rewriteLine(1, "fresh")}},
+	)
+
+	as.NoError(Run(context.Background(), options(nix, dir)))
+
+	as.Equal("fresh\n", readFile(t, filepath.Join(dir, "gen.txt")))
+}
+
+// TestAssertedRootGetsGenericRefusal pins the diagnostic half of the same
+// distinction. A check that declared its root IS the repo root must not be told its
+// module is "most likely a repository subdirectory" — it already ruled that out, so
+// the subdirectory hint would send the operator after nothing. Only an UNKNOWN root
+// (null) earns that hint; compare
+// TestSubdirectoryRootedPatchIsRefusedWithDiagnosis, which uses the same patch.
+func TestAssertedRootGetsGenericRefusal(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	aux := t.TempDir()
+
+	initRepo(t, dir, map[string]string{"go/config_tommy.go": "package stale\n"})
+
+	nix, _ := nixStub(t, aux,
+		[]Check{{Name: "tommy-codegen", Prefix: prefix("")}},
+		[]stubSpec{{name: "tommy-codegen", patch: subdirPatch}},
+	)
+
+	err := Run(context.Background(), options(nix, dir))
+
+	as.ErrorIs(err, ErrRepairFailed)
+	as.Contains(err.Error(), "changed under the build")
+	as.NotContains(err.Error(), "subdirectory")
+
 	as.NoFileExists(filepath.Join(dir, "config_tommy.go"))
 }
 
@@ -420,7 +477,8 @@ func TestDiscoverParsesContractFields(tt *testing.T) {
 	nix, _ := nixStub(t, aux,
 		[]Check{
 			{Name: "zulu", Includes: []string{"flake.lock"}},
-			{Name: "alpha", Prefix: "go", Includes: []string{"*.go", "go.nix"}},
+			{Name: "alpha", Prefix: prefix("go"), Includes: []string{"*.go", "go.nix"}},
+			{Name: "mike", Prefix: prefix("")},
 		},
 		nil,
 	)
@@ -428,13 +486,19 @@ func TestDiscoverParsesContractFields(tt *testing.T) {
 	checks, err := Discover(context.Background(), options(nix, dir))
 	as.NoError(err)
 
+	// All three prefix states survive the round trip distinctly: a subpath, an
+	// asserted root, and an unknown root. Collapsing the last two is the mistake
+	// this asserts against.
 	as.Equal(
 		[]Check{
-			{Name: "alpha", Prefix: "go", Includes: []string{"*.go", "go.nix"}},
+			{Name: "alpha", Prefix: prefix("go"), Includes: []string{"*.go", "go.nix"}},
+			{Name: "mike", Prefix: prefix("")},
 			{Name: "zulu", Includes: []string{"flake.lock"}},
 		},
 		checks,
 	)
+
+	as.Nil(checks[2].Prefix, "an absent codegenPrefix must stay unknown, not become the root")
 }
 
 // TestMissingTargetsUsesGitsOwnStrip pins the git behaviour the subdirectory
@@ -623,11 +687,12 @@ func TestCheckValidateRejectsUnsafePrefix(tt *testing.T) {
 	t := &test_ui.T{T: tt}
 	as := require.New(t)
 
-	as.NoError(Check{Name: "ok"}.validate())
-	as.NoError(Check{Name: "ok", Prefix: "go"}.validate())
-	as.NoError(Check{Name: "ok", Prefix: "nested/module"}.validate())
+	as.NoError(Check{Name: "ok"}.validate(), "an unknown root is the common case, not an error")
+	as.NoError(Check{Name: "ok", Prefix: prefix("")}.validate())
+	as.NoError(Check{Name: "ok", Prefix: prefix("go")}.validate())
+	as.NoError(Check{Name: "ok", Prefix: prefix("nested/module")}.validate())
 
-	as.ErrorContains(Check{Name: "ok", Prefix: "/etc"}.validate(), "absolute")
-	as.ErrorContains(Check{Name: "ok", Prefix: "../sibling"}.validate(), "climbs out")
+	as.ErrorContains(Check{Name: "ok", Prefix: prefix("/etc")}.validate(), "absolute")
+	as.ErrorContains(Check{Name: "ok", Prefix: prefix("../sibling")}.validate(), "climbs out")
 	as.ErrorContains(Check{Name: "has space"}.validate(), "unquoted")
 }

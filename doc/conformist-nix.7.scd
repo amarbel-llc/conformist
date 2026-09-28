@@ -104,10 +104,14 @@ build, and leave two places to debug. That is also why the lane is safe in the
 PURE *eng* preset despite needing live _nix_ and _git_ --- check mode never
 invokes a repair.
 
-The patch is applied with *git apply -p2*, rooted at the tree root, or at
-*passthru.codegenPrefix* when the check declares one (its module root, which may
-be a repo subdirectory). A patch from a subdirectory-rooted module whose check
-declares NO prefix is refused rather than applied at the wrong prefix.
+The patch is applied with *git apply -p2*. *passthru.codegenPrefix* names the
+module root it is relative to, and is tri-state: a subpath (applied with
+*--directory=*), an explicit empty string (the check asserts its module is the
+repo root), or _null_ --- unknown, which is the ordinary case for a root module,
+since the prefix is auto-derived only for a *src = self + "/subdir"* module. With
+a null prefix the tree root is the only candidate, so the patch is applied there
+when its paths resolve and REFUSED otherwise, rather than written at a prefix
+nobody confirmed.
 
 Discovery and per-check build failures WARN and exit 0, because the lane runs in
 a git pre-commit hook where a non-zero exit blocks the commit: an unreachable

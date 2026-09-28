@@ -6,9 +6,10 @@ promotion-criteria: |
   passthru.codegenPatch and run this lane in their pre-commit hook for two weeks,
   with no commit blocked by a refusal that turned out to be spurious.
 
-  testing -> accepted: passthru.codegenPrefix exists upstream and is honored here
-  (closing the subdirectory-module limitation), the trigger globs have needed no
-  adjustment for two weeks, and no repo has had to disable the lane.
+  testing -> accepted: a subdirectory-rooted module has been repaired end to end in
+  a real repo via passthru.codegenPrefix (the field itself landed in igloo#83 and is
+  honored here), the trigger globs have needed no adjustment for two weeks, and no
+  repo has had to disable the lane.
 ---
 
 # Generic codegen-repair at commit time
@@ -34,7 +35,7 @@ keeps every attr carrying `passthru.codegenPatch` (the igloo#80 contract):
 | Attribute | Meaning |
 |---|---|
 | `passthru.codegenPatch` | A derivation whose `$out/patch` is a `git diff --no-index --binary src work`, empty when the tree is already current. Its presence is what marks a check as repairable. |
-| `passthru.codegenPrefix` | Optional. The tree-root-relative directory the patch is rooted at (the module root given to the builder as `src`). Absent or empty means the tree root. |
+| `passthru.codegenPrefix` | Optional, and **tri-state** (igloo#83). A subpath string (`"go"`) means the module root is there, so the patch is applied with `git apply --directory=go`. An explicit `""` means the check asserts its module IS the repo root. `null` — or an absent attr — means the root is UNKNOWN, which is the common case: igloo auto-derives a prefix only for the `src = self + "/subdir"` shape, so an ordinary root module written `src = self` or `src = ./.` reports null. Absent is deliberately NOT read as `""`; see Limitations. |
 | `passthru.codegenIncludes` | Optional. Trigger globs the generator declares for inputs that are not Go sources. Reported, not acted on — see Limitations. |
 
 Nothing else is read, and no generator is named anywhere: a repo onboards by having
@@ -153,23 +154,30 @@ conformist surfaces repair-command exits and output for ALL linters (a non-zero
 `cargo clippy --fix` with unfixable lints left over is deliberately not fatal
 today), which is a conformist-wide decision rather than part of this feature.
 
-**A module root in a subdirectory is refused, not repaired.** A codegenPatch's paths
-are relative to its check's module root, which may be a repo subdirectory (a repo
-whose Go module lives under `go/`). `passthru.codegenPrefix` is read and honored as
-`git apply --directory` when present, so the field can land upstream without another
-change here — but until it exists, such a patch is REFUSED with a message naming the
-absent paths and the field that would fix it. Applying it at the tree root would be
-a silent wrong-prefix write, which is the worst outcome available. Tracked on
-igloo#80.
+**A subdirectory module root is repaired only when the check publishes it.** A
+codegenPatch's paths are relative to its check's module root, which may be a repo
+subdirectory (a repo whose Go module lives under `go/`). When
+`passthru.codegenPrefix` names that subpath, the patch is applied there with
+`git apply --directory` and lands correctly. When the prefix is `null` — the common
+case, since igloo derives one only for the `src = self + "/subdir"` shape — the tree
+root is the only candidate, so the patch is applied there if its paths resolve and
+REFUSED otherwise, with a message naming the absent paths and the field that would
+fix it. Applying it at the tree root regardless would be a silent wrong-prefix
+write, the worst outcome available.
 
-**That refusal is not airtight for an add-only patch.** The refusal works by noticing
-that the patch targets files absent from the tree root, which a patch that only
-CREATES files does not reveal — its targets are legitimately absent either way. A
-subdirectory-rooted check whose patch only adds files would therefore create them at
-the repository root. Nothing in the patch distinguishes that case, so
-`codegenPrefix` is the only real fix; inferring the module root from the repo's
-layout was considered and rejected, because a repair tool that guesses at a root is
-how a repository gets corrupted.
+A check that asserts `""` is treated as a known root, and a refusal there is
+reported as the plain conflict it is rather than hinting at a subdirectory the check
+has already ruled out.
+
+**The null-prefix refusal is not airtight for an add-only patch.** It works by
+noticing that the patch targets files absent from the tree root, which a patch that
+only CREATES files does not reveal — its targets are legitimately absent either way.
+A subdirectory-rooted check with a null prefix whose patch only adds files would
+therefore create them at the repository root. Nothing in the patch distinguishes
+that case, so publishing `codegenPrefix` is the only real fix (which is why igloo#83
+exists); inferring the module root from the repo's layout was considered and
+rejected, because a repair tool that guesses at a root is how a repository gets
+corrupted.
 
 **Trigger globs are not unioned with `codegenIncludes` automatically.** This module
 is evaluated INSIDE the consumer's own flake, so reading `checks` from here to learn

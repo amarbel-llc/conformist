@@ -113,18 +113,27 @@ var checkNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 type Check struct {
 	// Name is the attr name under `checks.<system>`.
 	Name string `json:"name"`
-	// Prefix is the check's `passthru.codegenPrefix`: the tree-root-relative
-	// directory its patch is rooted at, i.e. the module root that was handed to
-	// the builder as `src`. Empty means the tree root itself.
+	// Prefix is the check's `passthru.codegenPrefix` (igloo#83), and it is
+	// deliberately a pointer because the contract has THREE states, not two:
 	//
-	// A codegenPatch's paths are relative to that root, NOT to the repository, so
-	// a check whose module lives in a subdirectory (a repo with its Go module
-	// under go/) needs the prefix to land its patch in the right place. The field
-	// is read optimistically: the contract does not publish it yet, and until it
-	// does a subdirectory-rooted check is refused rather than misapplied (see
+	//   "go" — the module root is that repo-relative subpath, so the patch must be
+	//          applied with `git apply --directory=go`.
+	//   ""   — the module IS the repo root, asserted by the check.
+	//   nil  — UNKNOWN (the attr is absent, or present and null). igloo only
+	//          auto-derives a prefix from the `self + "/subdir"` src shape; a
+	//          module written `src = self` or `src = ./.` derives null even though
+	//          it sits at the root, because bare self and an unrelated bare path
+	//          are indistinguishable by string context. So nil is the COMMON case
+	//          for a root module, not an error.
+	//
+	// A codegenPatch's paths are relative to the module root, NOT to the
+	// repository, so conflating nil with "" would be a guess about where a patch
+	// belongs. For nil this command applies at the tree root but only when the
+	// patch's paths resolve there, and refuses loudly otherwise; for "" it knows
+	// the root is right and reports a refusal as the plain conflict it is. See
 	// [session.explainRefusal] and
-	// docs/features/0001-generic-codegen-repair-linter.md).
-	Prefix string `json:"prefix"`
+	// docs/features/0001-generic-codegen-repair-linter.md.
+	Prefix *string `json:"prefix"`
 	// Includes is the check's own `passthru.codegenIncludes` (igloo#80): the
 	// trigger globs a generator declares next to its check for inputs that are
 	// not Go sources. It is reported here rather than acted on — see the
@@ -133,6 +142,26 @@ type Check struct {
 	// the linter's own `includes` cannot be computed inside the consumer's own
 	// module eval.
 	Includes []string `json:"includes"`
+}
+
+// directory is the `git apply --directory` argument this check's patch needs, or
+// "" when the patch applies at the tree root — which covers both an asserted root
+// ("") and an unknown root (nil, where the tree root is the only candidate and
+// [session.explainRefusal] guards the guess).
+func (c Check) directory() string {
+	if c.Prefix == nil {
+		return ""
+	}
+
+	return *c.Prefix
+}
+
+// rootIsAsserted reports whether the check positively declared that its module is
+// the repo root, as opposed to leaving it unknown. It separates "this really is the
+// root" from "nobody said", which is the difference between reporting a refusal as
+// a plain conflict and suggesting a subdirectory-rooted module.
+func (c Check) rootIsAsserted() bool {
+	return c.Prefix != nil && *c.Prefix == ""
 }
 
 // validate reports why this command cannot safely act on a discovered check, or
@@ -144,7 +173,7 @@ func (c Check) validate() error {
 		)
 	}
 
-	if c.Prefix == "" {
+	if c.directory() == "" {
 		return nil
 	}
 
@@ -152,17 +181,19 @@ func (c Check) validate() error {
 	// climbing value would write outside the tree. Refuse rather than sanitize:
 	// a prefix this command does not understand is a contract mismatch, and
 	// guessing at it is how a repair tool corrupts a repo.
-	if filepath.IsAbs(c.Prefix) {
+	prefix := c.directory()
+
+	if filepath.IsAbs(prefix) {
 		return fmt.Errorf(
 			"its passthru.codegenPrefix (%q) is absolute, but a codegen prefix must be a"+
 				" tree-root-relative subdirectory",
-			c.Prefix,
+			prefix,
 		)
 	}
 
-	if slices.Contains(strings.Split(filepath.ToSlash(filepath.Clean(c.Prefix)), "/"), "..") {
+	if slices.Contains(strings.Split(filepath.ToSlash(filepath.Clean(prefix)), "/"), "..") {
 		return fmt.Errorf(
-			"its passthru.codegenPrefix (%q) climbs out of the tree root", c.Prefix,
+			"its passthru.codegenPrefix (%q) climbs out of the tree root", prefix,
 		)
 	}
 
@@ -239,7 +270,11 @@ let
         if check ? passthru && check.passthru ? codegenPatch then
           {
             inherit name;
-            prefix = check.passthru.codegenPrefix or "";
+            # Defaults to null, NOT to the empty string: an absent attr means the
+            # module root is unknown, while an explicit "" means the check asserts
+            # it IS the repo root (igloo#83). Defaulting to "" here would silently
+            # turn "nobody said" into "definitely the root".
+            prefix = check.passthru.codegenPrefix or null;
             includes = check.passthru.codegenIncludes or [ ];
           }
         else
@@ -781,22 +816,29 @@ func (s *session) restoreIndex(ctx context.Context) {
 }
 
 // explainRefusal turns a patch that will not apply into a message naming the
-// likely cause. The generic case is genuinely ambiguous — the tree changed under
-// the build, or the patch is rooted somewhere else — but when a check declares no
-// codegenPrefix AND its patch targets files absent from the tree root, a
-// subdirectory-rooted module is by far the likeliest explanation, and it is the one
-// case this version cannot repair at all.
+// likely cause.
+//
+// The generic case is genuinely ambiguous — the tree changed under the build, or
+// the patch is rooted somewhere else. But a check whose module root is UNKNOWN
+// (nil codegenPrefix) and whose patch targets files absent from the tree root is
+// very likely a subdirectory-rooted module, which is the one case this command
+// cannot place a patch into; naming that saves the operator a hunt.
+//
+// A check that ASSERTED its root (an explicit "") gets the generic message even
+// then: the root is not in question, so suggesting a subdirectory would send them
+// after something the check has already ruled out.
 func (s *session) explainRefusal(
 	ctx context.Context, check Check, patch string, applyErr error,
 ) error {
-	if check.Prefix == "" {
+	if check.Prefix == nil {
 		if missing := s.missingTargets(ctx, check, patch); len(missing) > 0 {
 			return fmt.Errorf(
 				"%w: %s's codegen patch targets file(s) absent from the tree root (%s) and its"+
-					" check declares no passthru.codegenPrefix, so its module root is most likely a"+
-					" repository subdirectory — which this version cannot place a patch into."+
-					" Regenerate from that subdirectory by hand until the check publishes"+
-					" passthru.codegenPrefix (igloo#80): %w",
+					" check publishes no passthru.codegenPrefix, so its module root is most likely a"+
+					" repository subdirectory — which cannot be placed without that prefix."+
+					" Have the check pass codegenPrefix (igloo#83 auto-derives it only for a"+
+					" `src = self + \"/subdir\"` module), or regenerate from that subdirectory by"+
+					" hand: %w",
 				ErrRepairFailed, check.Name, strings.Join(missing, ", "), applyErr,
 			)
 		}
@@ -902,8 +944,8 @@ func (s *session) createdTargets(
 func (s *session) applyArgs(check Check, patch string, extra ...string) []string {
 	args := []string{"apply", patchStrip, "--whitespace=nowarn"}
 
-	if check.Prefix != "" {
-		args = append(args, "--directory="+check.Prefix)
+	if dir := check.directory(); dir != "" {
+		args = append(args, "--directory="+dir)
 	}
 
 	args = append(args, extra...)
