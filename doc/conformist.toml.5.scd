@@ -214,9 +214,9 @@ plus:
 	it: *cargo clippy --fix* is deliberately invoked without a trailing *-D* so an
 	unfixable remainder does not abort the repair, and a repair that partially
 	succeeded is usually better than none. A repair whose whole purpose is to
-	leave the tree consistent --- a codegen lane applying generated-file patches
-	--- has the opposite need: if it could not do its job, the commit or merge it
-	gates must not proceed as though it had.
+	leave the tree consistent, such as a codegen lane applying generated-file
+	patches, has the opposite need: if it could not do its job, the commit or
+	merge it gates must not proceed as though it had.
 
 	The repair command's output is included in the returned error, so the reason
 	is reported even though repair output is otherwise logged at debug level.
