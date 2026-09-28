@@ -25,14 +25,18 @@ Justfile recipes are **paved paths** — prefer them over ad-hoc
 exactly what `spinclass merge-this-session`'s pre-merge hook runs (`just`), so do
 not run `just`/`just lint` again right before merging.
 
+Do NOT enumerate recipes here. Every recipe's name and one-line doc comment is
+hoisted into the agent's system prompt by the just-us clown plugin (`just --list`
+otherwise), so a listing is duplication that only goes stale — and AGENTS.md is
+capped at 40000 characters by the `agents-md` linter. What belongs here is the
+rationale a doc comment has no room for.
+
 - `just` (= `just default` = `validate build test verify lint`) — full local CI
   lane; the merge hook runs the devshell `validate` gate and the Go test suite
   (`test`) too.
 - **No ambient Go.** Dependencies live in `go.nix` (igloo FDR 0008): no go.mod,
   go.sum or gomod2nix.toml in the checkout, no `go` in the devShell. go commands
   run inside nix via `godyn-go`; see godyn(7).
-- `just build` — `build-nix`. `just build-go` links `.#default` at
-  `build/conformist` (conformist + flakeclobber).
 - `just test` / `just test-go` — godyn's per-package test lane,
   `checks.<sys>.conformist-tests` (a `tags = [ "test" ]` instance: dewey's
   `test_ui` sits behind that tag), sandboxed, with formatters/git/jj/bash as
@@ -46,41 +50,22 @@ not run `just`/`just lint` again right before merging.
   (impure git-state linters) + `lint-go` (godyn vet + godyn-lint: vet passes +
   staticcheck defaults, `//nolint` honored; no golangci-lint) +
   `lint-go-analyzers` (one godyn vet lane per dewey analyzer, conformist#10).
-- `just codemod-fmt` — `nix fmt` (write/repair mode on conformist's own tree).
-- `just update-go` / `just update-go-get MOD@VER` — `go mod tidy` / `go get`
-  through `godyn-go` (needs `impure-derivations`), ingested back into go.nix.
-- `just explore-show-config` — emit conformist's own generated `conformist.toml`
-  from the Nix module without a full check run (debugging the module).
-- `just explore-merge-driver-flake-lock` — end-to-end smoke test of the
-  `conformist-flake-lock` merge driver: a throwaway repo with a local path
-  input, a genuine `flake.lock` conflict, and a real `git merge`. It lives
-  outside the CI lane because it needs a real `nix` on PATH, which a nix build
-  sandbox does not have — so the sandboxed fixtures in `nix/linter-fixtures.nix`
-  can only cover that driver's fail-closed paths. The `conformist-codegen-header`
-  driver needs no nix and IS gated in `verify-linter-fixtures`, including a
-  driver-not-registered control proving the passing merge passes because of the
-  driver rather than incidentally.
-- `just debug-bench-backends [iterations]` (positional, e.g. `just
-  debug-bench-backends 5`) — microbench the native (godyn) vs bga build backends
-  across `cold`/`warm`/`leaf`/`found` edit-locality phases,
-  emitting per-build durations to stats-me as `gobuild.conformist.<backend>.<phase>`
-  timers (a protocol shared with igloo's dewey bench; uses `nixgc` for cold
-  rebuilds). Diagnostic only — not in the CI lane.
-- `just debug-codegen-eval-cost [iterations]` — time the `codegen-repair`
-  discovery eval (`conformist codegen-repair --list`) clean vs dirty and with the
-  nix eval cache disabled, and count the derivations a dirty-tree discovery has to
-  build. It reports a non-zero run as `ERR` rather than timing it, so a fast
-  failure cannot pass for a fast eval. The current numbers and what they decided
-  are recorded in `docs/features/0001-generic-codegen-repair-linter.md`.
-- Fleet-migration diagnostics, all debug-grouped and all taking the fleet root
-  from `$ENG_REPOS` (or `root=…`): `just debug-flakeclobber-coverage` tallies
-  which repos flakeclobber recognizes and why each refusal refuses, over both
-  sweep passes; `just debug-flakeparse-bisect <flake.nix>` isolates which let
-  binding (or which region) makes a file fail the shape match; `just
-  debug-flakeclobber-regression [ref]` builds flakeclobber from a reference
-  commit AND the working tree and diffs their fleet-wide output, so a parser
-  widening can be shown additive rather than assumed so.
-- `just run-nix -- <args>` — `nix run . -- <args>`.
+- `just update-go` / `just update-go-get MOD@VER` — go through `godyn-go`, which
+  needs `impure-derivations`; the result is ingested back into go.nix.
+- `explore-merge-driver-flake-lock` lives OUTSIDE the CI lane because it needs a
+  real `nix` on PATH, which a nix build sandbox does not have — so the sandboxed
+  fixtures in `nix/linter-fixtures.nix` can only cover that driver's fail-closed
+  paths. The `conformist-codegen-header` driver needs no nix and IS gated in
+  `verify-linter-fixtures`, including a driver-not-registered control proving the
+  passing merge passes because of the driver rather than incidentally.
+- The `debug-*` benchmarks and fleet-migration diagnostics are not in any
+  aggregate. `debug-bench-backends` emits per-build durations to stats-me as
+  `gobuild.conformist.<backend>.<phase>` timers (a protocol shared with igloo's
+  dewey bench; uses `nixgc` for cold rebuilds). The `debug-flakeclobber-*` /
+  `debug-flakeparse-*` recipes take the fleet root from `$ENG_REPOS` (or `root=…`);
+  `debug-flakeclobber-regression` diffs a reference commit's fleet-wide output
+  against the working tree's, so a parser widening can be shown additive rather
+  than assumed so.
 - `just bump-version` / `just tag` / `just release` — versioning (release only
   from `master`). Release-on-merge: `just bump-version-level bugfix|minor|major`
   commits the bump before merging; the `release` post-merge target
@@ -146,13 +131,11 @@ under fail-on-change.
   `chore: conformist fmt+fix`; dirty-tree policy in `commitPreflight`);
   subcommands `check` (`check.go`), `identity` (`identity.go` — prints the
   resolved config/toolchain identity hash, conformist#76), `codegen-repair`
-  (`codegenrepair.go` + `cmd/codegen/` — the generic codegen-repair engine, #124:
-  walks `checks.<system>`, builds every check carrying `passthru.codegenPatch`
-  (the igloo#80 contract), and applies each patch with `git apply -p2`, one patch
-  per pass with a re-discovery between them because each patch is a diff against
-  its own check's `src`. Config-free by design, so the same code can ship as the
-  standalone static artifact; fail-soft on discovery — it runs inside a git
-  pre-commit hook, where exiting non-zero blocks the commit) and `version`
+  (`codegenrepair.go` + `cmd/codegen/` — #124: applies every
+  `checks.<system>.*.passthru.codegenPatch` (igloo#80) with `git apply -p2`, one
+  patch per pass since each is a diff against its own check's `src`; config-free so
+  the same code ships as the static artifact. Design, limits and measured cost:
+  `docs/features/0001-generic-codegen-repair-linter.md`) and `version`
   (`version.go`) dispatch
   separately; `conform` (`conform.go` + `cmd/conform/`) scaffolds a repo into the
   eng shape — writes every absent shape file (`conformist.nix`, a `version.env`
@@ -424,17 +407,14 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   `extra-args`, `deny`, `allow`. Behavioral fixtures live in a separate
   `clippy-fixtures` aggregate built by `just explore-clippy-fixture`, kept out of
   the verify/CI lane so CI stays Rust-free).
-  `codegen-repair` (conformist#124 — the generic codegen-repair lane: its
-  `repair-command` is conformist's own `codegen-repair` subcommand, applying every
-  flake check's `passthru.codegenPatch`. **Repair-only**: the read-only `command`
-  is a deliberate no-op, because the drift check carrying the passthru is already
-  the check-mode gate — which is also what makes it safe in the PURE `eng` preset
-  despite needing live nix and git, since check mode never invokes a repair. Opts
-  into all three staging tiers (#55/#56/#57) so a patch's rewritten, created and
-  deleted outputs land in the triggering commit. `package` is `nullOr` and defaults
-  to null because `nix/checks.nix`'s registry smoke eval sets no top-level
-  `package`; `presets/eng.nix` wires the real one. Design, limitations and the
-  measured discovery cost: `docs/features/0001-generic-codegen-repair-linter.md`).
+  `codegen-repair` (conformist#124 — the generic codegen-repair lane, wiring the
+  subcommand above as a whole-tree `repair-command`. **Repair-only**: the read-only
+  `command` is a no-op because the drift check carrying the passthru IS the
+  check-mode gate, which is also what makes it safe in the PURE `eng` preset. Opts
+  into all three staging tiers (#55/#56/#57) plus `repair-must-succeed`, so a
+  failed repair blocks the commit. `package` is `nullOr`/null because
+  `nix/checks.nix`'s smoke eval sets no top-level `package`; `presets/eng.nix`
+  wires the real one).
 - `nix/presets/` — reusable rosters a consumer imports to enable the whole
   eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`,
   `git-merge-drivers`, `codegen-repair`, the
