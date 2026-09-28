@@ -289,17 +289,27 @@ A consumer enables a whole convention roster with one import rather than enablin
 each linter by hand. Exposed as *conformist.lib.presets.{eng,eng-go,eng-impure}*:
 
 *eng*
-	The pure lane: the language-agnostic eng-convention enforcers, which read only
-	committed files and so run inside the sandboxed *checks.formatting*.
+	The pure lane: enforcers that read only committed files and so run inside the
+	sandboxed *checks.formatting*. Enables *eng-versioning*,
+	*eng-versioning-deprecated-file*, *flake-outputs*, *flake-lock*,
+	*git-merge-drivers* and *codegen-repair*.
+
+	It does NOT enable the *justfile-\** linters, despite their rules being
+	conformist's --- see below.
 
 *eng-go*
 	The canonical Go formatter chain, *goimports* at priority 1 then *gofumpt* at
-	priority 2 --- the sequence the fleet converged on. Kept separate so a non-Go
-	repository importing *eng* never pulls a Go toolchain.
+	priority 2 --- the sequence the fleet converged on. Formatters only, no
+	linters. Kept separate so a non-Go repository importing *eng* never pulls a Go
+	toolchain.
 
 *eng-impure*
 	The git-state lane, which needs a live _.git_ and so runs against the working
-	tree rather than the sandbox.
+	tree rather than the sandbox. Enables *git-remotes*, *git-default-branch*,
+	*sweatfile*, *agents-md* and *gomod2nix*.
+
+	*clippy* is deliberately NOT here, even though it is impure: it would make
+	every non-Rust repository build a Rust toolchain for a no-op.
 
 conformist self-consumes all three (_nix/conformist.nix_ and
 _nix/conformist-impure.nix_), so a preset cannot drift from what conformist itself

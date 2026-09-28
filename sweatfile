@@ -14,7 +14,7 @@
 pre-merge = "just"
 
 # Whole-phase cap for the named [[post-merge]] targets below (FDR-0026): the
-# release-assets target builds two static binaries before uploading.
+# `release` target builds two static binaries before uploading them.
 post-merge-timeout = "30m"
 
 # Per-commit repair (conformist#39/#40/#47/#51): format the index-staged

@@ -42,7 +42,10 @@ igloo, because of the *follows*.
 other side of the backend benchmark.
 
 *packages.conformist-static* is the portable static x86_64 release binary that the
-*release-assets* post-merge target uploads. It is bga with *CGO_ENABLED=0*, netgo and
+*release* post-merge target uploads, via *just deploy-release*. (There is no
+*release-assets* target; *deploy-release-assets* is a justfile recipe that target
+calls. Naming a target the sweatfile does not declare fails a merge before it
+lands.) It is bga with *CGO_ENABLED=0*, netgo and
 osusergo, *-s -w*, the nixpkgs Go patches' tzdata/mailcap/iana-etc paths stripped, and
 *allowedReferences = [ ]*. It uses bga rather than godyn because godyn's cgo-on stdlib
 cannot link statically yet. The aarch64 cross link fails, so x86_64 is the shipped
@@ -92,6 +95,17 @@ Two rules exist because of bugs:
 
 *lint-go-analyzers*
 	One godyn vet lane per dewey analyzer (conformist#10).
+
+Each lane is also a flake attribute, which is how you build one directly rather than
+through its recipe:
+
+```
+nix build .#checks.x86_64-linux.conformist-tests   # just test-go
+nix build .#checks.x86_64-linux.vet                # go vet, part of just lint-go
+nix build .#checks.x86_64-linux.lint               # godyn-lint, likewise
+nix build .#checks.x86_64-linux.dewey-<name>       # one analyzer, just lint-go-analyzers
+nix build .#checks.x86_64-linux.formatting         # just lint-fmt
+```
 
 # WHAT THE SANDBOX CANNOT DO
 
