@@ -6,9 +6,10 @@ conformist-git - git conventions conformist enforces
 
 # DESCRIPTION
 
-conformist ships two git *merge drivers* for files that a generator owns, and a
-whole-tree linter that checks a repo binds the right paths to them. This page is
-the normative home for those conventions.
+conformist ships two git *merge drivers* for files that a generator owns, a
+whole-tree linter that checks a repo binds the right paths to them, and two
+linters over the repository's git configuration itself. This page is the
+normative home for those conventions.
 
 See *conformist*(7) for conformist's concepts, *conformist-nix*(7) for the flake
 rules, and *gitattributes*(5) for the underlying git mechanism.
@@ -114,6 +115,32 @@ linters.git-merge-drivers.entries = [
 
 *when-file* suppresses an entry unless the named file exists at the tree root,
 which is what keeps the default _flake.lock_ binding silent in a non-flake repo.
+
+# REMOTES
+
+A repository's remotes MUST use SSH, and its *origin* MUST point at the canonical
+forge. Enforced by the *git-remotes* linter (conformist#68); it reads live git
+state, so it runs in the impure working-tree lane rather than the sandbox.
+
+The *check* reports two things: any remote that is not SSH, and an *origin* whose
+host is neither *canonical-host* --- default _code.linenisgreat.com_, the forge ---
+nor one of the per-repository *allowed-hosts* allowlist. The allowlist exists for a
+repository deliberately still hosted elsewhere, e.g.:
+
+```
+linters.git-remotes.allowed-hosts = [ "github.com" ];
+```
+
+The *repair* rewrites https, http and git remotes for _github.com_ and
+_code.linenisgreat.com_ to their SSH forms. Note it does so REGARDLESS of the
+allowlist: the allowlist governs which *origin* host is acceptable, not which
+protocol is. A repo may legitimately remain on GitHub; it may not legitimately use
+an unauthenticated transport.
+
+# DEFAULT BRANCH
+
+The *git-default-branch* linter checks the repository's default branch against the
+convention. Like *git-remotes* it reads live git state and runs in the impure lane.
 
 # SEE ALSO
 

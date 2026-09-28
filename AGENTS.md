@@ -177,80 +177,16 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   per-tool submodule, the remarshal-free `mkTomlFormat`/`mkYamlFormat`, and the
   `presets.{eng,eng-go,eng-impure}` rosters.
 - `nix/programs/` + `programs.nix` — the formatter registry.
-- `nix/linters/` + `linters.nix` — the linter registry. Beyond general linters
-  (shellcheck, ruff, statix, deadnix, typos, yamllint, …), this holds the
-  **eng-convention enforcers** conformist runs on itself: `eng-versioning`,
-  `eng-versioning-deprecated-file` (flags `version.txt` / a flake.nix named
-  version var, per eng-versioning(7) "Deprecated alternatives"),
-  the justfile-* convention checks are NO LONGER HERE: the seven moved to
-  just-us (`lib.conformistPresets.justfile`, alongside justfile-orphan-summary)
-  because they read the fork-only `just --dump --dump-format model`, and
-  conformist must stay strictly upstream — just-us already inputs conformist, so
-  a just-us input here would be a cycle. conformist-justfile(7) remains their
-  normative home and `presets/eng.nix` documents the pairing, but conformist
-  does NOT currently run them on its own justfile: reaching them would need
-  either the forbidden input or a source pin, and the fleet-adoption route is
-  still being designed (papi as the injection point). So conformist authors
-  these conventions without being held to them for now — a known gap, not an
-  oversight (conformist#85/#89/#112; RFC 0005's `conformist.profile` closes
-  it), `flake-outputs` and `flake-lock`
-  (conformist-nix(7) FLAKE OUTPUTS / FLAKE HYGIENE — outputs formal names all
-  inputs, flake.lock is committed; #9/#11), `git-merge-drivers`
-  (conformist-git(7) MERGE DRIVERS — `.gitattributes` must bind generated paths
-  to the regenerate-on-conflict merge drivers in `nix/merge-drivers.nix`; check
-  reads `.gitattributes`, repair appends the missing lines. Only `flake.lock` is
-  bound by default: a repo's generated-SOURCE globs are opt-in via
-  `linters.git-merge-drivers.entries`, because a glob that also matched a
-  hand-written sibling would route real source through a driver that resolves
-  stamp conflicts on its own), `golangci-dewey`
-  (conformist#10: a golangci-lint-gating repo must wire the dewey plugin via
-  `.custom-gcl.yml`), `git-remotes` (SSH-only remotes AND a canonical `origin`
-  host — check reports any non-SSH remote plus an `origin` whose host isn't
-  `canonical-host` (default `code.linenisgreat.com`, the forge) or one of a
-  per-repo `allowed-hosts` allowlist (e.g. `[ "github.com" ]` for a repo
-  deliberately still on GitHub); repair rewrites github.com/
-  code.linenisgreat.com https/http/git remotes to SSH regardless of that
-  allowlist — #68),
-  `git-default-branch`, `sweatfile`,
-  `agents-md` (CLAUDE.md→AGENTS.md migration, check + repair), `gomod2nix`
-  (conformist-nix(7) GO MODULE LOCK — gomod2nix.toml in sync with go.mod/go.sum;
-  check regenerates-to-temp + diffs, repair regenerates + `git add`s; impure
-  because regen needs the module graph and repair stages; watches the
-  default-excluded go.mod/go.sum — a whole-tree check (`passes-files=false`) is
-  exempt from the global excludes by design, its includes being a trigger gate
-  (conformist#45, retiring the conformist#44 `ignore-global-excludes` flag);
-  native check pending amarbel-llc/gomod2nix#14). `clippy` (conformist#69 — a
-  first-class Rust lint: check is `cargo clippy … -- -D warnings`, repair is
-  `cargo clippy --fix`; whole-tree, `restage-repair-outputs`. **Impure** (it
-  compiles the crate) so it's working-tree-lane only, and **opt-in**: it is a
-  registered module — enable with `linters.clippy.enable = true` — but is NOT in
-  the eng-impure preset roster, so a non-Rust repo never pulls a Rust toolchain.
-  conformist pins NO Rust: the `packages` toolchain defaults to
-  cargo/clippy/rustc/gcc from the consumer's own nixpkgs (overridable for
-  rust-overlay/fenix). Knobs: `manifest-path`, `workspace`, `all-targets`,
-  `extra-args`, `deny`, `allow`. Behavioral fixtures live in a separate
-  `clippy-fixtures` aggregate built by `just explore-clippy-fixture`, kept out of
-  the verify/CI lane so CI stays Rust-free).
-  `codegen-repair` (conformist#124 — the generic codegen-repair lane, wiring the
-  subcommand above as a whole-tree `repair-command`. **Repair-only**: the read-only
-  `command` is a no-op because the drift check carrying the passthru IS the
-  check-mode gate, which is also what makes it safe in the PURE `eng` preset. Opts
-  into all three staging tiers (#55/#56/#57) plus `repair-must-succeed`, so a
-  failed repair blocks the commit. `package` is `nullOr`/null because
-  `nix/checks.nix`'s smoke eval sets no top-level `package`; `presets/eng.nix`
-  wires the real one).
-- `nix/presets/` — reusable rosters a consumer imports to enable the whole
-  eng-convention set at once: `eng.nix` (pure: `eng-versioning*`, `flake-*`,
-  `git-merge-drivers`, `codegen-repair`, the
-  seven `justfile-*`), `eng-go.nix` (the canonical Go formatter chain: `goimports`
-  priority 1 then `gofumpt` priority 2 — the sequence the fleet converged on,
-  eng #18; kept separate from `eng` so a non-Go repo never pulls a Go toolchain),
-  and `eng-impure.nix` (git-state lane: `git-remotes`, `git-default-branch`,
-  `sweatfile`, `agents-md`, `gomod2nix`). Exposed as
-  `conformist.lib.presets.{eng,eng-go,eng-impure}`, so a downstream repo's roster
-  is `imports = [ conformist.lib.presets.eng conformist.lib.presets.eng-go ]`.
-  conformist self-consumes them (below), so the presets can't drift from what
-  conformist itself runs.
+- `nix/linters/` + `linters.nix` — the linter registry; adding
+  `nix/linters/<name>.nix` registers a linter. **The roster is in
+  `conformist-nix(7)` MODULE LIBRARY** ("Registries"), which names each
+  eng-convention enforcer and the page normative for the rule it checks, covers
+  `clippy`'s opt-in/impure/no-pinned-Rust design, and explains why the seven
+  `justfile-*` linters ship from just-us instead (a conformist→just-us input would
+  be a cycle) and why conformist consequently does not run them on itself.
+- `nix/presets/` — the `eng` / `eng-go` / `eng-impure` rosters a consumer imports
+  instead of enabling each linter by hand; see `conformist-nix(7)` MODULE LIBRARY
+  ("Presets") for what each contains and why they are split.
 - `nix/conformist.nix` — conformist's own self-config: `imports = [
   ./presets/eng.nix ./presets/eng-go.nix ]` (so conformist dogfoods the canonical
   goimports+gofumpt chain rather than the plain `gofmt` it used to be an outlier

@@ -200,6 +200,75 @@ _nix/programs/_ with _programs.nix_ is the formatter registry; _nix/linters/_ wi
 _linters.nix_ is the linter registry. Both auto-discover: adding
 _nix/linters/<name>.nix_ registers that linter.
 
+Beyond general-purpose linters (shellcheck, ruff, statix, deadnix, typos, yamllint
+and so on), the registry holds the *eng-convention enforcers* conformist runs on
+itself. Each names the page that is normative for the rule it checks:
+
+*eng-versioning*, *eng-versioning-deprecated-file*
+	_version.env_ declares the canonical version, and neither a _version.txt_ nor a
+	_flake.nix_ named version variable may reappear. See *eng-versioning*(7),
+	"Deprecated alternatives".
+
+*flake-outputs*, *flake-lock*
+	FLAKE OUTPUTS and FLAKE HYGIENE above (conformist#9/#11).
+
+*git-merge-drivers*, *git-remotes*, *git-default-branch*
+	*conformist-git*(7) MERGE DRIVERS, REMOTES and DEFAULT BRANCH
+	(conformist#68).
+
+*gomod2nix*
+	GO MODULE LOCK above.
+
+*codegen-repair*
+	CODEGEN DRIFT above (conformist#124).
+
+*golangci-dewey*
+	A repository gating on golangci-lint must wire the dewey plugin through
+	_.custom-gcl.yml_ (conformist#10).
+
+*agents-md*
+	The CLAUDE.md-to-AGENTS.md migration, and the character cap on AGENTS.md
+	itself. Check and repair.
+
+*sweatfile*
+	The spinclass sweatfile's shape.
+
+*clippy*
+	A first-class Rust lint (conformist#69): the check is
+	*cargo clippy … -- -D warnings*, the repair is *cargo clippy --fix*.
+	Whole-tree, with *restage-repair-outputs*.
+
+	It is *impure* --- it compiles the crate --- so it runs in the working-tree
+	lane only, never the sandboxed check. It is also *opt-in*: a registered module
+	enabled with *linters.clippy.enable = true*, deliberately NOT in the eng-impure
+	preset roster, so a non-Rust repository never pulls a Rust toolchain for a
+	no-op.
+
+	conformist pins NO Rust. The *packages* toolchain defaults to cargo, clippy,
+	rustc and gcc from the consumer's own nixpkgs, and is overridden wholesale for
+	a pinned toolchain from rust-overlay or fenix. Knobs: *manifest-path*,
+	*workspace*, *all-targets*, *extra-args*, *deny*, *allow*.
+
+	Its behavioural fixtures live in a separate *clippy-fixtures* aggregate, built
+	by *just explore-clippy-fixture* and kept out of the verify lane so CI stays
+	Rust-free.
+
+## The justfile linters are not here
+
+The seven *justfile-\** convention linters, and *justfile-orphan-summary*, ship from
+just-us as *lib.conformistPresets.justfile*. They read *just --dump --dump-format
+model*, a fork-only dump format a stock *just* rejects, and conformist must stay
+strictly UPSTREAM of its consumers: just-us already takes conformist as an input, so
+taking just-us here would be a cycle. The coupling therefore lives in the repository
+that owns the parser.
+
+The rules remain conformist's --- *conformist-justfile*(7) is still their normative
+home --- but conformist does NOT currently run them on its own justfile. Reaching
+them would need either the forbidden input or a source pin, and the fleet-adoption
+route is still being designed, with papi as the likely injection point. So conformist
+authors these conventions without being held to them: a known gap, not an oversight
+(conformist#85/#89/#112). RFC 0005's *conformist.profile* is what closes it.
+
 ## Remarshal-free config generation
 
 *mkTomlFormat* and *mkYamlFormat* replace *pkgs.formats.toml* and
