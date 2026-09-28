@@ -189,4 +189,4 @@ retained; conformist is released under the MIT license.
 
 *conformist*(1), *conformist.toml*(5), *conformist-conform*(7),
 *conformist-git*(7), *conformist-nix*(7), *conformist-justfile*(7),
-*eng-design_patterns-conformist*(7)
+*conformist-testing*(7), *eng-design_patterns-conformist*(7)

@@ -309,4 +309,4 @@ nixpkgs, so the module's *package* option has no default.
 # SEE ALSO
 
 *conformist*(7), *conformist.toml*(5), *conformist-conform*(7),
-*conformist-git*(7)
+*conformist-git*(7), *conformist-testing*(7)

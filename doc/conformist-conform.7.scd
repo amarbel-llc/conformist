@@ -251,4 +251,4 @@ which is what happened once, when no case in the roster had an *inputs* block an
 # SEE ALSO
 
 *conformist*(7), *conformist-conform*(1), *conformist-nix*(7),
-*conformist-justfile*(7)
+*conformist-justfile*(7), *conformist-testing*(7)

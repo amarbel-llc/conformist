@@ -143,6 +143,11 @@ let
         chars=$(wc -c <AGENTS.md)
         if [ "$chars" -gt ${toString cfg.max-chars} ]; then
           echo "agents-md: AGENTS.md is $chars characters, exceeds the ${toString cfg.max-chars}-character limit" >&2
+          # Name the remedy (conformist#120). The fix is almost never "cut prose":
+          # it is to move reference-grade content into a manpage once and leave a
+          # pointer, which is why the message says where to move it rather than
+          # just reporting the number.
+          echo "agents-md: move reference content into a manpage under doc/ and leave a pointer, rather than deleting facts — AGENTS.md is an orientation map, and a paragraph a reader could look up belongs in a page (conformist#120)" >&2
           findings=1
         fi
       fi

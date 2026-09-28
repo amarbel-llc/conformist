@@ -18,6 +18,24 @@ The defining extension over treefmt is the `[linter.<name>]` config section
 **repair** vs **check** modes. A linter's `command` is a read-only check (must
 exit non-zero on findings); an optional `repair-command` applies autofixes.
 
+## Where the reference lives
+
+This file is an orientation map, not a reference (conformist#120). The man pages
+under `doc/` are normative; read the `.scd` source, since conformist's pages are
+not yet installed and so do not resolve via `man` in an agent session.
+
+| Page | Covers |
+|---|---|
+| `conformist(7)` | concepts; repair/staged/check MODES and their exit codes; sandbox checking; walking and caching; config identity |
+| `conformist.toml(5)` | every config key, including `repair-command`, the staging tiers and `repair-must-succeed` |
+| `conformist-nix(7)` | the flake conventions the `flake-*` linters enforce; GO MODULE LOCK; CODEGEN DRIFT; the MODULE LIBRARY a consumer evaluates, the linter registry and the presets |
+| `conformist-git(7)` | merge drivers, remotes, default branch |
+| `conformist-conform(7)` | how `conform` and `flakeclobber` rewrite a `flake.nix`: the parser, the shape roster, the refusals, splicing, sweep order |
+| `conformist-testing(7)` | build backends, test and lint lanes, sandbox constraints, diagnostic recipes |
+| `conformist-justfile(7)` | the justfile conventions (whose linters ship from just-us) |
+| `docs/features/` | FDRs — one feature's design, limits and measurements |
+| `docs/rfcs/` | design records for larger changes |
+
 ## Build / test / lint commands
 
 Justfile recipes are **paved paths** — prefer them over ad-hoc
@@ -31,41 +49,19 @@ otherwise), so a listing is duplication that only goes stale — and AGENTS.md i
 capped at 40000 characters by the `agents-md` linter. What belongs here is the
 rationale a doc comment has no room for.
 
-- `just` (= `just default` = `validate build test verify lint`) — full local CI
-  lane; the merge hook runs the devshell `validate` gate and the Go test suite
-  (`test`) too.
+- `just` (= `just default` = `validate build test verify lint`) is the local CI
+  lane and exactly what the merge hook runs, so do not run it again right before
+  merging.
 - **No ambient Go.** Dependencies live in `go.nix` (igloo FDR 0008): no go.mod,
   go.sum or gomod2nix.toml in the checkout, no `go` in the devShell. go commands
   run inside nix via `godyn-go`; see godyn(7).
-- `just test` / `just test-go` — godyn's per-package test lane,
-  `checks.<sys>.conformist-tests` (a `tags = [ "test" ]` instance: dewey's
-  `test_ui` sits behind that tag), sandboxed, with formatters/git/jj/bash as
-  `nativeCheckInputs` and `testFiles` for the fixtures read from outside a
-  package. Test stub scripts resolve bash by absolute path (no /usr/bin/env).
-  One package: `just debug-test-pkg PKG RUN` (`godyn-test`; `git add -N` new
-  files). The `cmd` `TestMain` pins `GIT_CEILING_DIRECTORIES` /
-  `CONFORMIST_CEILING_DIRECTORIES` to the temp root (conformist#15), and
-  `test-go` still fails if the working tree mutates.
-- `just lint` — `lint-fmt` (sandboxed `checks.formatting`) + `lint-worktree`
-  (impure git-state linters) + `lint-go` (godyn vet + godyn-lint: vet passes +
-  staticcheck defaults, `//nolint` honored; no golangci-lint) +
-  `lint-go-analyzers` (one godyn vet lane per dewey analyzer, conformist#10).
-- `just update-go` / `just update-go-get MOD@VER` — go through `godyn-go`, which
-  needs `impure-derivations`; the result is ingested back into go.nix.
-- `explore-merge-driver-flake-lock` lives OUTSIDE the CI lane because it needs a
-  real `nix` on PATH, which a nix build sandbox does not have — so the sandboxed
-  fixtures in `nix/linter-fixtures.nix` can only cover that driver's fail-closed
-  paths. The `conformist-codegen-header` driver needs no nix and IS gated in
-  `verify-linter-fixtures`, including a driver-not-registered control proving the
-  passing merge passes because of the driver rather than incidentally.
-- The `debug-*` benchmarks and fleet-migration diagnostics are not in any
-  aggregate. `debug-bench-backends` emits per-build durations to stats-me as
-  `gobuild.conformist.<backend>.<phase>` timers (a protocol shared with igloo's
-  dewey bench; uses `nixgc` for cold rebuilds). The `debug-flakeclobber-*` /
-  `debug-flakeparse-*` recipes take the fleet root from `$ENG_REPOS` (or `root=…`);
-  `debug-flakeclobber-regression` diffs a reference commit's fleet-wide output
-  against the working tree's, so a parser widening can be shown additive rather
-  than assumed so.
+- **Everything else about the build and test machinery is in
+  `conformist-testing(7)`** (`doc/conformist-testing.7.scd`): the godyn and bga
+  backends and the static release binary, the per-package test lane and its
+  `tags = ["test"]` instance, the two rules that exist because of bugs (stub
+  scripts resolve bash absolutely; `TestMain` pins the ceiling directories,
+  conformist#15), the four lint lanes, what the fixture sandbox cannot do and
+  which tests therefore live outside CI, and the diagnostic recipes.
 - `just bump-version` / `just tag` / `just release` — versioning (release only
   from `master`). Release-on-merge: `just bump-version-level bugfix|minor|major`
   commits the bump before merging; the `release` post-merge target
@@ -224,37 +220,18 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   single sha source**: igloo's input follows ours, which only works because
   `pkgs` is `igloo.legacyPackages.<sys>`, NOT the follows-immune
   `import igloo {}` shim (igloo#37).
-- `packages.{default,conformist}` — the **godyn** build (igloo FDR 0007/0008) on
-  every system: `buildGoAuto` over `go.nix` with no `strategy`, binaries
-  `conformist` + `flakeclobber`, git burned in via `git.Binary` ldflags, joined
-  with `manpages`. The package graph is derived at eval time (nothing committed,
-  per-system, no drift); cost: `ca-derivations` on every building host, and
-  evaluating another system's packages needs a builder for it (igloo#75).
-  **Consumers inherit both**, and a consumer bumping conformist also needs igloo
-  ≥ 899189e (its `follows`). `packages.conformist-bga` is `passthru.bga`, the
-  input-addressed escape hatch (and the bench's other side);
-  `conformist-godyn-tests` is the tests instance for `godyn-test -A`.
-  Self-consumption evals use the bare binary.
-- `packages.conformist-static` — portable static x86_64 release binary (the
-  `release-assets` post-merge target uploads it; aarch64 cross link fails):
-  bga with `CGO_ENABLED=0`, netgo/osusergo, `-s -w`, the nixpkgs Go
-  patches' tzdata/mailcap/iana-etc paths stripped, `allowedReferences = [ ]`
-  (godyn's cgo-on stdlib can't link static yet).
-- `checks.<sys>.{conformist-tests,vet,lint,dewey-<name>}` — godyn's per-package
-  test / go vet / godyn-lint / dewey-vet lanes, from the `tags = [ "test" ]`
-  instance (test/test.go imports the tagged `test_ui`).
-- **Man pages** (`doc/`, `eng-manpages(7)`): hand-written scdoc for sections
-  2–9 (`doc/conformist.toml.5.scd`, `doc/conformist.7.scd`,
-  `doc/conformist-nix.7.scd` — the normative home for the `flake-*` linters'
-  conventions, `doc/conformist-justfile.7.scd` — likewise for the `justfile-*`
-  linters, citing eng-design_patterns-justfile(7) as prose origin,
-  `doc/conformist-git.7.scd` — likewise for the merge drivers and the
-  `git-merge-drivers` linter) plus the
-  codegen
-  section-1 reference via `conformist gen-man`, all compiled by the `manpages`
-  Nix derivation — the build is the man-page lint (PRINCIPLE 4), there is no
-  justfile recipe. Note `doc/` (man-page sources) is distinct from `docs/`
-  (the mkdocs prose site).
+- `packages.{default,conformist,conformist-bga,conformist-static,manpages}` and
+  the `checks.<sys>` lanes — see `conformist-testing(7)` for the backends and
+  their trade-offs. `conformist-godyn-tests` is the tests instance for
+  `godyn-test -A`; self-consumption evals use the bare binary.
+- **Man pages** (`doc/`, `eng-manpages(7)`): hand-written scdoc for sections 2–9
+  plus the codegen section-1 reference via `conformist gen-man`, all compiled by
+  the `manpages` derivation — that build IS the man-page lint (PRINCIPLE 4), so
+  there is no justfile recipe. Exposed as `packages.manpages` and joined into
+  `packages.default`, which is how a consumer (circus/eng) installs them. The
+  pages are the normative home for conformist's conventions; each names its
+  subject in its NAME line. Note `doc/` (man-page sources) is distinct from
+  `docs/` (the mkdocs prose site, RFCs and FDRs).
 - `formatter` (= `nix fmt` wrapper), `checks.formatting` (sandboxed read-only
   gate) + the `formatter-*`/`linter-*` registry smoke tests.
 - `lib` = the Nix module library (`conformist.lib.evalModule pkgs { … }`), which
