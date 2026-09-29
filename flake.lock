@@ -65,11 +65,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1790553803,
-        "narHash": "sha256-xEl05S3gOvyK7Rj1B8qQKcs/KCjMDI7eMAVP4G65BSA=",
-        "rev": "dc99a3bf39e8c57478c43908b2ead293fa380d5b",
+        "lastModified": 1790707971,
+        "narHash": "sha256-GjhXPLfJe5CEglYxx56zsNDq8xBtECEPDsTSsY0U1xY=",
+        "rev": "a8bd0d7cdfebf3da2bfcc87cf90e9179b678e3e8",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/igloo/archive/dc99a3bf39e8c57478c43908b2ead293fa380d5b.tar.gz"
+        "url": "https://code.linenisgreat.com/igloo/archive/a8bd0d7cdfebf3da2bfcc87cf90e9179b678e3e8.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -78,17 +78,17 @@
     },
     "nixpkgs-master": {
       "locked": {
-        "lastModified": 1790323409,
-        "narHash": "sha256-VVTPf+Hyd5ebpjBMHmrLMSBIeW6ls48Bqtosj7CNKLA=",
+        "lastModified": 1790578696,
+        "narHash": "sha256-ZoxIApko70jCdbH3l20HWXOBaT2HZd87orzd2yJ9dVE=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e94cb152ed51bd6e24eb4a41f1460252beb52cd2",
+        "rev": "7a0f122f5090cf4c2ade2a13a0e229d4e19ba71f",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e94cb152ed51bd6e24eb4a41f1460252beb52cd2",
+        "rev": "7a0f122f5090cf4c2ade2a13a0e229d4e19ba71f",
         "type": "github"
       }
     },
