@@ -81,6 +81,18 @@ The stamp pattern defaults to an optionally-commented line beginning
 _Code generated_, and can be overridden with the *CONFORMIST_CODEGEN_STAMP_RE*
 environment variable.
 
+The driver makes no assumption about the rest of the file. It does not require
+the generated body to be unformatted, formatted, or stable across versions. It
+only requires that the two sides being merged produced the same body, so that
+git's own three-way merge leaves the stamp as the only conflict. A generator
+whose output is post-formatted (for example by goimports and gofumpt) therefore
+merges exactly like one committed raw, provided both branches ran the same
+generator and the same formatters. A merge across a change in that pipeline, say
+one branch formatting what the other left raw, or two formatter versions, leaves
+conflicts beyond the stamp. The driver then declines and the file is regenerated
+by hand. The same happens when a body change lies close enough to the stamp for
+git to fold both into one conflict block.
+
 ## FAILING CLOSED
 
 Both drivers exit non-zero on any condition they cannot handle, which tells git
