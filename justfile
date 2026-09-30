@@ -251,6 +251,77 @@ debug-scope-semantics:
     : > "$log"; out=$(cd "$repo" && CONFORMIST_LINTER_W_T_INCLUDES=nomatch "$bin" --no-cache --tree-root "$repo" --walk filesystem --config-file "$d/q3h.toml" 2>&1); rc=$?
     echo "== CONFORMIST_LINTER_W_T_INCLUDES=nomatch (hyphenated linter name w-t)"; echo "   exit=$rc"; sed "s#$d#<d>#g; s/^/   /" "$log"
 
+# The --stdin counterpart of debug-scope-semantics: whether stdin mode runs
+# linters, honours excludes and --formatters, chains prioritised formatters
+# like a file-mode run, how its path argument is anchored, and where a
+# working-dir formatter runs. Two formatters append " A" (priority 1) and " B"
+# (priority 2) to each line and log their cwd/argv; a whole-tree linter logs if
+# its repair fires. Scratch tree only.
+#
+# show what --stdin runs, where, and what it emits
+[group("debug")]
+debug-stdin-semantics:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$(nix build --no-link --print-out-paths '.#conformist-bga')/bin/conformist"
+    d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+    repo="$d/repo"; log="$d/log"
+    mkdir -p "$repo/go/pkgs" "$d/elsewhere"
+    touch "$repo/flake.nix"
+    # conf NAME EXCLUDES_TOML A_WORKING_DIR
+    conf() {
+      {
+        echo "excludes = [$2]"
+        for spec in "a 1" "b 2"; do
+          set -- "$1" "$2" "$3" $spec
+          echo "[formatter.$4]"
+          echo "command = 'echo \"$4 pwd=\$PWD args=\$*\" >> $log; for f in \"\$@\"; do sed -i \"s/\\\$/ ${4^^}/\" \"\$f\"; done'"
+          echo 'includes = ["*.go"]'
+          echo "priority = $5"
+          [ "$4" = a ] && [ -n "$3" ] && echo "working-dir = \"$3\""
+        done
+        echo '[linter.wt]'
+        echo 'command = "true"'
+        echo "repair-command = 'echo \"wt  pwd=\$PWD\" >> $log'"
+        echo 'includes = ["*.go"]'
+        echo 'passes-files = false'
+      } > "$d/$1.toml"
+    }
+    # run LABEL CWD ARGS...: pipe "x" through the binary, print exit, stdout,
+    # error lines and the tool log ($d shown as <d>, the temp dir as <tmp>).
+    run() {
+      local label=$1 cwd=$2; shift 2
+      : > "$log"
+      local out err rc
+      out=$(cd "$cwd" && echo x | "$bin" --quiet "$@" 2>"$d/stderr"); rc=$?
+      echo "== $label"
+      echo "   exit=$rc stdout=$(printf '%q' "$out")"
+      sed -n '/ERRO\|Error/p' "$d/stderr" | sed "s#$d#<d>#g; s#/[^ ]*/conformist-stdin-[^ ]*#<tmp>#g; s/^/   /"
+      sed "s#$d#<d>#g; s#/[^ ]*/conformist-stdin-[^ ]*#<tmp>#g; s/^/   /" "$log"
+    }
+    conf s "" ""
+    run "1,5: rel path, both formatters"   "$repo/go" --tree-root "$repo/go" --config-file "$d/s.toml" --stdin pkgs/facade.go
+    run "6: --formatters b"                 "$repo/go" --tree-root "$repo/go" --config-file "$d/s.toml" --stdin --formatters b pkgs/facade.go
+    run "3: path does not exist on disk"    "$repo/go" --tree-root "$repo/go" --config-file "$d/s.toml" --stdin no/such/dir/x.go
+    run "3: path ../x.go"                   "$repo/go" --tree-root "$repo/go" --config-file "$d/s.toml" --stdin ../x.go
+    run "3: cwd=elsewhere, rel path"        "$d/elsewhere" --tree-root "$repo/go" --config-file "$d/s.toml" --stdin pkgs/facade.go
+    run "3: path not matching includes"     "$repo/go" --tree-root "$repo/go" --config-file "$d/s.toml" --stdin pkgs/facade.txt
+    conf e "'pkgs/**'" ""
+    run "2: excludes=[pkgs/**], rel path"   "$repo/go" --tree-root "$repo/go" --config-file "$d/e.toml" --stdin pkgs/facade.go
+    run "2+3: excludes=[pkgs/**], abs path" "$repo/go" --tree-root "$repo/go" --config-file "$d/e.toml" --stdin "$repo/go/pkgs/facade.go"
+    conf w "" "go"
+    run "4: a has working-dir=go (missing)" "$repo/go" --tree-root "$repo/go" --config-file "$d/w.toml" --stdin pkgs/facade.go
+    conf p "" "pkgs"
+    run "4: a has working-dir=pkgs (exists)" "$repo/go" --tree-root "$repo/go" --config-file "$d/p.toml" --stdin pkgs/facade.go
+    : > "$log"; out=$(cd "$repo/go" && echo x | CONFORMIST_TREE_ROOT_FILE=flake.nix "$bin" --quiet --tree-root "$repo/go" --config-file "$d/s.toml" --stdin pkgs/facade.go 2>&1); rc=$?
+    echo "== 3: CONFORMIST_TREE_ROOT_FILE + --tree-root"; echo "   exit=$rc"; printf '%s\n' "$out" | sed -n '/rror/p' | sed "s/^/   /"
+    : > "$log"; out=$(cd "$d/elsewhere" && echo x | "$bin" --quiet --config-file "$d/s.toml" --stdin pkgs/facade.go 2>&1); rc=$?
+    echo "== 3: no --tree-root, cwd=elsewhere (no git)"; echo "   exit=$rc stdout=$(printf '%q' "$out")"; sed "s#$d#<d>#g; s#/[^ ]*/conformist-stdin-[^ ]*#<tmp>#g; s/^/   /" "$log"
+    # 5: the same content through a file-mode run, for comparison
+    echo x > "$repo/go/pkgs/facade.go"; : > "$log"
+    (cd "$repo/go" && "$bin" --quiet --no-cache --tree-root "$repo/go" --walk filesystem --config-file "$d/s.toml" pkgs/facade.go >/dev/null 2>&1)
+    echo "== 5: file mode on the same content"; echo "   file=$(printf '%q' "$(cat "$repo/go/pkgs/facade.go")")"; sed "s#$d#<d>#g; s/^/   /" "$log"
+
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
 # remote get-url origin` (canonical-host rule). If those return the REWRITTEN

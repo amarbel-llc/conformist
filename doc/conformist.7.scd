@@ -180,6 +180,21 @@ fires it, even a file excluded from every formatter. There is no flag that
 disables linters. A caller that needs a formatter-only run must pass a config
 that declares no _[linter.<name>]_ sections.
 
+*Standard input.* *--stdin* _path_ formats standard input and writes the
+result to standard output. It runs formatters only: no linter and no repair
+runs, whole-tree ones included. _path_ is used verbatim as the tree-root-relative
+path for matching. It is not resolved against the current directory or
+*--working-dir*, need not exist, and must not begin with _.._. An absolute _path_
+is matched as the absolute string, so tree-root-relative *excludes* do not match
+it. When _path_ is excluded or matches no formatter, the input is emitted
+unchanged with exit 0. *--formatters* narrows the set, and prioritised
+formatters chain as they do on files. The tree root is still resolved, and each
+formatter still runs in its *working-dir*. The formatters are given a
+temporary copy of the input, not a file at _path_, so a tool that reads context
+from its file's location (such as a _go.mod_) does not find the tree's. If a
+formatter fails, the run exits 1, but standard output still carries the input
+as transformed by the formatters that succeeded.
+
 *Environment.* The tree-root options have environment overrides
 (_CONFORMIST_TREE_ROOT_, _CONFORMIST_TREE_ROOT_FILE_, _CONFORMIST_TREE_ROOT_CMD_).
 An explicit *--tree-root* flag takes precedence over _CONFORMIST_TREE_ROOT_.
