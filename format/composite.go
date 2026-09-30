@@ -54,6 +54,14 @@ func (c *CompositeFormatter) match(file *walk.File) (bool, []*Formatter) {
 		}
 	}
 
+	// skip-generated (conformist#133) excludes like a global exclude, but reads
+	// the file, so it is only checked for a file some formatter wants.
+	if len(matches) > 0 && c.cfg.SkipGenerated && hasGeneratedHeader(file) {
+		log.Debugf("path has a generated-code header: %s", file.RelPath)
+
+		return true, nil
+	}
+
 	return false, matches
 }
 

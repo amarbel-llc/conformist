@@ -37,6 +37,7 @@ type Config struct {
 	Quiet                  bool     `mapstructure:"quiet"                    toml:"-"` // not allowed in config
 	RefuseIdentityMismatch bool     `mapstructure:"refuse-identity-mismatch" toml:"refuse-identity-mismatch,omitempty"`
 	RequireTools           bool     `mapstructure:"require-tools"            toml:"require-tools,omitempty"`
+	SkipGenerated          bool     `mapstructure:"skip-generated"           toml:"skip-generated,omitempty"`
 	TreeRoot               string   `mapstructure:"tree-root"                toml:"tree-root,omitempty"`
 	TreeRootCmd            string   `mapstructure:"tree-root-cmd"            toml:"tree-root-cmd,omitempty"`
 	TreeRootFile           string   `mapstructure:"tree-root-file"           toml:"tree-root-file,omitempty"`
@@ -247,6 +248,12 @@ func SetFlags(fs *pflag.FlagSet) {
 			"repair gates that must run every lane. (`conformist check` is strict "+
 			"regardless; relax it with --allow-missing-formatter.) "+
 			"(env $CONFORMIST_REQUIRE_TOOLS)",
+	)
+	fs.Bool(
+		"skip-generated", false,
+		"Withhold files whose leading comment lines carry the standard generated-code marker "+
+			"(`// Code generated ... DO NOT EDIT.`) from formatters and per-file linters, like a "+
+			"global exclude. Whole-tree linters still trigger on them. (env $CONFORMIST_SKIP_GENERATED)",
 	)
 	fs.Bool(
 		"stdin", false,

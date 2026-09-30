@@ -155,7 +155,10 @@ tree root. Positional path arguments only narrow which part of the tree is
 walked: a file reached through _<root>/pkgs_ is still matched as _pkgs/x.go_. A
 positional path outside the root is an error. The *walk* type does not affect
 anchoring. Glob syntax and its pitfalls are in *conformist.toml*(5) GLOB
-PATTERNS.
+PATTERNS. *skip-generated* excludes by content instead of by path: a file
+carrying the standard _Code generated ... DO NOT EDIT._ header is withheld
+wherever it sits, so it needs no glob and is unaffected by where the tree root
+is. See *conformist.toml*(5).
 
 *working-dir is tree-root-relative too.* A tool's *working-dir* is joined onto
 the tree root. It is not resolved against the process's current directory or

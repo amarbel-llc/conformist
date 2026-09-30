@@ -53,6 +53,11 @@ func TestConfigIdentity(t *testing.T) {
 	reExcluded.Excludes = []string{"*.md"}
 	as.NotEqual(id, reExcluded.Identity(), "different excludes must change the identity")
 
+	// skip-generated narrows the formatted set like excludes (conformist#133).
+	skipping := base()
+	skipping.SkipGenerated = true
+	as.NotEqual(id, skipping.Identity(), "skip-generated must change the identity")
+
 	// An empty config still produces a stable hash (no panic on nil maps).
 	empty := &config.Config{}
 	as.Regexp("^[0-9a-f]{64}$", empty.Identity())

@@ -20,6 +20,7 @@ import (
 type CompositeLinter struct {
 	stats          *stats.Stats
 	globalExcludes []glob.Glob
+	skipGenerated  bool
 	linters        map[string]*Linter
 }
 
@@ -106,13 +107,14 @@ func (c *CompositeLinter) match(files []*walk.File) map[*Linter][]*walk.File {
 
 	for _, file := range files {
 		globallyExcluded := pathMatches(file.RelPath, c.globalExcludes)
+		generated := newGeneratedProbe(file, c.skipGenerated) // conformist#133
 
 		for _, l := range c.linters {
 			if globallyExcluded && l.passesFiles {
 				continue
 			}
 
-			if l.Wants(file) {
+			if l.Wants(file) && !(l.passesFiles && generated.skipped()) {
 				linterFiles[l] = append(linterFiles[l], file)
 			}
 		}
@@ -163,6 +165,7 @@ func NewCompositeLinter(cfg *config.Config, statz *stats.Stats) (*CompositeLinte
 	return &CompositeLinter{
 		stats:          statz,
 		globalExcludes: globalExcludes,
+		skipGenerated:  cfg.SkipGenerated,
 		linters:        linters,
 	}, nil
 }

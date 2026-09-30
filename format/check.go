@@ -82,11 +82,16 @@ func (c *CompositeChecker) Check(ctx context.Context, files []*walk.File) ([]Fin
 		// conformist#44 ignore-global-excludes flag).
 		globallyExcluded := pathMatches(file.RelPath, c.globalExcludes)
 
+		// skip-generated (conformist#133) withholds the file exactly like a
+		// global exclude, but is only probed once a formatter or per-file linter
+		// wants the file.
+		generated := newGeneratedProbe(file, c.cfg.SkipGenerated)
+
 		matched := false
 
 		if !globallyExcluded {
 			for _, f := range c.formatters {
-				if f.Wants(file) {
+				if f.Wants(file) && !generated.skipped() {
 					formatterFiles[f] = append(formatterFiles[f], file)
 					matched = true
 				}
@@ -98,15 +103,16 @@ func (c *CompositeChecker) Check(ctx context.Context, files []*walk.File) ([]Fin
 				continue
 			}
 
-			if l.Wants(file) {
+			if l.Wants(file) && !(l.passesFiles && generated.skipped()) {
 				linterFiles[l] = append(linterFiles[l], file)
 				matched = true
 			}
 		}
 
-		// A globally-excluded file that no opt-in linter wanted is silently
-		// skipped, exactly as before — it must not trip the unmatched path.
-		if globallyExcluded && !matched {
+		// A globally-excluded or generated file that no opt-in linter wanted is
+		// silently skipped, exactly as before — it must not trip the unmatched
+		// path.
+		if (globallyExcluded || generated.known()) && !matched {
 			continue
 		}
 

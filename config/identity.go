@@ -34,6 +34,13 @@ func (c *Config) Identity() string {
 	writeField(h, "walk", c.Walk)
 	writeList(h, "excludes", c.Excludes)
 
+	// Hashed only when set, so turning it on changes the identity (it narrows
+	// what the config formats, like excludes) while every existing config keeps
+	// the identity its trees were attested with.
+	if c.SkipGenerated {
+		writeField(h, "skip-generated", "true")
+	}
+
 	for _, name := range sortedKeys(c.FormatterConfigs) {
 		f := c.FormatterConfigs[name]
 		writeField(h, "formatter", name)
