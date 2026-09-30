@@ -35,8 +35,8 @@
 // FAIL-SOFT ON DISCOVERY, FAIL-LOUD ON APPLY. This runs inside a git pre-commit
 // hook, where a non-zero exit blocks the commit. A flaky or unavailable nix (no
 // flake, offline, an eval error in an unrelated check) must therefore NOT block
-// every commit in the repo: discovery and per-check build failures warn and return
-// success, leaving the drift check to catch any resulting staleness. A patch that
+// every commit in the repo: discovery and per-check build failures, and a run with
+// no git worktree to apply to (conformist#132), warn and return success, leaving the drift check to catch any resulting staleness. A patch that
 // was built but will not APPLY is different — the contract says it was generated
 // from this very tree, so a refusal means something is genuinely inconsistent —
 // and that exits non-zero. `--strict` promotes the soft failures to hard ones for
@@ -368,14 +368,15 @@ func defaultTreeRoot() (string, error) {
 	return top, nil
 }
 
+// errNoWorktree marks the "no git worktree to repair" case, which [Run] treats
+// as a soft failure (conformist#132).
+var errNoWorktree = errors.New("not inside a git worktree, so there is no tree to apply a codegen patch to")
+
 // gitToplevel resolves the git worktree root of the working directory.
 func gitToplevel() (string, error) {
 	out, err := exec.Command(git.Binary, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", fmt.Errorf(
-			"%w: not inside a git worktree, so there is no tree to apply a codegen patch to: %w",
-			ErrRepairFailed, err,
-		)
+		return "", fmt.Errorf("%w: %w: %w", ErrRepairFailed, errNoWorktree, err)
 	}
 
 	return strings.TrimSpace(string(out)), nil
@@ -385,6 +386,16 @@ func gitToplevel() (string, error) {
 // patch is empty.
 func Run(ctx context.Context, opts Options) error {
 	if err := opts.Resolve(); err != nil {
+		// No worktree (e.g. a nix sandbox, conformist#132) means there is nothing
+		// to apply a patch to — the same case as the linter's no-flake.nix gate —
+		// so it fails soft like discovery does, and --strict (or --list, which
+		// reports rather than repairs) keeps it loud.
+		if errors.Is(err, errNoWorktree) && !opts.Strict && !opts.ListOnly {
+			log.Warnf("codegen-repair: %v — nothing to repair; pass --strict to fail instead", errNoWorktree)
+
+			return nil
+		}
+
 		return err
 	}
 

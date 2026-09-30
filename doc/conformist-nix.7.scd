@@ -119,7 +119,10 @@ nobody confirmed.
 Discovery and per-check build failures WARN and exit 0, because the lane runs in
 a git pre-commit hook where a non-zero exit blocks the commit: an unreachable
 _nix_ must not stop a repo from committing, and the drift check still catches
-whatever staleness results. A patch that was built but will not APPLY exits 2 ---
+whatever staleness results. Running outside a git worktree (a _nix_ sandbox, for
+instance) is the same kind of no-op as a missing _flake.nix_: there is no tree to
+apply a patch to, so it too warns and exits 0 (conformist#132). A patch that was
+built but will not APPLY exits 2 ---
 it was generated from this very tree, so a refusal is a real inconsistency. The
 *strict* option promotes the warnings.
 

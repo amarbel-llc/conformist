@@ -57,9 +57,11 @@ static artifact.
 | Exit | Meaning |
 |---|---|
 | 0 | Converged, or nothing to do, or a soft failure was warned about |
-| 2 | A built patch would not apply; the run would not converge; or, under `--strict`, a discovery or build failure |
+| 2 | A built patch would not apply; the run would not converge; or, under `--strict`, a discovery or build failure, or no git worktree |
 
-Discovery and per-check build failures WARN and exit 0. This runs inside a git
+Discovery and per-check build failures WARN and exit 0, and so does running
+outside a git worktree — a nix sandbox, where `dagnabit export` runs conformist's
+repair — since there is no tree to apply a patch to (conformist#132). This runs inside a git
 pre-commit hook, where a non-zero exit blocks the commit, so an unreachable or
 flaky nix must not stop a repo from committing — the drift check is still the gate,
 and the worst case is the staleness the lane was trying to pre-empt. A patch that

@@ -21,7 +21,7 @@
 # requirements are nix and git.
 #
 # FAIL-SOFT. `conformist codegen-repair` warns and exits 0 when discovery or a
-# per-check build fails, because this runs in a git pre-commit hook where a
+# per-check build fails, or when there is no git worktree (conformist#132), because this runs in a git pre-commit hook where a
 # non-zero exit blocks the commit — an unreachable nix must not stop a repo from
 # committing, and the drift check still catches whatever staleness results. Set
 # `strict = true` for a lane that would rather stop.
@@ -104,8 +104,8 @@ in
       type = lib.types.bool;
       default = false;
       description = ''
-        Fail the repair when discovery or a per-check patch build fails, instead
-        of warning and proceeding. The default is lenient because this lane runs
+        Fail the repair when discovery or a per-check patch build fails, or when
+        it runs outside a git worktree, instead of warning and proceeding. The default is lenient because this lane runs
         inside a git pre-commit hook, where a non-zero exit blocks the commit and
         an unreachable nix would block every commit in the repo; the drift check
         still catches any staleness that results. Turn it on for a lane that would

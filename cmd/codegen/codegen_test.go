@@ -650,6 +650,33 @@ func TestResolveRefusesAmbiguousFlakeRoot(tt *testing.T) {
 	as.Equal(dir, explicit.TreeRoot)
 }
 
+// TestNoWorktreeFailsSoftUnlessStrict pins conformist#132. Outside a git worktree
+// (a nix sandbox, where dagnabit runs conformist's repair) there is no tree to
+// apply a codegen patch to, which is the same "nothing to repair" case as a
+// missing flake.nix: warn and succeed, leaving the drift check as the gate.
+// --strict keeps it a hard failure, like every other soft failure here.
+func TestNoWorktreeFailsSoftUnlessStrict(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	as.NoError(os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{ outputs = _: { }; }\n"), 0o600))
+
+	// Keep git from finding a repository above the temp dir (a local run's
+	// TMPDIR may sit inside a checkout).
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
+
+	// A nix that must never be reached: resolution fails before discovery.
+	nix := filepath.Join(dir, "no-nix")
+
+	as.NoError(Run(context.Background(), Options{System: "x86_64-linux", Nix: nix}))
+
+	err := Run(context.Background(), Options{System: "x86_64-linux", Nix: nix, Strict: true})
+	as.ErrorIs(err, ErrRepairFailed)
+	as.Contains(err.Error(), "not inside a git worktree")
+}
+
 // TestNonConvergenceNamesWhatItApplied pins that the give-up path says what it
 // already wrote. That path leaves the tree mutated by every patch that landed
 // before the bound was hit, and nothing reverts them, so the names are the only
