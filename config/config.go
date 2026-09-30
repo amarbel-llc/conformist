@@ -221,7 +221,8 @@ func SetFlags(fs *pflag.FlagSet) {
 	)
 	fs.StringSliceP(
 		"formatters", "f", nil,
-		"Specify formatters to apply. Defaults to all configured formatters. (env $CONFORMIST_FORMATTERS)",
+		"Specify formatters to apply. Defaults to all configured formatters. Selects among formatters only: "+
+			"configured linters, including their repair commands, still run. (env $CONFORMIST_FORMATTERS)",
 	)
 	fs.Bool(
 		"no-cache", false,

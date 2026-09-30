@@ -140,6 +140,55 @@ the sequence of tools applied to it — and skips files whose signature is
 unchanged since the previous run. The cache is bypassed in check mode and by
 the *--no-cache* and *--clear-cache* flags.
 
+# TREE ROOT AND SCOPE
+
+Every path conformist matches is relative to the *tree root*. That root is
+named by *--tree-root*, *--tree-root-file* or *--tree-root-cmd*. With none of
+them it is the enclosing git or jujutsu worktree, then the config file's
+directory. A caller that runs conformist over part of a larger tree, such as a
+code generator formatting its output, therefore chooses the anchor for every
+glob in the config when it chooses the root.
+
+*Globs are tree-root-relative.* The top-level *excludes* and each tool's
+*includes* and *excludes* are matched against the file's path relative to the
+tree root. Positional path arguments only narrow which part of the tree is
+walked: a file reached through _<root>/pkgs_ is still matched as _pkgs/x.go_. A
+positional path outside the root is an error. The *walk* type does not affect
+anchoring. Glob syntax and its pitfalls are in *conformist.toml*(5) GLOB
+PATTERNS.
+
+*working-dir is tree-root-relative too.* A tool's *working-dir* is joined onto
+the tree root. It is not resolved against the process's current directory or
+*--working-dir*. The directory is entered only when the tool has matched files
+to process. A formatter or linter whose *working-dir* does not exist is
+harmless as long as every file it would match is excluded or out of scope; with
+work to do, repair mode fails with a _no such file or directory_ error naming
+the joined path. *conformist check* creates the *working-dir* inside its
+sandbox copy (see SANDBOX CHECKING), so a sandboxed formatter check does not
+fail on a missing one.
+
+*--working-dir* (*-C*) changes the process directory before the config is
+loaded. A relative *--tree-root* and relative positional paths are therefore
+resolved against it.
+
+*Tool selection.* *--formatters* (*-f*, _CONFORMIST_FORMATTERS_) selects among
+the configured formatters only. Every configured linter still runs, including a
+whole-tree repair. The top-level *excludes* do not stop a whole-tree
+(*passes-files* = false) linter either, because its *includes* are a trigger
+gate and not an input set. A walk that reaches any file its *includes* match
+fires it, even a file excluded from every formatter. There is no flag that
+disables linters. A caller that needs a formatter-only run must pass a config
+that declares no _[linter.<name>]_ sections.
+
+*Environment.* The tree-root options have environment overrides
+(_CONFORMIST_TREE_ROOT_, _CONFORMIST_TREE_ROOT_FILE_, _CONFORMIST_TREE_ROOT_CMD_).
+An explicit *--tree-root* flag takes precedence over _CONFORMIST_TREE_ROOT_.
+When _CONFORMIST_TREE_ROOT_FILE_ or _CONFORMIST_TREE_ROOT_CMD_ is set in the
+environment, or *tree-root-file*/*tree-root-cmd* is set in the config, an
+explicit *--tree-root* is refused with _at most one of tree-root, tree-root-cmd
+or tree-root-file can be specified_. The ambient value makes the run fail
+instead of silently picking a root.
+
 # CONFIG-IDENTITY ATTESTATION
 
 conformist's model is one tree, one config, one toolchain — but in practice the

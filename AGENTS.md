@@ -26,8 +26,8 @@ not yet installed and so do not resolve via `man` in an agent session.
 
 | Page | Covers |
 |---|---|
-| `conformist(7)` | concepts; repair/staged/check MODES and their exit codes; sandbox checking; walking and caching; config identity |
-| `conformist.toml(5)` | every config key, including `repair-command`, the staging tiers and `repair-must-succeed` |
+| `conformist(7)` | concepts; repair/staged/check MODES and their exit codes; sandbox checking; walking and caching; tree root and scope (glob anchoring, `working-dir`, `--formatters` vs linters); config identity |
+| `conformist.toml(5)` | every config key, including `repair-command`, the staging tiers and `repair-must-succeed`; GLOB PATTERNS |
 | `conformist-nix(7)` | the flake conventions the `flake-*` linters enforce; GO MODULE LOCK; CODEGEN DRIFT; the MODULE LIBRARY a consumer evaluates, the linter registry and the presets |
 | `conformist-git(7)` | merge drivers, remotes, default branch |
 | `conformist-conform(7)` | how `conform` and `flakeclobber` rewrite a `flake.nix`: the parser, the shape roster, the refusals, splicing, sweep order |

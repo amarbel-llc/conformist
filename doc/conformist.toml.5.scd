@@ -35,11 +35,16 @@ These keys appear at the top level of the file. Operational flags such as
 are command-line only and are rejected in the config file.
 
 *excludes*
-	List of glob patterns excluded from every formatter and linter. Preferred
-	over the deprecated _[global]_ *excludes* table.
+	List of glob patterns excluded from every formatter and per-file linter,
+	matched against tree-root-relative paths (see GLOB PATTERNS). A whole-tree
+	linter (*passes-files* = false) still sees excluded files as triggers.
+	Preferred over the deprecated _[global]_ *excludes* table.
 
 *formatters*
 	List of formatter names to run. Defaults to every configured formatter.
+	Selects among formatters only: every configured linter, including its
+	*repair-command*, still runs. No option disables linters; for a
+	formatter-only run, use a config with no _[linter.<name>]_ sections.
 
 *walk*
 	Tree traversal method: one of _auto_, _git_, _jujutsu_, _filesystem_.
@@ -48,7 +53,12 @@ are command-line only and are rejected in the config file.
 *tree-root*, *tree-root-cmd*, *tree-root-file*
 	Mutually exclusive ways to locate the tree root. Without any of them the
 	root is the enclosing git or jujutsu worktree, falling back to the config
-	file's directory.
+	file's directory. The exclusivity spans the config file, the environment
+	and the flags. A *--tree-root* flag overrides _CONFORMIST_TREE_ROOT_, but it
+	conflicts with _CONFORMIST_TREE_ROOT_FILE_ or _CONFORMIST_TREE_ROOT_CMD_ and
+	the run fails. A relative *tree-root* is resolved against *--working-dir*.
+	Every glob and *working-dir* in the file is relative to the tree root; see
+	*conformist*(7) TREE ROOT AND SCOPE.
 
 *on-unmatched*
 	Log level for paths matching no formatter: _debug_, _info_, _warn_,
@@ -121,7 +131,12 @@ Each _[formatter.<name>]_ table accepts:
 *working-dir*
 	Subdirectory, relative to the tree root, to run this formatter in --- e.g.
 	a submodule whose codegen must run from there. Defaults to the tree root.
-	When set, file arguments are passed relative to it.
+	When set, file arguments are passed relative to it. It is joined onto the
+	tree root, not onto the current directory or *--working-dir*, so moving the
+	tree root moves it. It is entered only when the formatter has matched files.
+	A *working-dir* that does not exist is not an error until there is work for
+	the tool; then repair mode fails. The check-mode sandbox creates it in its
+	copy.
 
 # LINTER SECTIONS
 
@@ -222,12 +237,39 @@ plus:
 	is reported even though repair output is otherwise logged at debug level.
 	Ignored on a linter with no *repair-command*.
 
+# GLOB PATTERNS
+
+*includes* and *excludes*, both top-level and per tool, are glob patterns
+matched against the whole of a file's path relative to the tree root. Positional
+path arguments and the *walk* type do not change that anchor.
+
+Patterns are compiled without a path separator, so _\*_ and _\*\*_ both match
+any run of characters _including_ _/_. As a result _\*.go_ matches _a/b/c.go_.
+A pattern must match the entire path, and a literal _/_ in it must be present
+in the path. In particular _\*\*/pkgs/\*\*_ does NOT match _pkgs/x.go_, because
+the pattern needs a character before _/pkgs/_. It does match _go/pkgs/x.go_ and
+_.tmp/pkgs/x.go_. To exclude a directory at the root and at any depth, list
+both:
+
+```
+excludes = ["pkgs/**", "**/pkgs/**"]
+```
+
+A pattern written for one tree root does not carry over to another. With the
+tree root at _<repo>/go_, _pkgs/\*\*_ matches _<repo>/go/pkgs/x.go_ and
+_go/pkgs/\*\*_ matches nothing there.
+
 # ENVIRONMENT
 
 Every option has an environment override named by upper-casing the key and
 prefixing _CONFORMIST\__ (for example _CONFORMIST_WALK_, _CONFORMIST_EXCLUDES_).
 The legacy _TREELINT\__ prefix is honored when the _CONFORMIST\__ equivalent is
-unset.
+unset. Hyphens and dots in the key become underscores. The overrides reach the
+per-tool keys of tools declared in the config as well: for example
+_CONFORMIST_LINTER_CODEGEN_REPAIR_INCLUDES_ replaces
+_[linter.codegen-repair]_ *includes*. An ambient variable of that shape
+therefore changes a tool's configuration. See *conformist*(7) TREE ROOT AND
+SCOPE for how the tree-root variables combine with the flags.
 
 *CONFORMIST_CONFIG*
 	Path to the config file, overriding upward discovery.

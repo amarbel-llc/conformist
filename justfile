@@ -157,6 +157,100 @@ debug-profile-dryrun root:
     "$bin" check --tree-root "{{ root }}" --no-cache --profile-only --profile "$PWD/conformist.profile" 2>&1
     echo "exit: $?"
 
+# Observe how the raw binary scopes a run when a caller (dagnabit's facade
+# pass) picks the tree root: whether --formatters also drops linters, whether a
+# working-dir is touched when its formatter matches nothing, what excludes are
+# anchored to, what a formatter's working-dir resolves against, and how
+# CONFORMIST_TREE_ROOT* in the environment meets an explicit --tree-root. Every
+# tool is a shell line that appends its cwd and argv to a log, so each case
+# prints exactly what ran and where. Scratch tree only; --no-cache throughout.
+#
+# show which tools run, where, and on what, under tree-root/scope variations
+[group("debug")]
+debug-scope-semantics:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$(nix build --no-link --print-out-paths '.#conformist-bga')/bin/conformist"
+    d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+    repo="$d/repo"; log="$d/log"
+    mkdir -p "$repo/go/pkgs/sub" "$d/elsewhere"
+    touch "$repo/flake.nix" "$repo/go/main.go" "$repo/go/pkgs/facade.go" "$repo/go/pkgs/sub/deep.go"
+    # conf NAME FMT_WORKING_DIR EXCLUDES_TOML: a formatter `fmt` (shell line,
+    # optional working-dir) and a whole-tree linter `wt` with a repair, both on
+    # *.go, logging where they ran.
+    conf() {
+      {
+        echo "excludes = [$3]"
+        echo '[formatter.fmt]'
+        echo "command = 'echo \"fmt pwd=\$PWD args=\$*\" >> $log'"
+        echo 'includes = ["*.go"]'
+        [ -n "$2" ] && echo "working-dir = \"$2\""
+        echo '[linter.wt]'
+        echo 'command = "true"'
+        echo "repair-command = 'echo \"wt  pwd=\$PWD\" >> $log'"
+        echo 'includes = ["*.go"]'
+        echo 'passes-files = false'
+      } > "$d/$1.toml"
+    }
+    # run LABEL CWD ARGS...: run the binary from CWD, then print its exit, any
+    # error lines, and what the tools logged ($d shown as <d>).
+    run() {
+      local label=$1 cwd=$2; shift 2
+      : > "$log"
+      local out rc
+      out=$(cd "$cwd" && "$bin" --no-cache "$@" 2>&1); rc=$?
+      echo "== $label"
+      echo "   exit=$rc"
+      printf '%s\n' "$out" | sed -n '/ERRO\|Error\|error:/p' | sed "s#$d#<d>#g; s/^/   /"
+      sed "s#$d#<d>#g; s/^/   /" "$log"
+    }
+
+    echo "### Q1: --formatters vs linters"
+    conf q1 "" ""
+    run "no --formatters"             "$repo" --tree-root "$repo" --walk filesystem --config-file "$d/q1.toml"
+    run "--formatters fmt"            "$repo" --tree-root "$repo" --walk filesystem --config-file "$d/q1.toml" --formatters fmt
+    : > "$log"; (cd "$repo" && CONFORMIST_FORMATTERS=fmt "$bin" --no-cache --tree-root "$repo" --walk filesystem --config-file "$d/q1.toml" >/dev/null 2>&1)
+    echo "== CONFORMIST_FORMATTERS=fmt (env)"; sed "s#$d#<d>#g; s/^/   /" "$log"
+    run "global excludes all *.go"    "$repo" --tree-root "$repo" --walk filesystem --config-file "$d/q1.toml" --excludes '*.go'
+
+    echo; echo "### Q2: working-dir that does not exist under the tree root (root = repo/go, working-dir = go)"
+    conf q2 go ""
+    run "zero matches: excludes **"   "$repo/go" --tree-root "$repo/go" --walk filesystem --config-file "$d/q2.toml" --excludes '**'
+    run "zero matches: path w/o .go"  "$repo/go" --tree-root "$repo/go" --walk filesystem --config-file "$d/q2.toml" --excludes 'pkgs/**,main.go'
+    run "matches exist"               "$repo/go" --tree-root "$repo/go" --walk filesystem --config-file "$d/q2.toml"
+    : > "$log"
+    out=$(cd "$repo/go" && "$bin" check --no-cache --tree-root "$repo/go" --walk filesystem --config-file "$d/q2.toml" 2>&1); rc=$?
+    echo "== check mode, matches exist"; echo "   exit=$rc"; sed "s#$d#<d>#g; s/^/   /" "$log"
+
+    echo; echo "### Q3: exclude anchoring (root = repo/go, no working-dir)"
+    for ex in "'pkgs/**'" "'go/pkgs/**'" "'**/pkgs/**'" "'*/pkgs/**'"; do
+      conf q3 "" "$ex"
+      run "excludes=[$ex], no path"                "$repo/go" --tree-root "$repo/go" --walk filesystem --config-file "$d/q3.toml"
+      run "excludes=[$ex], path=pkgs (abs)"        "$repo/go" --tree-root "$repo/go" --walk filesystem --config-file "$d/q3.toml" "$repo/go/pkgs"
+    done
+    conf q3 "" "'pkgs/**'"
+    run "excludes=[pkgs/**], root=repo/go/pkgs, path=root" "$repo/go" --tree-root "$repo/go/pkgs" --walk filesystem --config-file "$d/q3.toml" "$repo/go/pkgs"
+
+    echo; echo "### Q3: working-dir / tree-root resolution"
+    conf q3w go ""
+    run "cwd=elsewhere, --tree-root=repo (abs)"      "$d/elsewhere" --tree-root "$repo" --walk filesystem --config-file "$d/q3w.toml"
+    run "cwd=elsewhere, -C repo, --tree-root=."      "$d/elsewhere" -C "$repo" --tree-root . --walk filesystem --config-file "$d/q3w.toml"
+    run "cwd=elsewhere, -C repo/go, --tree-root=repo (abs)" "$d/elsewhere" -C "$repo/go" --tree-root "$repo" --walk filesystem --config-file "$d/q3w.toml"
+
+    echo; echo "### Q3: ambient env vs explicit --tree-root"
+    conf q3e "" ""
+    : > "$log"; out=$(cd "$repo" && CONFORMIST_TREE_ROOT="$repo/go/pkgs" "$bin" --no-cache --tree-root "$repo" --walk filesystem --config-file "$d/q3e.toml" 2>&1); rc=$?
+    echo "== CONFORMIST_TREE_ROOT=repo/go/pkgs + --tree-root repo"; echo "   exit=$rc"; sed "s#$d#<d>#g; s/^/   /" "$log"
+    : > "$log"; out=$(cd "$repo" && CONFORMIST_TREE_ROOT_FILE=flake.nix "$bin" --no-cache --tree-root "$repo/go" --walk filesystem --config-file "$d/q3e.toml" 2>&1); rc=$?
+    echo "== CONFORMIST_TREE_ROOT_FILE=flake.nix + --tree-root repo/go"; echo "   exit=$rc"; printf '%s\n' "$out" | sed -n '/rror/p' | sed "s#$d#<d>#g; s/^/   /"; sed "s#$d#<d>#g; s/^/   /" "$log"
+    : > "$log"; out=$(cd "$repo" && CONFORMIST_TREE_ROOT_CMD="echo /" "$bin" --no-cache --tree-root "$repo/go" --walk filesystem --config-file "$d/q3e.toml" 2>&1); rc=$?
+    echo "== CONFORMIST_TREE_ROOT_CMD='echo /' + --tree-root repo/go"; echo "   exit=$rc"; printf '%s\n' "$out" | sed -n '/rror/p' | sed "s#$d#<d>#g; s/^/   /"
+    : > "$log"; out=$(cd "$repo" && CONFORMIST_LINTER_WT_INCLUDES=nomatch "$bin" --no-cache --tree-root "$repo" --walk filesystem --config-file "$d/q3e.toml" 2>&1); rc=$?
+    echo "== CONFORMIST_LINTER_WT_INCLUDES=nomatch (env override of a per-tool key)"; echo "   exit=$rc"; sed "s#$d#<d>#g; s/^/   /" "$log"
+    sed 's/^\[linter\.wt\]/[linter.w-t]/' "$d/q3e.toml" > "$d/q3h.toml"
+    : > "$log"; out=$(cd "$repo" && CONFORMIST_LINTER_W_T_INCLUDES=nomatch "$bin" --no-cache --tree-root "$repo" --walk filesystem --config-file "$d/q3h.toml" 2>&1); rc=$?
+    echo "== CONFORMIST_LINTER_W_T_INCLUDES=nomatch (hyphenated linter name w-t)"; echo "   exit=$rc"; sed "s#$d#<d>#g; s/^/   /" "$log"
+
 # Probe which git remote-reading commands apply `url.<base>.insteadOf` rewriting.
 # The git-remotes(#8) linter reads `git remote -v` (transport rule) and `git
 # remote get-url origin` (canonical-host rule). If those return the REWRITTEN
