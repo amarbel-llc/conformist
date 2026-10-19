@@ -677,6 +677,7 @@
       flakeModule = ./flake-module.nix;
 
       # `nix flake init -t 'git+https://code.linenisgreat.com/conformist.git#eng'`
+      # (the templates themselves pin conformist from the master tarball)
       # scaffolds a repo
       # already wired to conformist with the eng-convention preset: flake.nix
       # (conformist input + follows + evalModule), conformist.nix (imports
