@@ -53,6 +53,12 @@ var justfile []byte
 //go:embed scaffold/sweatfile
 var sweatfile []byte
 
+// The scaffold file is named without the leading dot so it is not hidden in the
+// source tree; it is written out as .gitattributes.
+//
+//go:embed scaffold/gitattributes
+var gitattributes []byte
+
 //go:embed scaffold/flake-snippet.txt
 var flakeSnippet string
 
@@ -129,6 +135,7 @@ func Run(dir string, out io.Writer, opts Options) (Result, error) {
 		{"conformist.nix", conformistNix},
 		{"version.env", renderVersionEnv(dir)},
 		{"sweatfile", sweatfile},
+		{".gitattributes", gitattributes},
 	}
 	for _, p := range plain {
 		wrote, err := writeIfAbsent(dir, p.name, p.content)

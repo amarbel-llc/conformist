@@ -11,7 +11,7 @@ import (
 )
 
 // allScaffolds is every file conform writes into a greenfield repo.
-var allScaffolds = []string{"conformist.nix", "version.env", "sweatfile", "flake.nix", "justfile"}
+var allScaffolds = []string{"conformist.nix", "version.env", "sweatfile", ".gitattributes", "flake.nix", "justfile"}
 
 // TestRunScaffoldsGreenfield verifies conform writes the full eng shape —
 // including complete, buildable flake.nix and justfile — into an empty dir, and
@@ -81,7 +81,7 @@ func TestRunReportsExistingFlakeAndJustfile(t *testing.T) {
 	res, err := conform.Run(dir, &out, conform.Options{})
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, []string{"conformist.nix", "version.env", "sweatfile"}, res.Wrote)
+	require.ElementsMatch(t, []string{"conformist.nix", "version.env", "sweatfile", ".gitattributes"}, res.Wrote)
 	require.ElementsMatch(t, []string{"flake.nix", "justfile"}, res.Skipped)
 
 	gotFlake, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
@@ -111,7 +111,7 @@ func TestRunPreservesExistingFiles(t *testing.T) {
 	res, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, []string{"version.env", "sweatfile", "flake.nix", "justfile"}, res.Wrote)
+	require.ElementsMatch(t, []string{"version.env", "sweatfile", ".gitattributes", "flake.nix", "justfile"}, res.Wrote)
 	require.Equal(t, []string{"conformist.nix"}, res.Skipped)
 
 	got, err := os.ReadFile(existing)
@@ -321,14 +321,21 @@ func seedAllScaffolds(t *testing.T, dir string) { //testui:allow // testify help
 // template files (templates/eng), so `conformist conform` and
 // `nix flake init -t …#eng` produce the same eng shape.
 func TestScaffoldFlakeAndJustfileMatchTemplate(t *testing.T) {
-	for _, name := range []string{"flake.nix", "justfile", "sweatfile"} {
+	// scaffold file name -> template file name (the scaffold copy of
+	// .gitattributes has no leading dot so it is not hidden in the source tree).
+	for name, templateName := range map[string]string{
+		"flake.nix":     "flake.nix",
+		"justfile":      "justfile",
+		"sweatfile":     "sweatfile",
+		"gitattributes": ".gitattributes",
+	} {
 		embedded, err := os.ReadFile(filepath.Join("scaffold", name))
 		require.NoError(t, err, "read embedded scaffold/%s", name)
 
-		template, err := os.ReadFile(filepath.Join("..", "..", "templates", "eng", name))
-		require.NoError(t, err, "read templates/eng/%s", name)
+		template, err := os.ReadFile(filepath.Join("..", "..", "templates", "eng", templateName))
+		require.NoError(t, err, "read templates/eng/%s", templateName)
 
 		require.Equal(t, string(template), string(embedded),
-			"scaffold/%s must match templates/eng/%s — keep them in sync", name, name)
+			"scaffold/%s must match templates/eng/%s — keep them in sync", name, templateName)
 	}
 }

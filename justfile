@@ -489,6 +489,31 @@ explore-template-eng:
     nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
     echo "explore-template-eng: template instantiates and passes checks.formatting"
 
+# Same smoke test for the Rust template (templates/eng-rust/): instantiate it,
+# lock it, run the sandboxed formatting check, and build the impure config so the
+# clippy overlay is proven to evaluate. The template pins conformist from the
+# published master tarball, so this needs network and exercises the module
+# library as published, not this worktree's.
+#
+# smoke-test the eng-rust flake template end-to-end
+[group("explore")]
+explore-template-eng-rust:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="{{ justfile_directory() }}"
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    cd "$d"
+    nix flake init -t "$src#eng-rust"
+    git init -q
+    git add -A
+    nix flake lock
+    git add flake.lock
+    sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
+    nix build ".#conformist-impure-config" --no-link --print-build-logs
+    echo "explore-template-eng-rust: template instantiates, passes checks.formatting, impure config evaluates"
+
 # End-to-end happy path for the conformist-flake-lock merge driver
 # (conformist-git(7) MERGE DRIVERS). The sandboxed fixtures in
 # nix/linter-fixtures.nix can only cover the driver's FAIL-CLOSED paths, because

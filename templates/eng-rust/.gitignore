@@ -1,0 +1,6 @@
+# The cargo workspace root is the repo root, so the build dir lands here.
+/target
+
+# nix build symlinks.
+/result
+/result-*

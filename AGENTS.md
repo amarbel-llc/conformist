@@ -258,7 +258,9 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   conformist's own self-lint (consumer-facing scaffold, e.g. a direnv `.envrc`
   has no shebang); the `explore-template-eng` recipe smoke-tests instantiation.
   Downstream consumers MUST set `conformist.package` — conformist is not in
-  nixpkgs, so the module's `package` option has no default.
+  nixpkgs, so the module's `package` option has no default. Per-language
+  siblings (`templates.eng-rust`, …) are listed in `conformist-conform(7)`
+  FLAKE TEMPLATES.
 
 ## Conventions and gotchas
 

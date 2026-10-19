@@ -163,14 +163,40 @@ A bare domain advertising one template uses it. Several prompt via *huh* on a TT
 and otherwise fail listing the ids rather than guessing. Operational failures map to
 exit 2 (*ErrConformFailed*), and a non-empty target is refused without *--overwrite*.
 
+# FLAKE TEMPLATES
+
+conformist's flake exposes one template per repo language, instantiated with *nix
+flake init -t <conformist flakeref>#<id>* or advertised through a domain's PAPI
+document for *conform <domain>#<id>* (above). Each lives under _templates/<id>/_ and
+is registered in the flake's *templates* output; a new language is one more
+directory and one more entry.
+
+- *eng*: language-agnostic. The eng preset, nixfmt, a justfile whose *default* is
+  *lint*, and the sweatfile hooks. The built-in scaffold (SCAFFOLDING) tracks this
+  template.
+- *eng-rust*: a Rust cargo workspace. Adds rustfmt, an impure clippy lane
+  (_conformist-impure.nix_, with the *gomod2nix* linter forced off since it needs a
+  Go overlay a plain consumer lacks), a Rust _.gitignore_, and a justfile whose
+  *default* is *test lint* with *lint-impure* in the *lint* aggregate. The version key
+  in _conformist.nix_ ships as a placeholder to rename, or to drop once the root
+  _Cargo.toml_ has a matching *[package]*.
+
+The templates pin conformist from the master tarball
+(_https://code.linenisgreat.com/conformist/archive/master.tar.gz_), the pin most of
+the fleet uses. The *explore-template-eng* and *explore-template-eng-rust* recipes
+smoke-test instantiation.
+
 # SCAFFOLDING
 
 *conform* writes every absent shape file: _conformist.nix_, a _version.env_ whose key
 is derived from the repository name (the git origin remote, else the directory
-basename, via *git.OriginRepoName*), and, greenfield, a complete
-_flake.nix_/_justfile_. All are *//go:embed*-ed from _cmd/conform/scaffold/_, and the
-_flake.nix_/_justfile_ are kept byte-identical to _templates/eng/_ by a drift test
-(conformist#41).
+basename, via *git.OriginRepoName*), a _sweatfile_, a _.gitattributes_ binding
+_flake.lock_ to the *conformist-flake-lock* merge driver (required by the
+*git-merge-drivers* linter, conformist-git(7) MERGE DRIVERS), and, greenfield, a
+complete _flake.nix_/_justfile_. All are *//go:embed*-ed from _cmd/conform/scaffold/_
+(the _.gitattributes_ source is stored there as _gitattributes_, undotted), and the
+_flake.nix_/_justfile_/_sweatfile_/_.gitattributes_ are kept byte-identical to
+_templates/eng/_ by a drift test (conformist#41).
 
 An existing _flake.nix_ in the recognized shape is edited in place to splice the
 *conformist* and *just-us* inputs --- the latter supplying both the devShell's *just*

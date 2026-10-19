@@ -687,6 +687,10 @@
           path = ./templates/eng;
           description = "amarbel-llc eng-conventions conformist setup (preset + recipes)";
         };
+        eng-rust = {
+          path = ./templates/eng-rust;
+          description = "eng setup for a Rust cargo workspace: eng preset, rustfmt, impure clippy lane";
+        };
         default = self.templates.eng;
       };
     };
