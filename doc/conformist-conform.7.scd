@@ -167,7 +167,7 @@ After *nix flake init* the bootstrap finishes the repo-specific steps itself
 (conformist#138), in this order:
 
 - *Version key.* The literal *EXAMPLE_VERSION* the templates ship in _version.env_
-  and _conformist.nix_ becomes *<REPO>_VERSION*, derived exactly like local mode's
+  and _conformist.nix_ becomes *<REPO>\_VERSION*, derived exactly like local mode's
   _version.env_ key (the git origin remote's repo name, else the directory
   basename). *--name <x>* overrides the name. Only files the template just wrote
   are rewritten, so *--overwrite* never edits a file the user already had.
