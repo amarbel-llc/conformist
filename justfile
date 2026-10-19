@@ -512,7 +512,9 @@ explore-template-eng-rust:
     sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
     nix build ".#conformist-impure-config" --no-link --print-build-logs
-    echo "explore-template-eng-rust: template instantiates, passes checks.formatting, impure config evaluates"
+    # The justfile's test-rust needs cargo from the devShell (conformist#137).
+    nix develop -c cargo --version
+    echo "explore-template-eng-rust: template instantiates, passes checks.formatting, impure config evaluates, devShell has cargo"
 
 # End-to-end happy path for the conformist-flake-lock merge driver
 # (conformist-git(7) MERGE DRIVERS). The sandboxed fixtures in

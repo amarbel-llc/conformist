@@ -115,6 +115,15 @@
             eval.config.build.preCommit
             eval.config.build.repair
             justPkg
+            # The Rust toolchain the justfile's `test-rust` (cargo test) needs on
+            # PATH; gcc is the linker cargo invokes. The clippy lane bakes its own
+            # copy (conformist-impure.nix), so this is for interactive use and
+            # `just`, not the lint gate.
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.clippy
+            pkgs.rustfmt
+            pkgs.gcc
           ];
         };
       }
