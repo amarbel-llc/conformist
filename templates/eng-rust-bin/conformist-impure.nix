@@ -41,7 +41,9 @@ let
       # are left for a human and still fail the check. Self-stage the fixes.
       cargo clippy --fix --allow-dirty --allow-staged --all-targets --workspace \
         --manifest-path Cargo.toml
-      git add -u
+      # Stage only what clippy can have rewritten (sources and the lockfile), never
+      # unrelated tracked edits the author has in flight.
+      git add -u -- '*.rs' Cargo.lock
     '';
   };
 in
