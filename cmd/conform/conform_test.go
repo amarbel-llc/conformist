@@ -11,7 +11,9 @@ import (
 )
 
 // allScaffolds is every file conform writes into a greenfield repo.
-var allScaffolds = []string{"conformist.nix", "version.env", "sweatfile", ".gitattributes", "flake.nix", "justfile"}
+var allScaffolds = []string{
+	"conformist.nix", "version.env", "sweatfile", ".gitattributes", "flake.nix", "conformist-impure.nix", "justfile",
+}
 
 // TestRunScaffoldsGreenfield verifies conform writes the full eng shape —
 // including complete, buildable flake.nix and justfile — into an empty dir, and
@@ -61,7 +63,11 @@ func TestRunIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Empty(t, res.Wrote, "second run must not rewrite existing files")
-	require.ElementsMatch(t, allScaffolds, res.Skipped)
+	// The impure overlay is only written alongside a freshly written flake.nix,
+	// so a re-run does not list it as kept.
+	require.ElementsMatch(t, []string{
+		"conformist.nix", "version.env", "sweatfile", ".gitattributes", "flake.nix", "justfile",
+	}, res.Skipped)
 }
 
 // TestRunReportsExistingFlakeAndJustfile verifies the fallback path: when
@@ -111,7 +117,8 @@ func TestRunPreservesExistingFiles(t *testing.T) {
 	res, err := conform.Run(dir, &bytes.Buffer{}, conform.Options{})
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, []string{"version.env", "sweatfile", ".gitattributes", "flake.nix", "justfile"}, res.Wrote)
+	require.ElementsMatch(t,
+		[]string{"version.env", "sweatfile", ".gitattributes", "flake.nix", "conformist-impure.nix", "justfile"}, res.Wrote)
 	require.Equal(t, []string{"conformist.nix"}, res.Skipped)
 
 	got, err := os.ReadFile(existing)
@@ -328,6 +335,8 @@ func TestScaffoldFlakeAndJustfileMatchTemplate(t *testing.T) {
 		"justfile":      "justfile",
 		"sweatfile":     "sweatfile",
 		"gitattributes": ".gitattributes",
+
+		"conformist-impure.nix": "conformist-impure.nix",
 	} {
 		embedded, err := os.ReadFile(filepath.Join("scaffold", name))
 		require.NoError(t, err, "read embedded scaffold/%s", name)

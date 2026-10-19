@@ -202,6 +202,17 @@ func normalizeCrateName(name string) string {
 	return strings.TrimSuffix(crate, "-")
 }
 
+// appendUnique appends item to list unless it is already there.
+func appendUnique(list []string, item string) []string {
+	for _, existing := range list {
+		if existing == item {
+			return list
+		}
+	}
+
+	return append(list, item)
+}
+
 // isGitRepo reports whether dir is a git work tree root (a .git directory, or a
 // .git file as in a linked worktree).
 func isGitRepo(dir string) bool {

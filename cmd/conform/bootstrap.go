@@ -35,6 +35,9 @@ type BootstrapOptions struct {
 	Name string
 	// NoLock skips the `nix flake lock` step.
 	NoLock bool
+	// AllowHosts are extra hosts the git-remotes check accepts for origin
+	// (--allow-host); persisted with a non-canonical origin host (#140).
+	AllowHosts []string
 	// GitStage stages paths (relative to dir) with git; nil uses runGitStage.
 	// Tests substitute a stub.
 	GitStage func(ctx context.Context, dir string, paths []string) error
@@ -129,6 +132,26 @@ func finishBootstrap(ctx context.Context, dir string, before treeSnapshot, out i
 		if files := rewrote[sub.token]; len(files) > 0 {
 			fmt.Fprintf(out, "set %s in %s\n", sub.value, strings.Join(files, ", "))
 		}
+	}
+
+	// #140: persist the git-remotes allowlist before staging so the overlay the
+	// template wrote (or we created) is staged with the rest.
+	hosts, err := wantedHosts(dir, opts.AllowHosts)
+	if err != nil {
+		return err
+	}
+
+	if len(hosts) > 0 {
+		outcome, err := persistAllowedHosts(dir, hosts)
+		if err != nil {
+			return err
+		}
+
+		if outcome.Created || outcome.Changed {
+			touched = appendUnique(touched, impureOverlay)
+		}
+
+		reportHosts(out, hosts, outcome, flakeImportsOverlay(dir))
 	}
 
 	staged := false

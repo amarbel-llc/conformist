@@ -59,6 +59,9 @@ var sweatfile []byte
 //go:embed scaffold/gitattributes
 var gitattributes []byte
 
+//go:embed scaffold/conformist-impure.nix
+var impureNix []byte
+
 //go:embed scaffold/flake-snippet.txt
 var flakeSnippet string
 
@@ -91,6 +94,11 @@ type Options struct {
 	// with zero further operator action (#42, the adoption-wave path). Without
 	// it, conform only prints RepairCommand as the one command to run.
 	Repair bool
+	// AllowHosts are hosts the git-remotes check should accept for origin besides
+	// the canonical one (--allow-host). They are persisted into
+	// conformist-impure.nix together with the origin remote's host when that is
+	// not canonical, so later runs keep them.
+	AllowHosts []string
 	// RepairRunner runs the working-tree repair and reports whether it changed
 	// the tree; nil uses defaultRepairRunner (sh -c over RepairCommand, with a
 	// git-status delta). Tests inject a stub so no real nix invocation happens.
@@ -161,6 +169,14 @@ func Run(dir string, out io.Writer, opts Options) (Result, error) {
 			return res, fmt.Errorf("failed to write flake.nix: %w", err)
 		}
 		res.Wrote = append(res.Wrote, "flake.nix")
+
+		// The greenfield flake imports ./conformist-impure.nix, so the overlay
+		// must exist alongside it.
+		if wroteOverlay, err := writeIfAbsent(dir, impureOverlay, impureNix); err != nil {
+			return res, err
+		} else if wroteOverlay {
+			res.Wrote = append(res.Wrote, impureOverlay)
+		}
 	case opts.NoEdit:
 		res.Skipped = append(res.Skipped, "flake.nix")
 		printFlake = true
@@ -207,6 +223,12 @@ func Run(dir string, out io.Writer, opts Options) (Result, error) {
 		if !justfileIsWired(dir) {
 			printJust = true
 		}
+	}
+
+	// #140: persist the git-remotes allowlist (--allow-host plus a non-canonical
+	// origin host) into conformist-impure.nix so re-runs and `just lint` keep it.
+	if err := persistHosts(dir, out, opts.AllowHosts, &res); err != nil {
+		return res, err
 	}
 
 	// #42(ii): with --repair, delegate the real edits to conformist's own

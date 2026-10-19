@@ -29,6 +29,29 @@ func TreeRootCmd() string { return Binary + " rev-parse --show-toplevel" }
 // directory basename). A non-nil error is reserved for an unexpected failure to
 // run git at all (e.g. git not on PATH).
 func OriginRepoName(dir string) (string, error) {
+	url, err := originURL(dir)
+	if err != nil || url == "" {
+		return "", err
+	}
+
+	return repoNameFromRemoteURL(url), nil
+}
+
+// OriginHost returns the host the `origin` remote of the git repo at dir
+// targets, or ("", nil) when there is no origin remote or its URL names no host
+// (a local path). It is the same extraction the git-remotes linter applies, so
+// conform and the linter agree on what "the origin host" is.
+func OriginHost(dir string) (string, error) {
+	url, err := originURL(dir)
+	if err != nil || url == "" {
+		return "", err
+	}
+
+	return HostFromRemoteURL(url), nil
+}
+
+// originURL reads the configured `origin` URL, or "" when there is none.
+func originURL(dir string) (string, error) {
 	cmd := exec.CommandContext(
 		context.Background(), Binary, "-C", dir, "config", "--get", "remote.origin.url",
 	)
@@ -47,7 +70,31 @@ func OriginRepoName(dir string) (string, error) {
 		return "", fmt.Errorf("failed to read origin remote in %s: %w", dir, err)
 	}
 
-	return repoNameFromRemoteURL(string(out)), nil
+	return strings.TrimSpace(string(out)), nil
+}
+
+// HostFromRemoteURL extracts the host from an scp-like (user@host:path), an
+// ssh://[user@]host[:port]/path, or any scheme://[user@]host[:port]/path remote
+// URL. It returns "" for anything else (a local path, a hostless file:// URL).
+// This mirrors origin_host in nix/linters/git-remotes.nix.
+func HostFromRemoteURL(url string) string {
+	var host string
+
+	switch {
+	case strings.Contains(url, "://"):
+		rest := url[strings.Index(url, "://")+len("://"):]
+		if _, after, found := strings.Cut(rest, "@"); found {
+			rest = after
+		}
+
+		host, _, _ = strings.Cut(rest, "/")
+		host, _, _ = strings.Cut(host, ":")
+	case strings.Contains(url, "@") && strings.Contains(url[strings.Index(url, "@"):], ":"):
+		rest := url[strings.Index(url, "@")+1:]
+		host, _, _ = strings.Cut(rest, ":")
+	}
+
+	return host
 }
 
 // repoNameFromRemoteURL extracts the repository name from a git remote URL: the

@@ -30,6 +30,7 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 		overwrite      bool
 		name           string
 		noLock         bool
+		allowHosts     []string
 	)
 
 	cmd := &cobra.Command{
@@ -50,6 +51,9 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 			"It then fills in the template's EXAMPLE_VERSION key (--name overrides the repo name), stages the " +
 			"files the template wrote when the directory is a git repo (never commits), and runs `nix flake " +
 			"lock` (--no-lock skips it; a lock failure warns).\n\n" +
+			"In both modes, an origin remote on a host other than code.linenisgreat.com (and every --allow-host) " +
+			"is persisted as linters.git-remotes.allowed-hosts in conformist-impure.nix, so the impure lane's " +
+			"git-remotes check accepts it.\n\n" +
 			"It is idempotent. Local mode exits 0 when nothing changed and 3 when it wrote/edited/repaired " +
 			"files; bootstrap exits 0 on success; 2 on an operational error.",
 		Args: cobra.MaximumNArgs(1),
@@ -63,7 +67,12 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 
 			// Domain bootstrap mode (#43): `conform <domain>` / `<domain>#<id>`.
 			if len(args) == 1 {
-				return runBootstrap(cmd, args[0], dir, overwrite, name, noLock)
+				return runBootstrap(cmd, args[0], dir, conform.BootstrapOptions{
+					Overwrite:  overwrite,
+					Name:       name,
+					NoLock:     noLock,
+					AllowHosts: allowHosts,
+				})
 			}
 
 			// Local scaffold + convergence mode (#41/#42).
@@ -71,6 +80,7 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 				NoEdit:         noEdit,
 				ForceFormatter: forceFormatter,
 				Repair:         repair,
+				AllowHosts:     allowHosts,
 			})
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrConformFailed, err)
@@ -98,6 +108,10 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 			"(default: the git origin remote's repo name, else the directory name)")
 	cmd.Flags().BoolVar(&noLock, "no-lock", false,
 		"in <domain> bootstrap mode, do not run `nix flake lock` after scaffolding")
+	cmd.Flags().StringSliceVar(&allowHosts, "allow-host", nil,
+		"a host the git-remotes check accepts for origin besides code.linenisgreat.com (repeatable); persisted "+
+			"in conformist-impure.nix so later runs and `just lint` keep it. An origin on any other host is added "+
+			"automatically")
 
 	return cmd
 }
@@ -105,14 +119,10 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 // runBootstrap dispatches the `conform <domain>` template-bootstrap mode (#43),
 // mapping an interactive terminal to the huh chooser and any failure to
 // ErrConformFailed (exit 2).
-func runBootstrap(cmd *cobra.Command, target, dir string, overwrite bool, name string, noLock bool) error {
-	err := conform.Bootstrap(cmd.Context(), target, dir, cmd.OutOrStdout(), conform.BootstrapOptions{
-		Overwrite:   overwrite,
-		Interactive: term.IsTerminal(int(os.Stdin.Fd())),
-		Name:        name,
-		NoLock:      noLock,
-	})
-	if err != nil {
+func runBootstrap(cmd *cobra.Command, target, dir string, opts conform.BootstrapOptions) error {
+	opts.Interactive = term.IsTerminal(int(os.Stdin.Fd()))
+
+	if err := conform.Bootstrap(cmd.Context(), target, dir, cmd.OutOrStdout(), opts); err != nil {
 		return fmt.Errorf("%w: %w", ErrConformFailed, err)
 	}
 

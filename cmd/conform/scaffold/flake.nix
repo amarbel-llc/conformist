@@ -70,12 +70,17 @@
           linters.justfile-common.justPackage = justPkg;
         };
 
-        # Impure lane: the git-state checks (git-remotes, sweatfile, agents-md).
+        # Impure lane: the git-state checks (git-remotes, sweatfile, agents-md)
+        # plus this repo's impure overlay (./conformist-impure.nix, where
+        # `conformist conform --allow-host` persists the git-remotes allowlist).
         # They need a live .git / host tools, so they run via `just lint-worktree`
         # against the working tree, not the sandboxed check. Wire this in once the
         # repo has SSH remotes + a sweatfile (see the justfile).
         impureEval = conformist.lib.evalModule pkgs {
-          imports = [ conformist.lib.presets.eng-impure ];
+          imports = [
+            conformist.lib.presets.eng-impure
+            ./conformist-impure.nix
+          ];
           package = conformistPkg;
           projectRootFile = "flake.nix";
         };

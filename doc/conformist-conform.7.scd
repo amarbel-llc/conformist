@@ -217,8 +217,36 @@ drift test keeps their language-independent files identical and checks the packa
 templates' placeholders and symlink.
 
 The impure lane's *git-remotes* check requires _origin_ on the canonical host
-(_code.linenisgreat.com_). A repo hosted elsewhere sets
-*linters.git-remotes.allowed-hosts* in its _conformist-impure.nix_.
+(_code.linenisgreat.com_); see ALLOWED HOSTS for repos hosted elsewhere.
+
+# ALLOWED HOSTS
+
+A repo whose _origin_ is on another forge fails the impure lane's *git-remotes*
+check until that host is in *linters.git-remotes.allowed-hosts* (conformist-git(7)
+REMOTES). *conform* sets it up (conformist#140), in both modes:
+
+- The _origin_ remote's host is added automatically when it is not
+  _code.linenisgreat.com_.
+- *--allow-host <host>* (repeatable) adds further hosts explicitly.
+
+The hosts are persisted as one managed line in _conformist-impure.nix_:
+
+	linters.git-remotes.allowed-hosts = [ "forge.example.org" ]; # managed by `conformist conform` (--allow-host)
+
+It lives in _conformist-impure.nix_, not _conformist.nix_, because *git-remotes*
+runs in the impure lane and only _conformist-impure.nix_ is merged into it
+(_conformist.nix_ feeds the pure lane, where the option has no effect), and
+because a plain Nix attribute needs no separate config format: later *conform*
+runs, *conform --repair* and *just lint* all just evaluate it.
+
+Re-runs are idempotent and only ever widen the line: a host once persisted is not
+dropped by a run without the flag, even if _origin_ later moves. Only the managed
+line is rewritten; the rest of the file is left alone, and the line is inserted
+before the file's closing brace. If the file already sets *allowed-hosts* by hand,
+or has no closing brace conform can insert before, it is left unedited and the line
+to add is printed. Greenfield, the scaffold and _templates/eng_ ship a
+_conformist-impure.nix_ stub that _flake.nix_ imports; when an existing flake does
+not import it, the allowlist would have no effect and conform says so.
 
 The templates pin conformist from the master tarball
 (_https://code.linenisgreat.com/conformist/archive/master.tar.gz_), the pin most of
@@ -230,12 +258,13 @@ smoke-test instantiation; the latter runs each Rust template's whole default gat
 
 *conform* writes every absent shape file: _conformist.nix_, a _version.env_ whose key
 is derived from the repository name (the git origin remote, else the directory
-basename, via *git.OriginRepoName*), a _sweatfile_, a _.gitattributes_ binding
+basename, via *git.OriginRepoName*), a _sweatfile_, a _conformist-impure.nix_ overlay
+stub (greenfield only, beside the _flake.nix_ that imports it), a _.gitattributes_ binding
 _flake.lock_ to the *conformist-flake-lock* merge driver (required by the
 *git-merge-drivers* linter, conformist-git(7) MERGE DRIVERS), and, greenfield, a
 complete _flake.nix_/_justfile_. All are *//go:embed*-ed from _cmd/conform/scaffold/_
 (the _.gitattributes_ source is stored there as _gitattributes_, undotted), and the
-_flake.nix_/_justfile_/_sweatfile_/_.gitattributes_ are kept byte-identical to
+_flake.nix_/_justfile_/_sweatfile_/_.gitattributes_/_conformist-impure.nix_ are kept byte-identical to
 _templates/eng/_ by a drift test (conformist#41).
 
 An existing _flake.nix_ in the recognized shape is edited in place to splice the

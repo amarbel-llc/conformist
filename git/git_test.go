@@ -58,6 +58,30 @@ func TestOriginRepoName(tt *testing.T) {
 	})
 }
 
+// TestHostFromRemoteURL pins the host extraction to the git-remotes linter's
+// origin_host (nix/linters/git-remotes.nix): scp-like, ssh:// and other
+// scheme:// forms yield a host; local paths and hostless file:// URLs yield "".
+func TestHostFromRemoteURL(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+
+	t.Run(test_ui.MakeTestCaseInfo("host extraction matches the linter"), func(t *test_ui.T) {
+		cases := map[string]string{
+			"git@code.linenisgreat.com:conformist.git":              "code.linenisgreat.com",
+			"ssh://git@forge.starbrandshoes.com/sasha/prophit.git":  "forge.starbrandshoes.com",
+			"ssh://git@forge.starbrandshoes.com:2222/sasha/prophit": "forge.starbrandshoes.com",
+			"https://github.com/amarbel-llc/conformist.git":         "github.com",
+			"https://user@example.org/some/where.git":               "example.org",
+			"forge.example:owner/repo.git":                          "",
+			"/srv/git/conformist.git":                               "",
+			"file:///srv/git/conformist.git":                        "",
+			"../relative/path.git":                                  "",
+		}
+		for url, want := range cases {
+			require.Equalf(t, want, git.HostFromRemoteURL(url), "url %q", url)
+		}
+	})
+}
+
 func gitRun(t *test_ui.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...)
