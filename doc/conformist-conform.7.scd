@@ -163,6 +163,25 @@ A bare domain advertising one template uses it. Several prompt via *huh* on a TT
 and otherwise fail listing the ids rather than guessing. Operational failures map to
 exit 2 (*ErrConformFailed*), and a non-empty target is refused without *--overwrite*.
 
+After *nix flake init* the bootstrap finishes the repo-specific steps itself
+(conformist#138), in this order:
+
+- *Version key.* The literal *EXAMPLE_VERSION* the templates ship in _version.env_
+  and _conformist.nix_ becomes *<REPO>_VERSION*, derived exactly like local mode's
+  _version.env_ key (the git origin remote's repo name, else the directory
+  basename). *--name <x>* overrides the name. Only files the template just wrote
+  are rewritten, so *--overwrite* never edits a file the user already had.
+- *Staging.* In a git repo, exactly the files the template wrote are *git add*-ed.
+  Nothing is committed. Outside a git repo this is skipped and reported.
+- *Locking.* *nix flake lock* runs, then _flake.lock_ is staged. It runs by default;
+  *--no-lock* skips it. A failed lock, or a failed stage, prints a warning and the
+  bootstrap still succeeds, since the template is already in place; the step
+  is listed under the final *Remaining:* line instead. Locking is skipped when staging
+  failed in a git repo, because a git flake sees only tracked files.
+
+The closing *Remaining:* line names whatever is left (*direnv allow*, review and
+commit, plus any step that was skipped or failed).
+
 # FLAKE TEMPLATES
 
 conformist's flake exposes one template per repo language, instantiated with *nix

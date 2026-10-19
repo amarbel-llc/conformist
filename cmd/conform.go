@@ -28,6 +28,8 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 		forceFormatter bool
 		repair         bool
 		overwrite      bool
+		name           string
+		noLock         bool
 	)
 
 	cmd := &cobra.Command{
@@ -44,7 +46,10 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 			"With a <domain> (or <domain>#<id>) argument, bootstrap a NEW repo from a flake template advertised " +
 			"by that domain's PAPI document (PAPI RFC-0001 §7/§8): it resolves the template, surfaces the " +
 			"resolved flakeref, and runs `nix flake init -t <flakeref>` in the current directory. A bare domain " +
-			"with one template uses it; with several it prompts on a TTY and otherwise fails listing the ids.\n\n" +
+			"with one template uses it; with several it prompts on a TTY and otherwise fails listing the ids. " +
+			"It then fills in the template's EXAMPLE_VERSION key (--name overrides the repo name), stages the " +
+			"files the template wrote when the directory is a git repo (never commits), and runs `nix flake " +
+			"lock` (--no-lock skips it; a lock failure warns).\n\n" +
 			"It is idempotent. Local mode exits 0 when nothing changed and 3 when it wrote/edited/repaired " +
 			"files; bootstrap exits 0 on success; 2 on an operational error.",
 		Args: cobra.MaximumNArgs(1),
@@ -58,7 +63,7 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 
 			// Domain bootstrap mode (#43): `conform <domain>` / `<domain>#<id>`.
 			if len(args) == 1 {
-				return runBootstrap(cmd, args[0], dir, overwrite)
+				return runBootstrap(cmd, args[0], dir, overwrite, name, noLock)
 			}
 
 			// Local scaffold + convergence mode (#41/#42).
@@ -88,6 +93,11 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 			"instead of only printing the command")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false,
 		"in <domain> bootstrap mode, allow `nix flake init` to scaffold into a non-empty directory")
+	cmd.Flags().StringVar(&name, "name", "",
+		"in <domain> bootstrap mode, the repo name the <NAME>_VERSION key is derived from "+
+			"(default: the git origin remote's repo name, else the directory name)")
+	cmd.Flags().BoolVar(&noLock, "no-lock", false,
+		"in <domain> bootstrap mode, do not run `nix flake lock` after scaffolding")
 
 	return cmd
 }
@@ -95,10 +105,12 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 // runBootstrap dispatches the `conform <domain>` template-bootstrap mode (#43),
 // mapping an interactive terminal to the huh chooser and any failure to
 // ErrConformFailed (exit 2).
-func runBootstrap(cmd *cobra.Command, target, dir string, overwrite bool) error {
+func runBootstrap(cmd *cobra.Command, target, dir string, overwrite bool, name string, noLock bool) error {
 	err := conform.Bootstrap(cmd.Context(), target, dir, cmd.OutOrStdout(), conform.BootstrapOptions{
 		Overwrite:   overwrite,
 		Interactive: term.IsTerminal(int(os.Stdin.Fd())),
+		Name:        name,
+		NoLock:      noLock,
 	})
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrConformFailed, err)
