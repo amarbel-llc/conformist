@@ -22,6 +22,14 @@ const versionKeyPlaceholder = "EXAMPLE_VERSION"
 // keyedFiles are the template files whose versionKeyPlaceholder is replaced.
 var keyedFiles = []string{"version.env", "conformist.nix"}
 
+// crateNamePlaceholder is the literal the Rust package templates ship as the
+// Cargo package name (and in their AGENTS.md); bootstrap replaces it with the
+// repo's crate name.
+const crateNamePlaceholder = "EXAMPLE_CRATE"
+
+// crateNamedFiles are the template files whose crateNamePlaceholder is replaced.
+var crateNamedFiles = []string{"Cargo.toml", "AGENTS.md"}
+
 // treeSnapshot maps each non-.git path under a dir (slash-separated, relative) to
 // a digest of its content (a symlink hashes its target), so bootstrap can tell
 // which files `nix flake init` wrote or changed.
@@ -99,53 +107,99 @@ func (after treeSnapshot) touchedSince(before treeSnapshot) []string {
 	return touched
 }
 
-// applyVersionKey replaces versionKeyPlaceholder with key+"_VERSION" in the
-// keyed files the template wrote, and returns the files it rewrote. A template
-// without the placeholder (or a file the user already had) is left untouched.
-func applyVersionKey(dir, key string, touched []string) ([]string, error) {
+// substitution replaces token with value in the named files, when the template
+// wrote them.
+type substitution struct {
+	token string
+	value string
+	files []string
+}
+
+// applySubstitutions applies each substitution to the files the template wrote
+// and returns, per substitution token, the files it rewrote. A template without
+// the token (or a file the user already had) is left untouched.
+func applySubstitutions(dir string, touched []string, subs []substitution) (map[string][]string, error) {
 	wasTouched := map[string]bool{}
 	for _, path := range touched {
 		wasTouched[path] = true
 	}
 
-	var rewrote []string
+	rewrote := map[string][]string{}
 
-	for _, name := range keyedFiles {
-		if !wasTouched[name] {
-			continue
+	for _, sub := range subs {
+		for _, name := range sub.files {
+			if !wasTouched[name] {
+				continue
+			}
+
+			path := filepath.Join(dir, name)
+
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return rewrote, fmt.Errorf("reading %s: %w", name, err)
+			}
+
+			if !strings.Contains(string(content), sub.token) {
+				continue
+			}
+
+			replaced := strings.ReplaceAll(string(content), sub.token, sub.value)
+			if err := os.WriteFile(path, []byte(replaced), 0o644); err != nil { //nolint:gosec // template file, not a secret
+				return rewrote, fmt.Errorf("writing %s: %w", name, err)
+			}
+
+			rewrote[sub.token] = append(rewrote[sub.token], name)
 		}
-
-		path := filepath.Join(dir, name)
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return rewrote, fmt.Errorf("reading %s: %w", name, err)
-		}
-
-		if !strings.Contains(string(content), versionKeyPlaceholder) {
-			continue
-		}
-
-		replaced := strings.ReplaceAll(string(content), versionKeyPlaceholder, key+"_VERSION")
-		if err := os.WriteFile(path, []byte(replaced), 0o644); err != nil { //nolint:gosec // template file, not a secret
-			return rewrote, fmt.Errorf("writing %s: %w", name, err)
-		}
-
-		rewrote = append(rewrote, name)
 	}
 
 	return rewrote, nil
 }
 
-// bootstrapVersionKey is the key prefix bootstrap substitutes: an explicit name
-// when given, else the same origin-remote-then-directory derivation local-mode
-// conform uses.
-func bootstrapVersionKey(dir, name string) string {
-	if name != "" {
-		return normalizeVersionKey(name)
+// repoName is the repository's name: the git origin remote's repo name, falling
+// back to the directory basename.
+func repoName(dir string) string {
+	name, err := git.OriginRepoName(dir)
+	if err != nil || name == "" {
+		name = filepath.Base(dir)
 	}
 
-	return projectVersionKey(dir)
+	return name
+}
+
+// bootstrapSubstitutions are the placeholders every bootstrapped template may
+// carry, derived from an explicit name when given, else from repoName: the
+// <REPO>_VERSION key and a Cargo-legal crate name.
+func bootstrapSubstitutions(dir, name string) []substitution {
+	if name == "" {
+		name = repoName(dir)
+	}
+
+	return []substitution{
+		{versionKeyPlaceholder, normalizeVersionKey(name) + "_VERSION", keyedFiles},
+		{crateNamePlaceholder, normalizeCrateName(name), crateNamedFiles},
+	}
+}
+
+// normalizeCrateName lower-cases name and replaces every rune Cargo does not
+// allow in a package name ([a-z0-9_-]) with '-'. A name that does not start with
+// a letter gets a "crate-" prefix, since Cargo requires one.
+func normalizeCrateName(name string) string {
+	var b strings.Builder
+
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+
+	crate := strings.Trim(b.String(), "-_")
+	if crate == "" || crate[0] < 'a' || crate[0] > 'z' {
+		crate = "crate-" + crate
+	}
+
+	return strings.TrimSuffix(crate, "-")
 }
 
 // isGitRepo reports whether dir is a git work tree root (a .git directory, or a

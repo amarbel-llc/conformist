@@ -118,15 +118,17 @@ func finishBootstrap(ctx context.Context, dir string, before treeSnapshot, out i
 
 	touched := after.touchedSince(before)
 
-	key := bootstrapVersionKey(dir, opts.Name)
+	subs := bootstrapSubstitutions(dir, opts.Name)
 
-	rewrote, err := applyVersionKey(dir, key, touched)
+	rewrote, err := applySubstitutions(dir, touched, subs)
 	if err != nil {
 		return err
 	}
 
-	if len(rewrote) > 0 {
-		fmt.Fprintf(out, "set version key %s_VERSION in %s\n", key, strings.Join(rewrote, ", "))
+	for _, sub := range subs {
+		if files := rewrote[sub.token]; len(files) > 0 {
+			fmt.Fprintf(out, "set %s in %s\n", sub.value, strings.Join(files, ", "))
+		}
 	}
 
 	staged := false

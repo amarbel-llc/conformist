@@ -489,32 +489,51 @@ explore-template-eng:
     nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
     echo "explore-template-eng: template instantiates and passes checks.formatting"
 
-# Same smoke test for the Rust template (templates/eng-rust/): instantiate it,
-# lock it, run the sandboxed formatting check, and build the impure config so the
-# clippy overlay is proven to evaluate. The template pins conformist from the
-# published master tarball, so this needs network and exercises the module
-# library as published, not this worktree's.
+# Same smoke test for the Rust templates (eng-rust, eng-rust-bin, eng-rust-lib; all
+# three when none is named), but running the template's whole default gate, `just`:
+# the cargo tests, the sandboxed formatting check and the impure lane with clippy
+# (-D warnings). That is what catches a template whose own gate cannot pass, like a
+# devShell without cargo (conformist#137). eng-rust ships no manifest, so a minimal
+# Cargo.toml + src/lib.rs is written; the package templates get their
+# EXAMPLE_VERSION and EXAMPLE_CRATE placeholders substituted the way
+# `conformist conform <domain>#<id>` does. The origin remote is a canonical-host
+# stand-in so the git-remotes check passes. The templates pin conformist from the
+# published master tarball, so this needs network and exercises the module library
+# as published, not this worktree's.
 #
-# smoke-test the eng-rust flake template end-to-end
+# smoke-test the Rust flake templates end-to-end, running their full gate
 [group("explore")]
-explore-template-eng-rust:
+explore-template-eng-rust *ids:
     #!/usr/bin/env bash
     set -euo pipefail
     src="{{ justfile_directory() }}"
-    d=$(mktemp -d)
-    trap 'rm -rf "$d"' EXIT
-    cd "$d"
-    nix flake init -t "$src#eng-rust"
-    git init -q
-    git add -A
-    nix flake lock
-    git add flake.lock
-    sys=$(nix eval --raw --impure --expr 'builtins.currentSystem')
-    nix build ".#checks.${sys}.formatting" --no-link --print-build-logs
-    nix build ".#conformist-impure-config" --no-link --print-build-logs
-    # The justfile's test-rust needs cargo from the devShell (conformist#137).
-    nix develop -c cargo --version
-    echo "explore-template-eng-rust: template instantiates, passes checks.formatting, impure config evaluates, devShell has cargo"
+    ids="{{ ids }}"
+    : "${ids:=eng-rust eng-rust-bin eng-rust-lib}"
+    for id in $ids; do
+      d=$(mktemp -d)
+      (
+        trap 'rm -rf "$d"' EXIT
+        cd "$d"
+        nix flake init -t "$src#$id"
+        if [ ! -f Cargo.toml ]; then
+          printf '[package]\nname = "scratch"\nversion = "0.1.0"\nedition = "2021"\n' > Cargo.toml
+          mkdir -p src
+          printf 'pub fn one() -> u32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn ok() {\n        assert_eq!(super::one(), 1);\n    }\n}\n' > src/lib.rs
+          key=SCRATCH_VERSION
+        else
+          key=SCRATCH_VERSION
+          sed -i 's/EXAMPLE_CRATE/scratch/g' Cargo.toml AGENTS.md
+        fi
+        sed -i "s/EXAMPLE_VERSION/$key/g" version.env conformist.nix
+        git init -q
+        git remote add origin git@code.linenisgreat.com:scratch.git
+        git add -A
+        nix flake lock
+        git add flake.lock
+        nix develop -c just
+      )
+      echo "explore-template-eng-rust: $id instantiates and passes its full gate"
+    done
 
 # End-to-end happy path for the conformist-flake-lock merge driver
 # (conformist-git(7) MERGE DRIVERS). The sandboxed fixtures in

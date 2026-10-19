@@ -305,12 +305,7 @@ func renderVersionEnv(dir string) []byte {
 // origin remote's repo name, falling back to the directory basename, normalized
 // to upper-snake-case.
 func projectVersionKey(dir string) string {
-	name, err := git.OriginRepoName(dir)
-	if err != nil || name == "" {
-		name = filepath.Base(dir)
-	}
-
-	return normalizeVersionKey(name)
+	return normalizeVersionKey(repoName(dir))
 }
 
 // normalizeVersionKey upper-cases name and replaces every non-alphanumeric rune

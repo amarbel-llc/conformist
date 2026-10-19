@@ -1,0 +1,3 @@
+# conformist-git(7) MERGE DRIVERS: flake.lock is generated, so a rebase conflict
+# on it is resolved by regenerating it rather than by a textual three-way merge.
+flake.lock merge=conformist-flake-lock

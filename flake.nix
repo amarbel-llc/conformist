@@ -171,7 +171,12 @@
                 "test/examples"
                 "test/config"
               ];
-              "cmd/conform" = [ "templates/eng" ];
+              "cmd/conform" = [
+                "templates/eng"
+                "templates/eng-rust"
+                "templates/eng-rust-bin"
+                "templates/eng-rust-lib"
+              ];
               "config" = [ "test/examples" ];
               "profile" = [ "conformist.profile" ];
               "walk" = [
@@ -691,6 +696,14 @@
         eng-rust = {
           path = ./templates/eng-rust;
           description = "eng setup for a Rust cargo workspace: eng preset, rustfmt, impure clippy lane";
+        };
+        eng-rust-bin = {
+          path = ./templates/eng-rust-bin;
+          description = "eng setup for a Rust binary crate: eng-rust plus a minimal Cargo package, AGENTS.md stub and CLAUDE.md symlink";
+        };
+        eng-rust-lib = {
+          path = ./templates/eng-rust-lib;
+          description = "eng setup for a Rust library crate: eng-rust plus a minimal Cargo package, AGENTS.md stub and CLAUDE.md symlink";
         };
         default = self.templates.eng;
       };

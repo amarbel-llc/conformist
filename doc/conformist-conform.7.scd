@@ -171,6 +171,9 @@ After *nix flake init* the bootstrap finishes the repo-specific steps itself
   _version.env_ key (the git origin remote's repo name, else the directory
   basename). *--name <x>* overrides the name. Only files the template just wrote
   are rewritten, so *--overwrite* never edits a file the user already had.
+- *Crate name.* The Rust package templates' *EXAMPLE_CRATE* placeholder (in
+  _Cargo.toml_ and _AGENTS.md_) becomes the same name, lower-cased and reduced to
+  Cargo's alphabet, under the same rules.
 - *Staging.* In a git repo, exactly the files the template wrote are *git add*-ed.
   Nothing is committed. Outside a git repo this is skipped and reported.
 - *Locking.* *nix flake lock* runs, then _flake.lock_ is staged. It runs by default;
@@ -199,11 +202,29 @@ directory and one more entry.
   *default* is *test lint* with *lint-impure* in the *lint* aggregate. The version key
   in _conformist.nix_ ships as a placeholder to rename, or to drop once the root
   _Cargo.toml_ has a matching *[package]*.
+- *eng-rust-bin* and *eng-rust-lib*: *eng-rust* plus a minimal Cargo package (a
+  binary with _src/main.rs_, or a library with _src/lib.rs_, each with one test), a
+  short _AGENTS.md_ stub, and a _CLAUDE.md_ symlink to it (*nix flake init*
+  preserves the symlink; the *agents-md* linter requires a _CLAUDE.md_ symlink to
+  point at _AGENTS.md_). The package name ships as the placeholder *EXAMPLE_CRATE*
+  in _Cargo.toml_ and _AGENTS.md_, which bootstrap fills with the repo name
+  lower-cased and reduced to Cargo's alphabet, the same name that derives the
+  _version.env_ key, so *eng-versioning* needs no override and _conformist.nix_ ships
+  without one.
+
+Each template is a deliberate copy of the others (there is no shared base yet), so a
+drift test keeps their language-independent files identical and checks the package
+templates' placeholders and symlink.
+
+The impure lane's *git-remotes* check requires _origin_ on the canonical host
+(_code.linenisgreat.com_). A repo hosted elsewhere sets
+*linters.git-remotes.allowed-hosts* in its _conformist-impure.nix_.
 
 The templates pin conformist from the master tarball
 (_https://code.linenisgreat.com/conformist/archive/master.tar.gz_), the pin most of
 the fleet uses. The *explore-template-eng* and *explore-template-eng-rust* recipes
-smoke-test instantiation.
+smoke-test instantiation; the latter runs each Rust template's whole default gate
+(*just*) in a scratch repo.
 
 # SCAFFOLDING
 

@@ -23,5 +23,4 @@ build/
 
 # The eng template ships a starter .envrc for adopters; track it even though a
 # parent/global ignore excludes .envrc generally (`nix flake init` copies it).
-!/templates/eng/.envrc
-!/templates/eng-rust/.envrc
+!/templates/*/.envrc

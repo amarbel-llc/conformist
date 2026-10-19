@@ -1,0 +1,4 @@
+[package]
+name = "EXAMPLE_CRATE"
+version = "0.1.0"
+edition = "2021"

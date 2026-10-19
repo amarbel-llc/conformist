@@ -214,7 +214,46 @@ func TestBootstrapSetsVersionKeyFromDirName(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(nix), `"MY_REPO_VERSION"`)
 	require.NotContains(t, string(nix), "EXAMPLE_VERSION")
-	require.Contains(t, out.String(), "set version key MY_REPO_VERSION in version.env, conformist.nix")
+	require.Contains(t, out.String(), "set MY_REPO_VERSION in version.env, conformist.nix")
+}
+
+// TestBootstrapSetsCrateName verifies the Rust package templates' crate-name
+// placeholder is filled in Cargo.toml and AGENTS.md, from --name or the dir name.
+func TestBootstrapSetsCrateName(t *testing.T) {
+	r, host := fixtureResolver(t, singleTemplate)
+	dir := t.TempDir()
+
+	err := conform.Bootstrap(context.Background(), host, dir, &bytes.Buffer{}, conform.BootstrapOptions{
+		Resolver: r,
+		Name:     "My_Repo.rs",
+		NoLock:   true,
+		FlakeInit: func(_ context.Context, d, _ string) error {
+			for name, content := range map[string]string{
+				"Cargo.toml": "[package]\nname = \"EXAMPLE_CRATE\"\n",
+				"AGENTS.md":  "# EXAMPLE_CRATE\n",
+				"README.md":  "EXAMPLE_CRATE untouched\n",
+			} {
+				if err := os.WriteFile(filepath.Join(d, name), []byte(content), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", name, err)
+				}
+			}
+
+			return nil
+		},
+	})
+	require.NoError(t, err)
+
+	cargo, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
+	require.NoError(t, err)
+	require.Equal(t, "[package]\nname = \"my_repo-rs\"\n", string(cargo))
+
+	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	require.NoError(t, err)
+	require.Equal(t, "# my_repo-rs\n", string(agents))
+
+	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(readme), "EXAMPLE_CRATE", "only the named files are substituted")
 }
 
 func TestBootstrapNameFlagOverridesVersionKey(t *testing.T) {
