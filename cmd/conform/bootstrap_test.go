@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -321,7 +322,8 @@ func TestBootstrapStagesTouchedFilesInGitRepoAndLocks(t *testing.T) {
 	require.Equal(t, [][]string{{"conformist.nix", "justfile", "version.env"}, {"flake.lock"}}, staged,
 		"stage exactly the template's files, then flake.lock after locking; never a commit")
 	require.Contains(t, out.String(), "locked flake inputs")
-	require.Contains(t, out.String(), "Remaining: `direnv allow`; review, then commit.")
+	require.Contains(t, out.String(), "Remaining: create .envrc containing `use flake` unless spinclass manages it, "+
+		"then `direnv allow`; review, then commit.")
 }
 
 func TestBootstrapNoLockSkipsLockAndSaysSo(t *testing.T) {
@@ -342,7 +344,7 @@ func TestBootstrapNoLockSkipsLockAndSaysSo(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.Contains(t, out.String(), "Remaining: `nix flake lock`; `direnv allow`; review, then commit.")
+	require.Contains(t, out.String(), "Remaining: `nix flake lock`; create .envrc containing `use flake`")
 }
 
 // TestBootstrapLockFailureWarnsButSucceeds verifies a failed lock does not fail
@@ -362,6 +364,56 @@ func TestBootstrapLockFailureWarnsButSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out.String(), "warning: nix flake lock failed: offline")
 	require.Contains(t, out.String(), "Remaining: `nix flake lock`;")
+}
+
+// TestBootstrapStagesFilesTheRepoExcludes is the spinclass case (conformist#141):
+// the repo's .git/info/exclude lists .envrc, and `nix flake init` (stubbed here
+// the way it behaves: write the file, then add it with intent-to-add) leaves it
+// in the index, so the real `git add` succeeds, the lock still runs and the
+// bootstrap finishes clean.
+func TestBootstrapStagesFilesTheRepoExcludes(t *testing.T) {
+	r, host := fixtureResolver(t, singleTemplate)
+	dir := t.TempDir()
+	gitInitWithOrigin(t, dir, "git@code.linenisgreat.com:x.git")
+
+	exclude := filepath.Join(dir, ".git", "info", "exclude")
+	require.NoError(t, os.MkdirAll(filepath.Dir(exclude), 0o755))
+	require.NoError(t, os.WriteFile(exclude, []byte(".envrc\n"), 0o644))
+
+	locked := false
+	var out bytes.Buffer
+	err := conform.Bootstrap(context.Background(), host, dir, &out, conform.BootstrapOptions{
+		Resolver: r,
+		FlakeInit: func(ctx context.Context, d, _ string) error {
+			for _, name := range []string{".envrc", "version.env"} {
+				if err := os.WriteFile(filepath.Join(d, name), []byte("x\n"), 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", name, err)
+				}
+			}
+
+			// nix adds what it wrote even when an exclude pattern matches, so force.
+			cmd := exec.CommandContext(ctx, "git", "-C", d, "add", "--intent-to-add", "--force", "--",
+				".envrc", "version.env")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git add -N: %w: %s", err, out)
+			}
+
+			return nil
+		},
+		FlakeLock: func(_ context.Context, d string) error {
+			locked = true
+
+			return os.WriteFile(filepath.Join(d, "flake.lock"), []byte("{}\n"), 0o644)
+		},
+	})
+	require.NoError(t, err)
+
+	status, err := exec.CommandContext(context.Background(), "git", "-C", dir, "status", "--short").Output()
+	require.NoError(t, err)
+	require.Contains(t, string(status), "A  .envrc", "the excluded file is staged, not just intent-to-add")
+	require.True(t, locked, "an excluded template file must not cost the lock step")
+	require.Contains(t, out.String(), "staged 2 files")
+	require.NotContains(t, out.String(), "warning")
 }
 
 func TestBootstrapNonGitDirDoesNotStage(t *testing.T) {

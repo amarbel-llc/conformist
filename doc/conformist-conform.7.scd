@@ -182,8 +182,14 @@ After *nix flake init* the bootstrap finishes the repo-specific steps itself
   is listed under the final *Remaining:* line instead. Locking is skipped when staging
   failed in a git repo, because a git flake sees only tracked files.
 
-The closing *Remaining:* line names whatever is left (*direnv allow*, review and
-commit, plus any step that was skipped or failed).
+The closing *Remaining:* line names whatever is left (creating _.envrc_, *direnv
+allow*, review and commit, plus any step that was skipped or failed).
+
+No template ships an _.envrc_. The fleet keeps it untracked and git-ignored:
+spinclass lists it in _.git/info/exclude_ and rewrites it in every worktree, so a
+tracked copy makes spinclass's merge dirty check fail (conformist#141). A repo that
+wants direnv creates the one-line file itself (*use flake*), as eng-direnv(7)
+describes for child-repo envrc files.
 
 # FLAKE TEMPLATES
 

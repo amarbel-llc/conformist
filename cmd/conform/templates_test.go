@@ -28,7 +28,7 @@ func readTemplateFile(t *testing.T, id, name string) string { //testui:allow // 
 // the others (no shared base yet), so this test is what keeps a fix to one from
 // silently missing the rest.
 func TestRustTemplatesShareBoilerplate(t *testing.T) {
-	for _, name := range []string{".envrc", ".gitattributes", "sweatfile"} {
+	for _, name := range []string{".gitattributes", "sweatfile"} {
 		want := readTemplateFile(t, "eng", name)
 
 		for _, id := range []string{"eng-rust", "eng-rust-bin", "eng-rust-lib"} {
@@ -46,6 +46,16 @@ func TestRustTemplatesShareBoilerplate(t *testing.T) {
 			require.Equal(t, want, readTemplateFile(t, id, name),
 				"templates/%s/%s must match templates/eng-rust/%s", id, name, name)
 		}
+	}
+}
+
+// TestTemplatesShipNoEnvrc verifies no template ships an .envrc: the fleet keeps
+// it untracked and git-ignored (spinclass rewrites it in every worktree), so a
+// tracked copy makes spinclass's merge dirty check fail (conformist#141).
+func TestTemplatesShipNoEnvrc(t *testing.T) {
+	for _, id := range []string{"eng", "eng-rust", "eng-rust-bin", "eng-rust-lib"} {
+		_, err := os.Lstat(templatePath(id, ".envrc"))
+		require.ErrorIs(t, err, os.ErrNotExist, "templates/%s must not ship an .envrc", id)
 	}
 }
 

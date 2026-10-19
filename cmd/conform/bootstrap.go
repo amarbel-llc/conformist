@@ -163,6 +163,9 @@ func finishBootstrap(ctx context.Context, dir string, before treeSnapshot, out i
 			gitStage = runGitStage
 		}
 
+		// Note: `nix flake init` has already added every file it wrote to the
+		// index with intent-to-add, even ones a .git/info/exclude pattern would
+		// ignore (spinclass excludes .envrc), so `git add` of them succeeds.
 		if err := gitStage(ctx, dir, touched); err != nil {
 			fmt.Fprintf(out, "warning: could not stage the scaffold: %v\n", err)
 			remaining = append(remaining, "`git add` the scaffold")
@@ -184,7 +187,11 @@ func finishBootstrap(ctx context.Context, dir string, before treeSnapshot, out i
 		remaining = append(remaining, lockStep(ctx, dir, out, opts, staged)...)
 	}
 
-	remaining = append(remaining, "`direnv allow`", "review, then commit")
+	// No template ships an .envrc (the fleet keeps it untracked; spinclass
+	// generates it per worktree), so say how to make one.
+	remaining = append(remaining,
+		"create .envrc containing `use flake` unless spinclass manages it, then `direnv allow`",
+		"review, then commit")
 
 	fmt.Fprintf(out, "\nRemaining: %s.\n", strings.Join(remaining, "; "))
 

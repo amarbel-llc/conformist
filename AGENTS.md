@@ -243,7 +243,7 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   'git+https://code.linenisgreat.com/conformist.git#eng'` scaffolds an adopter
   repo wired to the eng
   preset (flake.nix + conformist.nix + a conformist-justfile(7)-conformant
-  justfile + version.env + .envrc + a sweatfile wiring the config-specific
+  justfile + version.env + a sweatfile wiring the config-specific
   `conformist-pre-commit` hook plus the opt-in `conformist-repair` merge-time
   hook — conformist#47/#51/#54/#59). The flake's `build.preCommit` and
   `build.repair` are exposed both as `packages.conformist-pre-commit` /
@@ -255,8 +255,10 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
   a documented opt-in with a path to flip the default later.
   `cmd/conform`'s scaffold ships the same flake.nix/justfile/sweatfile
   byte-identically (a drift test guards it). `templates/**` is excluded from
-  conformist's own self-lint (consumer-facing scaffold, e.g. a direnv `.envrc`
-  has no shebang); the `explore-template-eng` recipe smoke-tests instantiation.
+  conformist's own self-lint (consumer-facing scaffold, deliberately not
+  conformant as-is, e.g. `EXAMPLE_*` placeholders); the `explore-template-eng`
+  recipe smoke-tests instantiation. No template ships an `.envrc` (spinclass
+  owns it; conformist#141).
   Downstream consumers MUST set `conformist.package` — conformist is not in
   nixpkgs, so the module's `package` option has no default. Per-language
   siblings (`templates.eng-rust`, …) are listed in `conformist-conform(7)`

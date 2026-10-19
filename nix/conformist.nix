@@ -68,7 +68,8 @@
     "test/**"
     # templates/** is consumer-facing scaffold (the `nix flake init -t .#eng`
     # source), validated by instantiating it, not by conformist linting its own
-    # copy — e.g. a direnv .envrc legitimately has no shebang (shellcheck SC2148).
+    # copy — e.g. the EXAMPLE_* placeholders it ships are deliberately not valid
+    # until `conform` fills them in.
     "templates/**"
     # Prose and design docs are out of scope for code formatters.
     "docs/**"

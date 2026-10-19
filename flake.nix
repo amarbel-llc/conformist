@@ -687,7 +687,8 @@
       # already wired to conformist with the eng-convention preset: flake.nix
       # (conformist input + follows + evalModule), conformist.nix (imports
       # presets.eng + formatters), a conformist-justfile(7)-conformant justfile,
-      # version.env, and .envrc. See templates/eng/.
+      # and version.env (no .envrc: the fleet keeps it untracked, conformist#141).
+      # See templates/eng/.
       templates = {
         eng = {
           path = ./templates/eng;
