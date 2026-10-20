@@ -174,6 +174,10 @@ After *nix flake init* the bootstrap finishes the repo-specific steps itself
 - *Crate name.* The Rust package templates' *EXAMPLE_CRATE* placeholder (in
   _Cargo.toml_ and _AGENTS.md_) becomes the same name, lower-cased and reduced to
   Cargo's alphabet, under the same rules.
+- *Go name.* The Go template's *EXAMPLE_NAME* placeholder (in _go.nix_,
+  _flake.nix_, _main.go_ and _AGENTS.md_: the module path's last element, the
+  package name and the binary's name) becomes the same lower-cased name as the
+  crate name, under the same rules.
 - *Staging.* In a git repo, exactly the files the template wrote are *git add*-ed.
   Nothing is committed. Outside a git repo this is skipped and reported.
 - *Locking.* *nix flake lock* runs, then _flake.lock_ is staged. It runs by default;
@@ -218,6 +222,19 @@ directory and one more entry.
   _version.env_ key, so *eng-versioning* needs no override and _conformist.nix_ ships
   without one.
 
+- *eng-go*: a Go module built with godyn (godyn(7)). The *eng* and *eng-go* presets
+  (goimports then gofumpt), nixfmt, an _igloo_ flake input for _buildGoAuto_, a
+  _go.nix_ manifest with no dependencies (module path
+  *code.linenisgreat.com/EXAMPLE_NAME*, no _go.mod_), a main package at the module
+  root with one test, _packages.default_ and _checks.{formatting,tests}_, a
+  justfile whose *default* is *build test lint*, an _AGENTS.md_ stub and a
+  _CLAUDE.md_ symlink. The name ships as the placeholder *EXAMPLE_NAME* and the
+  version key as *EXAMPLE_VERSION* (_conformist.nix_ sets the *eng-versioning*
+  key explicitly, since go.mod is rendered inside nix). There is no bin/lib split
+  as in Rust: a Go library is a module whose packages are imported, so a repo that
+  only exports packages deletes _main.go_ and sets *subPackages* in _flake.nix_
+  to its _cmd/_ directories, or to none.
+
 Each template is a deliberate copy of the others (there is no shared base yet), so a
 drift test keeps their language-independent files identical and checks the package
 templates' placeholders and symlink.
@@ -256,9 +273,9 @@ not import it, the allowlist would have no effect and conform says so.
 
 The templates pin conformist from the master tarball
 (_https://code.linenisgreat.com/conformist/archive/master.tar.gz_), the pin most of
-the fleet uses. The *explore-template-eng* and *explore-template-eng-rust* recipes
-smoke-test instantiation; the latter runs each Rust template's whole default gate
-(*just*) in a scratch repo.
+the fleet uses. The *explore-template-eng*, *explore-template-eng-rust* and
+*explore-template-eng-go* recipes smoke-test instantiation; the latter two run each
+template's whole default gate (*just*) in a scratch repo.
 
 # SCAFFOLDING
 

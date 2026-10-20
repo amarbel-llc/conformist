@@ -535,6 +535,38 @@ explore-template-eng-rust *ids:
       echo "explore-template-eng-rust: $id instantiates and passes its full gate"
     done
 
+# Same smoke test for the Go template (eng-go), running its whole default gate,
+# `just`: the godyn build, the godyn test lane, the sandboxed formatting check and
+# the impure lane. Its EXAMPLE_NAME and EXAMPLE_VERSION placeholders are
+# substituted the way `conformist conform <domain>#eng-go` does, and the built
+# binary is run to prove the version embedding works. The origin remote is a
+# canonical-host stand-in so the git-remotes check passes. The template pins
+# conformist, igloo and just-us from their published master tarballs, so this needs
+# network and exercises the module library as published, not this worktree's.
+#
+# smoke-test the Go flake template end-to-end, running its full gate
+[group("explore")]
+explore-template-eng-go:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="{{ justfile_directory() }}"
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    cd "$d"
+    nix flake init -t "$src#eng-go"
+    sed -i 's/EXAMPLE_NAME/scratch/g' go.nix flake.nix main.go AGENTS.md
+    sed -i 's/EXAMPLE_VERSION/SCRATCH_VERSION/g' version.env conformist.nix
+    git init -q
+    git remote add origin git@code.linenisgreat.com:scratch.git
+    git add -A
+    nix flake lock
+    git add flake.lock
+    nix develop -c just
+    out=$(nix build --no-link --print-out-paths)
+    ls "$out/bin"
+    "$out/bin/scratch"
+    echo "explore-template-eng-go: eng-go instantiates and passes its full gate"
+
 # End-to-end happy path for the conformist-flake-lock merge driver
 # (conformist-git(7) MERGE DRIVERS). The sandboxed fixtures in
 # nix/linter-fixtures.nix can only cover the driver's FAIL-CLOSED paths, because

@@ -30,6 +30,14 @@ const crateNamePlaceholder = "EXAMPLE_CRATE"
 // crateNamedFiles are the template files whose crateNamePlaceholder is replaced.
 var crateNamedFiles = []string{"Cargo.toml", "AGENTS.md"}
 
+// goNamePlaceholder is the literal the Go template ships as the module path's
+// last element, the package name and the binary's name; bootstrap replaces it
+// with the repo's lower-cased name.
+const goNamePlaceholder = "EXAMPLE_NAME"
+
+// goNamedFiles are the template files whose goNamePlaceholder is replaced.
+var goNamedFiles = []string{"go.nix", "flake.nix", "main.go", "AGENTS.md"}
+
 // treeSnapshot maps each non-.git path under a dir (slash-separated, relative) to
 // a digest of its content (a symlink hashes its target), so bootstrap can tell
 // which files `nix flake init` wrote or changed.
@@ -168,7 +176,8 @@ func repoName(dir string) string {
 
 // bootstrapSubstitutions are the placeholders every bootstrapped template may
 // carry, derived from an explicit name when given, else from repoName: the
-// <REPO>_VERSION key and a Cargo-legal crate name.
+// <REPO>_VERSION key and a Cargo-legal crate name (also the Go template's name,
+// being a valid lower-case Go module path element).
 func bootstrapSubstitutions(dir, name string) []substitution {
 	if name == "" {
 		name = repoName(dir)
@@ -177,6 +186,7 @@ func bootstrapSubstitutions(dir, name string) []substitution {
 	return []substitution{
 		{versionKeyPlaceholder, normalizeVersionKey(name) + "_VERSION", keyedFiles},
 		{crateNamePlaceholder, normalizeCrateName(name), crateNamedFiles},
+		{goNamePlaceholder, normalizeCrateName(name), goNamedFiles},
 	}
 }
 

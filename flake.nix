@@ -176,6 +176,7 @@
                 "templates/eng-rust"
                 "templates/eng-rust-bin"
                 "templates/eng-rust-lib"
+                "templates/eng-go"
               ];
               "config" = [ "test/examples" ];
               "profile" = [ "conformist.profile" ];
@@ -705,6 +706,10 @@
         eng-rust-lib = {
           path = ./templates/eng-rust-lib;
           description = "eng setup for a Rust library crate: eng-rust plus a minimal Cargo package, AGENTS.md stub and CLAUDE.md symlink";
+        };
+        eng-go = {
+          path = ./templates/eng-go;
+          description = "eng setup for a Go module built with godyn: eng and eng-go presets, go.nix, a minimal main package with one test, AGENTS.md stub and CLAUDE.md symlink";
         };
         default = self.templates.eng;
       };
