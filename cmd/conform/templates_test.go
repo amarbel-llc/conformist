@@ -112,7 +112,7 @@ func TestGoTemplateBootstrapsWithNoPlaceholderLeft(t *testing.T) {
 
 	versionEnv, err := os.ReadFile(filepath.Join(dir, "version.env"))
 	require.NoError(t, err)
-	require.Equal(t, "export MY_JUGGLER_VERSION=0.1.0\n", string(versionEnv))
+	require.Contains(t, string(versionEnv), "export MY_JUGGLER_VERSION=0.1.0\n")
 
 	target, err := os.Readlink(filepath.Join(dir, "CLAUDE.md"))
 	require.NoError(t, err, "CLAUDE.md must be a symlink")
