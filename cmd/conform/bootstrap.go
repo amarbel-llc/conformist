@@ -148,8 +148,21 @@ func preflightTemplate(
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating preflight dir: %w", err)
 	}
-	defer os.RemoveAll(scratch)
 
+	conflicts, identical, err = comparePreflight(ctx, flakeInit, scratch, flakeref, target)
+
+	// Best-effort cleanup of a temp dir; a leftover is harmless.
+	_ = os.RemoveAll(scratch)
+
+	return conflicts, identical, err
+}
+
+func comparePreflight(
+	ctx context.Context,
+	flakeInit func(ctx context.Context, dir, flakeref string) error,
+	scratch, flakeref string,
+	target treeSnapshot,
+) (conflicts, identical []string, err error) {
 	if err := flakeInit(ctx, scratch, flakeref); err != nil {
 		return nil, nil, fmt.Errorf("nix flake init (preflight) from %s: %w", flakeref, err)
 	}
