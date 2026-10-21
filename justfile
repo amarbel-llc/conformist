@@ -567,6 +567,89 @@ explore-template-eng-go:
     "$out/bin/scratch"
     echo "explore-template-eng-go: eng-go instantiates and passes its full gate"
 
+# Drive the REAL `conformist conform <domain>#<id>` bootstrap (real nix flake
+# init, this worktree's templates) through the conformist#142 scenarios, for each
+# template id: (1) empty target, (2) a colliding justfile (preflight refusal,
+# nothing written), (3) --overwrite beside only non-colliding files, (4) a rerun on
+# a tree byte-identical to the template with placeholders still present. A local
+# https PAPI server (self-signed, trusted via SSL_CERT_FILE) stands in for the
+# domain, since the resolver is https-only. stdin is /dev/null throughout, so a
+# nix flake-trust prompt that needs a tty would show up as a failure. Scratch
+# dirs live under .tmp/ and are kept for inspection. Uses --no-lock (the lock step
+# needs network and is unrelated to #142).
+#
+# run the real bootstrap through the #142 scenarios
+[group("explore")]
+explore-bootstrap-real *ids:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    src="{{ justfile_directory() }}"
+    ids="{{ ids }}"
+    : "${ids:=eng-go eng-rust-bin}"
+    bin="$(nix build --no-link --print-out-paths '.#conformist-bga')/bin/conformist"
+    root="$src/.tmp/real-bootstrap"
+    rm -rf "$root"; mkdir -p "$root"
+    cd "$root"
+    exec > >(tee "$root/report.txt") 2>&1
+    nix shell nixpkgs#openssl nixpkgs#python3 --command bash -c '
+      openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 1 \
+        -subj /CN=localhost -addext subjectAltName=DNS:localhost >/dev/null 2>&1
+      python3 - "$1" <<PY &
+    import http.server, ssl, json, sys
+    src = sys.argv[1]
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            host = self.headers["Host"]
+            if self.path == "/.well-known/papi":
+                body = {"data": {"resources": {"templates": "https://%s/papi/templates" % host}}, "meta": {}}
+            else:
+                body = {"data": [{"id": i, "flakeref": "git+file://%s#%s" % (src, i), "kind": "flake-template"} for i in ("eng-go", "eng-rust-bin")], "meta": {}}
+            b = json.dumps(body).encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+        def log_message(self, *a): pass
+    s = http.server.HTTPServer(("127.0.0.1", 0), H)
+    c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); c.load_cert_chain("cert.pem", "key.pem")
+    s.socket = c.wrap_socket(s.socket, server_side=True)
+    open("port", "w").write(str(s.server_address[1])); s.serve_forever()
+    PY
+      echo $! > pid
+    ' _ "$src" &
+    for _ in $(seq 50); do [ -s "$root/port" ] && break; sleep 0.2; done
+    sleep 1
+    host="localhost:$(cat "$root/port")"
+    trap 'kill "$(cat "$root/pid")" 2>/dev/null || true' EXIT
+    export SSL_CERT_FILE="$root/cert.pem"
+
+    run() { # label dir args...
+      local label=$1 dir=$2; shift 2
+      echo "=== $label"
+      ( cd "$dir" && "$bin" conform "$@" </dev/null ) 2>&1 | sed 's/^/  | /'
+      echo "  exit: ${PIPESTATUS[0]}"
+    }
+    for id in $ids; do
+      d="$root/$id-1-empty"; mkdir -p "$d"; git -C "$d" init -q
+      run "$id (1) empty target" "$d" "$host#$id" --name scratch --no-lock
+      echo "  files: $(cd "$d" && ls -A | grep -v '^.git$' | tr '\n' ' ')"
+      grep -rl 'EXAMPLE_' "$d" --exclude-dir=.git | sed 's/^/  leftover placeholder: /'
+
+      d="$root/$id-2-collide"; mkdir -p "$d"; git -C "$d" init -q
+      echo 'mine:' > "$d/justfile"; echo hi > "$d/README.md"
+      run "$id (2) colliding justfile, --overwrite" "$d" "$host#$id" --name scratch --no-lock --overwrite
+      echo "  files: $(cd "$d" && ls -A | grep -v '^.git$' | tr '\n' ' ')"
+
+      d="$root/$id-3-noncollide"; mkdir -p "$d"; git -C "$d" init -q
+      echo hi > "$d/README.md"
+      run "$id (3) non-colliding files, --overwrite" "$d" "$host#$id" --name scratch --no-lock --overwrite
+      echo "  files: $(cd "$d" && ls -A | grep -v '^.git$' | tr '\n' ' ')"
+      grep -rl 'EXAMPLE_' "$d" --exclude-dir=.git | sed 's/^/  leftover placeholder: /'
+
+      d="$root/$id-4-rerun"; mkdir -p "$d"; git -C "$d" init -q
+      ( cd "$d" && nix flake init -t "git+file://$src#$id" </dev/null ) >/dev/null 2>&1
+      echo "=== $id (4) pre-seeded with nix flake init; placeholders present: $(grep -rl 'EXAMPLE_' "$d" --exclude-dir=.git | wc -l) files"
+      run "$id (4) rerun, --overwrite" "$d" "$host#$id" --name scratch --no-lock --overwrite
+      grep -rl 'EXAMPLE_' "$d" --exclude-dir=.git | sed 's/^/  leftover placeholder: /'
+    done
+
 # End-to-end happy path for the conformist-flake-lock merge driver
 # (conformist-git(7) MERGE DRIVERS). The sandboxed fixtures in
 # nix/linter-fixtures.nix can only cover the driver's FAIL-CLOSED paths, because
