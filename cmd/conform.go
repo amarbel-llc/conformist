@@ -102,7 +102,8 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 		"after scaffolding, run the working-tree repair (format + eng-lint repair, no commit) inline "+
 			"instead of only printing the command")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false,
-		"in <domain> bootstrap mode, allow `nix flake init` to scaffold into a non-empty directory")
+		"in <domain> bootstrap mode, allow `nix flake init` to scaffold into a non-empty directory; "+
+			"refused up front, writing nothing, if a template file differs from an existing one")
 	cmd.Flags().StringVar(&name, "name", "",
 		"in <domain> bootstrap mode, the repo name the <NAME>_VERSION key is derived from "+
 			"(default: the git origin remote's repo name, else the directory name)")

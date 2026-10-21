@@ -163,14 +163,26 @@ A bare domain advertising one template uses it. Several prompt via *huh* on a TT
 and otherwise fail listing the ids rather than guessing. Operational failures map to
 exit 2 (*ErrConformFailed*), and a non-empty target is refused without *--overwrite*.
 
+*Collision preflight* (conformist#142). Into a non-empty target (*--overwrite*),
+*nix flake init* would write every non-colliding file and then refuse the
+colliding ones, leaving a half-applied tree and skipping the steps below. So
+bootstrap first instantiates the template into a scratch directory and compares
+it with the target. If any template file exists in the target with different
+content, bootstrap exits 2 listing them and writes nothing; move or merge those
+files and rerun. Files identical to the template are not conflicts. An empty
+target skips the preflight.
+
 After *nix flake init* the bootstrap finishes the repo-specific steps itself
 (conformist#138), in this order:
 
 - *Version key.* The literal *EXAMPLE_VERSION* the templates ship in _version.env_
   and _conformist.nix_ becomes *<REPO>\_VERSION*, derived exactly like local mode's
   _version.env_ key (the git origin remote's repo name, else the directory
-  basename). *--name <x>* overrides the name. Only files the template just wrote
-  are rewritten, so *--overwrite* never edits a file the user already had.
+  basename). *--name <x>* overrides the name. Only files that are the template's
+  own are rewritten: ones it just wrote, and ones already byte-identical to the
+  template (which *nix flake init* skips), so a rerun still fills placeholders.
+  *--overwrite* never edits a file the user already had that differs from the
+  template.
 - *Crate name.* The Rust package templates' *EXAMPLE_CRATE* placeholder (in
   _Cargo.toml_ and _AGENTS.md_) becomes the same name, lower-cased and reduced to
   Cargo's alphabet, under the same rules.

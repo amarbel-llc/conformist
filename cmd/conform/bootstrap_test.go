@@ -416,6 +416,110 @@ func TestBootstrapStagesFilesTheRepoExcludes(t *testing.T) {
 	require.NotContains(t, out.String(), "warning")
 }
 
+// countingTemplate wraps templateFiles with a record of every directory the
+// template was instantiated into.
+func countingTemplate(t *testing.T, dirs *[]string) func(context.Context, string, string) error { //testui:allow // testify helper
+	t.Helper()
+
+	inner := templateFiles(t)
+
+	return func(ctx context.Context, d, ref string) error {
+		*dirs = append(*dirs, d)
+
+		return inner(ctx, d, ref)
+	}
+}
+
+// TestBootstrapConflictAbortsBeforeWriting is #142 scenario 2: one template file
+// collides with a different existing file, so nothing may be written to the
+// target and the error names the colliding file.
+func TestBootstrapConflictAbortsBeforeWriting(t *testing.T) {
+	r, host := fixtureResolver(t, singleTemplate)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "justfile"), []byte("mine:\n"), 0o644))
+
+	var dirs []string
+	err := conform.Bootstrap(context.Background(), host, dir, &bytes.Buffer{}, conform.BootstrapOptions{
+		Resolver:  r,
+		Overwrite: true,
+		NoLock:    true,
+		FlakeInit: countingTemplate(t, &dirs),
+	})
+	require.ErrorIs(t, err, conform.ErrTemplateConflict)
+	require.Contains(t, err.Error(), "justfile")
+	require.NotContains(t, err.Error(), "version.env", "only colliding files are listed")
+
+	require.NotContains(t, dirs, dir, "the template is never instantiated into the target")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "no partial tree: only the user's justfile remains")
+
+	got, err := os.ReadFile(filepath.Join(dir, "justfile"))
+	require.NoError(t, err)
+	require.Equal(t, "mine:\n", string(got))
+}
+
+// TestBootstrapRerunFillsPlaceholdersOfIdenticalFiles is #142 scenario 3: every
+// template file already sits in the target byte-for-byte (nix would skip them
+// all), yet the placeholders are still filled and the files staged.
+func TestBootstrapRerunFillsPlaceholdersOfIdenticalFiles(t *testing.T) {
+	r, host := fixtureResolver(t, singleTemplate)
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o755))
+	require.NoError(t, templateFiles(t)(context.Background(), dir, ""))
+
+	// nix flake init writes nothing when everything is identical.
+	var staged [][]string
+	err := conform.Bootstrap(context.Background(), host, dir, &bytes.Buffer{}, conform.BootstrapOptions{
+		Resolver:  r,
+		Overwrite: true,
+		Name:      "prophit",
+		NoLock:    true,
+		FlakeInit: func(_ context.Context, d, _ string) error {
+			if d == dir {
+				return nil
+			}
+
+			return templateFiles(t)(context.Background(), d, "")
+		},
+		GitStage: func(_ context.Context, _ string, paths []string) error {
+			staged = append(staged, paths)
+
+			return nil
+		},
+	})
+	require.NoError(t, err)
+
+	versionEnv, err := os.ReadFile(filepath.Join(dir, "version.env"))
+	require.NoError(t, err)
+	require.Equal(t, "export PROPHIT_VERSION=0.1.0\n", string(versionEnv))
+	require.Equal(t, [][]string{{"conformist.nix", "justfile", "version.env"}}, staged)
+}
+
+// TestBootstrapNonCollidingExistingFilesProceed is the --overwrite happy path
+// beside user files the template does not write: no conflict, template written.
+func TestBootstrapNonCollidingExistingFilesProceed(t *testing.T) {
+	r, host := fixtureResolver(t, singleTemplate)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi\n"), 0o644))
+
+	var dirs []string
+	err := conform.Bootstrap(context.Background(), host, dir, &bytes.Buffer{}, conform.BootstrapOptions{
+		Resolver:  r,
+		Overwrite: true,
+		Name:      "prophit",
+		NoLock:    true,
+		FlakeInit: countingTemplate(t, &dirs),
+	})
+	require.NoError(t, err)
+	require.Contains(t, dirs, dir)
+
+	versionEnv, err := os.ReadFile(filepath.Join(dir, "version.env"))
+	require.NoError(t, err)
+	require.Equal(t, "export PROPHIT_VERSION=0.1.0\n", string(versionEnv))
+}
+
 func TestBootstrapNonGitDirDoesNotStage(t *testing.T) {
 	r, host := fixtureResolver(t, singleTemplate)
 

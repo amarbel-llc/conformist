@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"code.linenisgreat.com/conformist/cmd/conform/papi"
@@ -99,13 +100,81 @@ func Bootstrap(ctx context.Context, target, dir string, out io.Writer, opts Boot
 		return err
 	}
 
+	// #142: into a populated dir, learn what the template would write BEFORE
+	// writing it. nix flake init writes every non-colliding file and then refuses
+	// the colliding ones, leaving a half-applied tree, so a collision must abort
+	// first. An empty dir cannot collide, so the clean path pays no extra init.
+	var identical []string
+
+	if len(before) > 0 {
+		conflicts, same, err := preflightTemplate(ctx, flakeInit, tmpl.Flakeref, before)
+		if err != nil {
+			return err
+		}
+
+		if len(conflicts) > 0 {
+			return fmt.Errorf("%w (nothing was written): %s",
+				ErrTemplateConflict, strings.Join(conflicts, ", "))
+		}
+
+		identical = same
+	}
+
 	if err := flakeInit(ctx, dir, tmpl.Flakeref); err != nil {
 		return fmt.Errorf("nix flake init from %s: %w", tmpl.Flakeref, err)
 	}
 
 	fmt.Fprintf(out, "initialized %s from %s\n", dir, tmpl.Flakeref)
 
-	return finishBootstrap(ctx, dir, before, out, opts)
+	return finishBootstrap(ctx, dir, before, identical, out, opts)
+}
+
+// ErrTemplateConflict means the template would write a file that already exists
+// in the target with different content; nix flake init would refuse it after
+// writing the rest (#142), so bootstrap refuses before writing anything.
+var ErrTemplateConflict = errors.New("template files conflict with existing files; move or merge them first")
+
+// preflightTemplate instantiates the template into a scratch dir and compares it
+// with the target snapshot. conflicts are template files present in the target
+// with different content; identical are those present byte-for-byte (nix skips
+// them, so they would otherwise never get their placeholders filled on a rerun).
+func preflightTemplate(
+	ctx context.Context,
+	flakeInit func(ctx context.Context, dir, flakeref string) error,
+	flakeref string,
+	target treeSnapshot,
+) (conflicts, identical []string, err error) {
+	scratch, err := os.MkdirTemp("", "conformist-template-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating preflight dir: %w", err)
+	}
+	defer os.RemoveAll(scratch)
+
+	if err := flakeInit(ctx, scratch, flakeref); err != nil {
+		return nil, nil, fmt.Errorf("nix flake init (preflight) from %s: %w", flakeref, err)
+	}
+
+	tmplFiles, err := snapshotTree(scratch)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for path, digest := range tmplFiles {
+		have, ok := target[path]
+
+		switch {
+		case !ok:
+		case have == digest:
+			identical = append(identical, path)
+		default:
+			conflicts = append(conflicts, path)
+		}
+	}
+
+	sort.Strings(conflicts)
+	sort.Strings(identical)
+
+	return conflicts, identical, nil
 }
 
 // finishBootstrap does the repo-specific steps a fresh scaffold always needs
@@ -113,13 +182,20 @@ func Bootstrap(ctx context.Context, target, dir string, out io.Writer, opts Boot
 // and lock the flake. Staging and locking are best-effort: a failure there is
 // reported and the bootstrap still succeeds, since the template itself is
 // already in place.
-func finishBootstrap(ctx context.Context, dir string, before treeSnapshot, out io.Writer, opts BootstrapOptions) error {
+func finishBootstrap(ctx context.Context, dir string, before treeSnapshot, identical []string, out io.Writer, opts BootstrapOptions) error {
 	after, err := snapshotTree(dir)
 	if err != nil {
 		return err
 	}
 
+	// Files nix skipped as identical to the template are still the template's
+	// pristine copy, so a rerun fills their placeholders and stages them too (#142).
 	touched := after.touchedSince(before)
+	for _, path := range identical {
+		touched = appendUnique(touched, path)
+	}
+
+	sort.Strings(touched)
 
 	subs := bootstrapSubstitutions(dir, opts.Name)
 
