@@ -69,7 +69,7 @@ func ExitCode(err error) int {
 func newCheckCmd(v *viper.Viper, statz *stats.Stats) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check [paths...]",
-		Short: "Check formatting and run linters without modifying any files",
+		Short: "Check formatting and run linters, modifying nothing",
 		Long: "Evaluate every configured formatter and linter in read-only check mode. " +
 			"Formatters with a native check command are run directly; fix-only formatters are " +
 			"checked via a sandbox copy so the working tree is never written. Exits 0 when clean, " +

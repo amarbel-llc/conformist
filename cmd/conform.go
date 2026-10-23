@@ -35,7 +35,7 @@ func newConformCmd(v *viper.Viper) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "conform [<domain>[#<id>]]",
-		Short: "Scaffold this repo into the amarbel-llc conformist shape, or bootstrap one from a domain's PAPI template",
+		Short: "Scaffold this repo into the conformist shape",
 		Long: "With no argument, transition the current repo toward the amarbel-llc conformist shape. Writes " +
 			"each absent shape file — conformist.nix, a version.env keyed to the repo name, a sweatfile, and " +
 			"(greenfield) a complete flake.nix and justfile. An existing flake.nix that is the recognized " +

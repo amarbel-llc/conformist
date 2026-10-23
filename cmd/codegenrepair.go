@@ -21,7 +21,7 @@ func newCodegenRepairCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "codegen-repair",
-		Short: "Apply every flake check's passthru.codegenPatch to the working tree",
+		Short: "Apply every check's codegenPatch to the tree",
 		Long: "Find every `checks.<system>.<name>` in this repo's flake that carries " +
 			"`passthru.codegenPatch` (the igloo#80 contract), build each one's patch, and apply it " +
 			"to the working tree with `git apply -p2`. This restamps generated files — a tommy " +
