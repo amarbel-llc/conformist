@@ -238,9 +238,21 @@ directory and one more entry.
   (goimports then gofumpt), nixfmt, an _igloo_ flake input for _buildGoAuto_, a
   _go.nix_ manifest with no dependencies (module path
   *code.linenisgreat.com/EXAMPLE_NAME*, no _go.mod_), a main package at the module
-  root with one test, _packages.default_ and _checks.{formatting,tests}_, a
-  justfile whose *default* is *build test lint*, an _AGENTS.md_ stub and a
-  _CLAUDE.md_ symlink. The name ships as the placeholder *EXAMPLE_NAME* and the
+  root with one test, an example level-0 package _internal/0/buildinfo_ that
+  _main.go_ uses, _packages.{default,manpages}_ and
+  _checks.{formatting,tests,layout,manpage-names}_, a justfile whose *default* is
+  *build test lint*, an _AGENTS.md_ stub and a _CLAUDE.md_ symlink. *layout* runs
+  *dagnabit -n internal* (purse-first's, as the _purse-first_ flake input) and
+  fails when a package under _internal/<level>/_ sits at the wrong level;
+  _doc/cli.1.scd_ is the binary's section-1 page, built by *scdoc* into
+  _packages.manpages_, installed under the package's name by _packages.default_
+  and checked by *manpage-names* (*doppelgang lint-man*, the _doppelgang_ input).
+  Both inputs follow the template's pins, and conformist itself takes neither
+  (that would be a cycle). _main.go_ imports its internal packages as
+  *code.linenisgreat.com/conformist/templates/eng-go/...* --- a path that resolves
+  inside conformist's own module, so its whole-module *go list* (godyn's graph)
+  sees the template --- and bootstrap rewrites that prefix to the new repo's
+  module path. The name ships as the placeholder *EXAMPLE_NAME* and the
   version key as *EXAMPLE_VERSION* (_conformist.nix_ sets the *eng-versioning*
   key explicitly, since go.mod is rendered inside nix). There is no bin/lib split
   as in Rust: a Go library is a module whose packages are imported, so a repo that

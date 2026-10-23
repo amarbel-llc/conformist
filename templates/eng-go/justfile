@@ -30,7 +30,32 @@ test-go:
 
 # --- lint ---
 
-lint: lint-fmt lint-impure
+lint: lint-fmt lint-layout lint-manpage-names lint-impure
+
+# internal/<level>/<leaf> must sit at the level dagnabit computes from its
+# imports (checks.layout). On failure the log names each package and the level
+# to move it to; move it by hand (git mv) and fix the import paths. It does not
+# see a package with no import edges at all.
+#
+# check the Go package levels against dagnabit
+[group('lint')]
+lint-layout:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.layout" --no-link --print-build-logs
+
+# Every installed page must satisfy the fleet NAME-line contract (one-line
+# `name - summary`, short enough to render untruncated); doppelgang lint-man is
+# the reference implementation.
+#
+# lint the manpages against the NAME-line contract
+[group('lint')]
+lint-manpage-names:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.manpage-names" --no-link --print-build-logs
 
 # Read-only formatting + the eng/eng-go presets' file-based linters, via the
 # sandboxed checks.formatting derivation.

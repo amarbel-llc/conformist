@@ -36,7 +36,13 @@ var crateNamedFiles = []string{"Cargo.toml", "AGENTS.md"}
 const goNamePlaceholder = "EXAMPLE_NAME"
 
 // goNamedFiles are the template files whose goNamePlaceholder is replaced.
-var goNamedFiles = []string{"go.nix", "flake.nix", "main.go", "AGENTS.md"}
+var goNamedFiles = []string{"go.nix", "flake.nix", "main.go", "AGENTS.md", "doc/cli.1.scd"}
+
+// goTemplateImportPrefix is where templates/eng-go's packages live inside
+// conformist's own module. The template's main.go imports its internal packages
+// by that path so conformist's whole-module `go list` (godyn's graph) resolves
+// them; bootstrap rewrites the prefix to the new repo's module path.
+const goTemplateImportPrefix = "code.linenisgreat.com/conformist/templates/eng-go"
 
 // treeSnapshot maps each non-.git path under a dir (slash-separated, relative) to
 // a digest of its content (a symlink hashes its target), so bootstrap can tell
@@ -187,6 +193,7 @@ func bootstrapSubstitutions(dir, name string) []substitution {
 		{versionKeyPlaceholder, normalizeVersionKey(name) + "_VERSION", keyedFiles},
 		{crateNamePlaceholder, normalizeCrateName(name), crateNamedFiles},
 		{goNamePlaceholder, normalizeCrateName(name), goNamedFiles},
+		{goTemplateImportPrefix, "code.linenisgreat.com/" + normalizeCrateName(name), []string{"main.go"}},
 	}
 }
 

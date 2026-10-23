@@ -29,6 +29,24 @@
     # manifest, godyn-go / godyn-test) and mkGoPkgs. See godyn(7).
     igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
     igloo.inputs.nixpkgs-master.follows = "nixpkgs";
+
+    # purse-first ships dagnabit, the package-layout tool behind `checks.layout`
+    # (internal/<level>/<leaf> must sit at the level its imports compute).
+    # doppelgang ships `lint-man`, the NAME-line check behind
+    # `checks.manpage-names`. Both depend on conformist, so they are consumers
+    # here the way this flake is; conformist itself takes neither (that would
+    # be a cycle). Follows keep their closures shared with this flake's pins.
+    purse-first.url = "https://code.linenisgreat.com/purse-first/archive/master.tar.gz";
+    purse-first.inputs.nixpkgs-master.follows = "nixpkgs";
+    purse-first.inputs.utils.follows = "utils";
+    purse-first.inputs.igloo.follows = "igloo";
+    purse-first.inputs.conformist.follows = "conformist";
+
+    doppelgang.url = "https://code.linenisgreat.com/doppelgang/archive/master.tar.gz";
+    doppelgang.inputs.nixpkgs-master.follows = "nixpkgs";
+    doppelgang.inputs.utils.follows = "utils";
+    doppelgang.inputs.igloo.follows = "igloo";
+    doppelgang.inputs.conformist.follows = "conformist";
   };
 
   outputs =
@@ -39,6 +57,8 @@
       nixpkgs,
       utils,
       igloo,
+      purse-first,
+      doppelgang,
       ...
     }:
     utils.lib.eachDefaultSystem (
@@ -76,6 +96,30 @@
             commit = appCommit;
             GOTOOLCHAIN = "local";
           };
+        };
+
+        # Section-1/7 manpages: doc/*.N.scd compiled by scdoc into
+        # share/man/manN. doc/cli.1.scd is installed under the package's name, so
+        # the template needs no file named after the repo.
+        manpages = pkgs.runCommand "EXAMPLE_NAME-manpages" { nativeBuildInputs = [ pkgs.scdoc ]; } ''
+          for src in ${./doc}/*.scd; do
+            base=$(basename "$src" .scd)
+            section=''${base##*.}
+            name=''${base%.*}
+            [ "$name" = cli ] && name=EXAMPLE_NAME
+            mkdir -p "$out/share/man/man$section"
+            scdoc < "$src" > "$out/share/man/man$section/$name.$section"
+          done
+        '';
+
+        # The binary plus its manpages: what `nix build` and an installer get.
+        installed = pkgs.symlinkJoin {
+          name = "EXAMPLE_NAME-${appVersion}";
+          paths = [
+            app
+            manpages
+          ];
+          meta.mainProgram = "EXAMPLE_NAME";
         };
 
         # `.default` is the bga (buildGoApplication) build on every system —
@@ -128,13 +172,45 @@
         };
       in
       {
-        packages.default = app;
+        packages.default = installed;
         packages.EXAMPLE_NAME = app;
+        packages.manpages = manpages;
 
         formatter = eval.config.build.wrapper;
         checks.formatting = eval.config.build.check self;
         # godyn's per-package test lane from go.nix. `just test-go` builds this.
         checks.tests = app.passthru.checkAll or app;
+
+        # internal/<level>/<leaf> must sit at the level dagnabit computes from
+        # its imports (`just lint-layout`; AGENTS.md, LAYOUT). A dry run that
+        # fails on any would-move line: applying a move needs `git mv`, and the
+        # rendered tree is not a git checkout. Move the package by hand to the
+        # level shown and fix the import paths.
+        checks.layout = app.passthru.codegenCheck {
+          command = ''
+            # Not `out`: that is the derivation's output path.
+            moves=$(dagnabit -n internal)
+            if [ -n "$moves" ]; then
+              echo "$moves"
+              echo "FAIL: dagnabit would move packages (above); move them by hand to the level shown." >&2
+              exit 1
+            fi
+          '';
+          nativeBuildInputs = [ purse-first.packages.${system}.dagnabit ];
+        };
+
+        # Every installed page must satisfy the fleet NAME-line contract: the
+        # pages render into session system prompts' manpage indexes, where a
+        # wrapped or oversized NAME line degrades the whole index.
+        checks.manpage-names =
+          pkgs.runCommand "EXAMPLE_NAME-manpage-names"
+            {
+              nativeBuildInputs = [ doppelgang.packages.${system}.default ];
+            }
+            ''
+              doppelgang lint-man --format text --max 72 ${manpages}/share/man
+              touch $out
+            '';
         packages.conformist-impure-config = impureEval.config.build.configFile;
 
         # A git pre-commit hook running THIS repo's config (conformist#47/#51):

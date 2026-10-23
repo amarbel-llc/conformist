@@ -70,7 +70,7 @@ func TestGoTemplateSharesBoilerplate(t *testing.T) {
 // The positive control is that the template does carry the placeholders first,
 // so a clean result proves the substitution ran rather than that none existed.
 func TestGoTemplateBootstrapsWithNoPlaceholderLeft(t *testing.T) {
-	for _, name := range []string{"go.nix", "flake.nix", "main.go", "AGENTS.md"} {
+	for _, name := range []string{"go.nix", "flake.nix", "main.go", "AGENTS.md", "doc/cli.1.scd"} {
 		require.Contains(t, readTemplateFile(t, "eng-go", name), "EXAMPLE_NAME",
 			"templates/eng-go/%s must carry the name placeholder", name)
 	}
@@ -110,6 +110,16 @@ func TestGoTemplateBootstrapsWithNoPlaceholderLeft(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(goNix), `module = "code.linenisgreat.com/my-juggler";`)
 
+	mainGo, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	require.NoError(t, err)
+	require.Contains(t, string(mainGo), `"code.linenisgreat.com/my-juggler/internal/0/buildinfo"`,
+		"bootstrap must repoint the internal import at the new module")
+	require.NotContains(t, string(mainGo), "code.linenisgreat.com/conformist/")
+
+	manpage, err := os.ReadFile(filepath.Join(dir, "doc", "cli.1.scd"))
+	require.NoError(t, err)
+	require.Contains(t, string(manpage), "my-juggler - ")
+
 	versionEnv, err := os.ReadFile(filepath.Join(dir, "version.env"))
 	require.NoError(t, err)
 	require.Contains(t, string(versionEnv), "export MY_JUGGLER_VERSION=0.1.0\n")
@@ -117,6 +127,57 @@ func TestGoTemplateBootstrapsWithNoPlaceholderLeft(t *testing.T) {
 	target, err := os.Readlink(filepath.Join(dir, "CLAUDE.md"))
 	require.NoError(t, err, "CLAUDE.md must be a symlink")
 	require.Equal(t, "AGENTS.md", target)
+}
+
+// TestGoTemplateShipsLayoutAndManpageLanes pins conformist#143: the Go template
+// carries a dagnabit package-layout lane and a section-1 manpage with the
+// NAME-line lint, each wired into the lint aggregate the pre-merge gate runs.
+// The internal/0 package is a real example (main.go uses it, it has a test) so
+// the layout lane checks a package rather than passing vacuously.
+func TestGoTemplateShipsLayoutAndManpageLanes(t *testing.T) {
+	flake := readTemplateFile(t, "eng-go", "flake.nix")
+	for _, want := range []string{
+		"purse-first.url", "doppelgang.url",
+		"codegenCheck", "dagnabit -n internal",
+		"doppelgang lint-man", "checks.layout", "checks.manpage-names",
+		"packages.manpages",
+	} {
+		require.Contains(t, flake, want, "templates/eng-go/flake.nix must wire %q", want)
+	}
+
+	// Both new inputs follow the template's own pins; none floats on its own.
+	for _, input := range []string{"purse-first", "doppelgang"} {
+		for _, follows := range []string{"igloo", "utils", "conformist", "nixpkgs-master"} {
+			require.Contains(t, flake, input+".inputs."+follows+".follows",
+				"templates/eng-go/flake.nix: %s must follow %s", input, follows)
+		}
+	}
+
+	justfile := readTemplateFile(t, "eng-go", "justfile")
+	require.Regexp(t, `(?m)^lint: .*\blint-layout\b.*\blint-manpage-names\b`, justfile,
+		"templates/eng-go/justfile: lint must aggregate both new lanes")
+	require.Contains(t, justfile, "\nlint-layout:")
+	require.Contains(t, justfile, "\nlint-manpage-names:")
+
+	page := readTemplateFile(t, "eng-go", "doc/cli.1.scd")
+	require.Regexp(t, `(?m)^EXAMPLE_NAME\(1\)`, page, "scdoc header names the binary")
+	require.Regexp(t, `(?m)^# NAME\n\nEXAMPLE_NAME - \S`, page, "NAME line: `name - summary`")
+
+	require.Contains(t, readTemplateFile(t, "eng-go", "main.go"), "/internal/0/",
+		"main.go must import the example level-0 package")
+
+	entries, err := os.ReadDir(filepath.Join(templatePath("eng-go", "internal"), "0"))
+	require.NoError(t, err, "templates/eng-go/internal/0 must exist")
+	require.Len(t, entries, 1, "one example leaf package")
+
+	leaf := filepath.Join("internal", "0", entries[0].Name())
+	_, err = os.Stat(templatePath("eng-go", filepath.Join(leaf, entries[0].Name()+"_test.go")))
+	require.NoError(t, err, "the example package carries a test")
+
+	agents := readTemplateFile(t, "eng-go", "AGENTS.md")
+	require.Contains(t, agents, "alfa", "AGENTS.md documents how to add a level")
+	require.Contains(t, agents, "lint-layout")
+	require.Contains(t, agents, "lint-manpage-names")
 }
 
 // copyTemplateTree copies src into dst the way `nix flake init` does: regular

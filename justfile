@@ -537,7 +537,8 @@ explore-template-eng-rust *ids:
 
 # Same smoke test for the Go template (eng-go), running its whole default gate,
 # `just`: the godyn build, the godyn test lane, the sandboxed formatting check and
-# the impure lane. Its EXAMPLE_NAME and EXAMPLE_VERSION placeholders are
+# the impure lane, plus the dagnabit layout lane and the manpage NAME-line lane
+# (conformist#143). Its EXAMPLE_NAME and EXAMPLE_VERSION placeholders are
 # substituted the way `conformist conform <domain>#eng-go` does, and the built
 # binary is run to prove the version embedding works. The origin remote is a
 # canonical-host stand-in so the git-remotes check passes. The template pins
@@ -554,7 +555,8 @@ explore-template-eng-go:
     trap 'rm -rf "$d"' EXIT
     cd "$d"
     nix flake init -t "$src#eng-go"
-    sed -i 's/EXAMPLE_NAME/scratch/g' go.nix flake.nix main.go AGENTS.md
+    sed -i 's/EXAMPLE_NAME/scratch/g' go.nix flake.nix main.go AGENTS.md doc/cli.1.scd
+    sed -i 's#code.linenisgreat.com/conformist/templates/eng-go#code.linenisgreat.com/scratch#' main.go
     sed -i 's/EXAMPLE_VERSION/SCRATCH_VERSION/g' version.env conformist.nix
     git init -q
     git remote add origin git@code.linenisgreat.com:scratch.git
@@ -565,6 +567,7 @@ explore-template-eng-go:
     out=$(nix build --no-link --print-out-paths)
     ls "$out/bin"
     "$out/bin/scratch"
+    test -f "$out/share/man/man1/scratch.1"
     echo "explore-template-eng-go: eng-go instantiates and passes its full gate"
 
 # Drive the REAL `conformist conform <domain>#<id>` bootstrap (real nix flake

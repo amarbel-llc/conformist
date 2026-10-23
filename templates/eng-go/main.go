@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"code.linenisgreat.com/conformist/templates/eng-go/internal/0/buildinfo"
 )
 
 // Injected at link time by the nix build (godyn(7), VERSION EMBEDDING).
@@ -14,7 +16,7 @@ var (
 )
 
 func versionLine() string {
-	return "EXAMPLE_NAME " + version + "+" + commit
+	return buildinfo.Line("EXAMPLE_NAME", version, commit)
 }
 
 func run(out io.Writer) error {
