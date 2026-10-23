@@ -234,6 +234,15 @@ itself. Each names the page that is normative for the rule it checks:
 	*conformist-git*(7) MERGE DRIVERS, REMOTES and DEFAULT BRANCH
 	(conformist#68).
 
+*scdoc*
+	Compiles each _\*.scd_ with *scdoc* itself and fails on its diagnostics
+	(conformist#128), so a man-page syntax error surfaces at the commit that
+	introduces it. scdoc's rules are contextual (a line starting with dashes is an error in a
+	definition-list body but fine as a list continuation; an underscore delimits
+	only at a word boundary), so the check is the compiler, not a pattern. It does not replace
+	the *manpages* derivation, which stays the authoritative gate (eng-manpages(7)
+	PRINCIPLE 4); it moves the common failures earlier. No repair.
+
 *gomod2nix*
 	GO MODULE LOCK above.
 
@@ -310,7 +319,7 @@ each linter by hand. Exposed as *conformist.lib.presets.{eng,eng-go,eng-impure}*
 	The pure lane: enforcers that read only committed files and so run inside the
 	sandboxed *checks.formatting*. Enables *eng-versioning*,
 	*eng-versioning-deprecated-file*, *flake-outputs*, *flake-lock*,
-	*git-merge-drivers* and *codegen-repair*.
+	*git-merge-drivers*, *scdoc* and *codegen-repair*.
 
 	It does NOT enable the *justfile-\** linters, despite their rules being
 	conformist's --- see below.

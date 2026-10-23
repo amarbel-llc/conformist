@@ -52,6 +52,9 @@ let
   # files       : attrset of relpath -> content written into the fixture tree
   # expectFail  : true => the linter MUST exit non-zero; false => MUST exit zero
   # expectToken : optional substring the linter output MUST contain
+  # passFiles   : true => the fixture's files are given to the command as file
+  #               arguments (a per-file linter, e.g. scdoc); false (default) =>
+  #               a whole-tree check run with no arguments.
   # evalPkgs    : pkgs the linter MODULE is evaluated against (default: pkgs).
   #               Lets a fixture exercise a module's degraded wiring when an
   #               overlay-provided tool is absent, e.g.
@@ -65,6 +68,7 @@ let
       files,
       expectFail ? false,
       expectToken ? null,
+      passFiles ? false,
       evalPkgs ? pkgs,
     }:
     let
@@ -76,6 +80,9 @@ let
         // enableModule;
       };
       cmd = mod.config.settings.linter.${name}.command;
+      fileArgs = nixlib.optionalString passFiles (
+        nixlib.concatMapStringsSep " " nixlib.escapeShellArg (builtins.attrNames files)
+      );
 
       assertExit =
         if expectFail then
@@ -104,8 +111,9 @@ let
       mkdir fixture && cd fixture
       ${writeFixtureFiles files}
 
-      # The whole-tree check runs at the tree root (cwd) with no file arguments.
-      if ${cmd} >out.log 2>&1; then rc=0; else rc=$?; fi
+      # The check runs at the tree root (cwd): a whole-tree check takes no file
+      # arguments, a per-file linter (passFiles) is given the fixture's files.
+      if ${cmd} ${fileArgs} >out.log 2>&1; then rc=0; else rc=$?; fi
       cat out.log
 
       ${assertExit}
@@ -1444,6 +1452,48 @@ let
   # ---- Fixtures -----------------------------------------------------------
 
   fixtures = [
+    # scdoc (conformist#128): the check is scdoc itself, so the cases are the two
+    # CONTEXTUAL errors the issue hit, each next to a near-identical page that
+    # compiles. A pattern could not tell these pairs apart.
+    (mkLinterFixtureCheck {
+      name = "scdoc";
+      label = "valid-pass";
+      passFiles = true;
+      files."doc/a.1.scd" =
+        "a(1)\n\n# NAME\n\na - a thing\n\n*bold* and _italic_ and CONFORMIST_CEILING_DIRECTORIES\n";
+    })
+    (mkLinterFixtureCheck {
+      name = "scdoc";
+      label = "nested-inline-fail";
+      passFiles = true;
+      files."doc/a.1.scd" = "a(1)\n\n# NAME\n\na - a thing\n\n*The _cmd_ TestMain pins it*\n";
+      expectFail = true;
+      expectToken = "doc/a.1.scd: Error at";
+    })
+    (mkLinterFixtureCheck {
+      name = "scdoc";
+      label = "dash-continuation-in-list-fail";
+      passFiles = true;
+      # A definition-list body line that starts `---` is read as a nested list
+      # entry and needs `- `.
+      files."doc/a.1.scd" =
+        "a(1)\n\n# NAME\n\na - a thing\n\n*thing*\n\tfirst line of the body\n\t--- second line\n";
+      expectFail = true;
+      expectToken = "doc/a.1.scd: Error at";
+    })
+    (mkLinterFixtureCheck {
+      name = "scdoc";
+      label = "second-file-reported";
+      passFiles = true;
+      # One bad file among good ones fails the run and is named.
+      files = {
+        "doc/a.1.scd" = "a(1)\n\n# NAME\n\na - a thing\n";
+        "doc/b.7.scd" = "b(7)\n\n# NAME\n\nb - b thing\n\n*The _x_ y*\n";
+      };
+      expectFail = true;
+      expectToken = "doc/b.7.scd: Error at";
+    })
+
     # eng-versioning: key derivation across go.mod / Cargo.toml / explicit key,
     # plus the rejection paths (conformist#29).
     (mkLinterFixtureCheck {

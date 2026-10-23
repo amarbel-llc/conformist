@@ -76,6 +76,12 @@
   # globs via linters.git-merge-drivers.entries.
   linters.git-merge-drivers.enable = true;
 
+  # conformist#128: compile every *.scd with scdoc at check/commit time, so a
+  # syntax error surfaces at the commit that introduces it instead of at the
+  # `manpages` derivation at merge time (that build stays the authoritative gate).
+  # Pure: scdoc reads only the file. A no-op for a repo with no *.scd.
+  linters.scdoc.enable = true;
+
   # conformist-justfile(7): the justfile convention roster is NOT enabled here.
   # It ships from just-us as `lib.conformistPresets.justfile` — see the header.
 }
