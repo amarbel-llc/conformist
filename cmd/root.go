@@ -110,8 +110,9 @@ func NewRoot(version, commit string) (*cobra.Command, *stats.Stats) {
 	fs.Bool(
 		"amend", false,
 		"With --commit, amend the existing HEAD commit (git commit --amend --no-edit), keeping its "+
-			"message, instead of creating a new "+format.CommitMessage+" commit. Refuses if HEAD is "+
-			"already pushed or the repository has no commits.",
+			"message, instead of creating a new "+format.CommitMessage+" commit. Refuses if the repository "+
+			"has no commits, or if HEAD is already pushed and the run has fixes to fold in (the fixes are "+
+			"put back); a tree that needs no fixes is left alone and exits 0.",
 	)
 
 	fs.Bool(

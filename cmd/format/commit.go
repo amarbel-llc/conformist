@@ -52,7 +52,8 @@ type CommitOptions struct {
 	Trailers []string
 	// Amend folds the run's fixes into HEAD via `git commit --amend --no-edit`
 	// (#33) instead of creating a fresh CommitMessage commit, keeping the
-	// existing message. Refused when HEAD is already pushed or absent.
+	// existing message. Refused when HEAD is absent, or when HEAD is already
+	// pushed AND the run has fixes to fold in (a clean tree is a no-op: #74).
 	Amend bool
 	// ExitZeroOnFix returns exit 0 instead of 3 when fixes were committed/amended
 	// (#35), so a caller that treats any nonzero exit as failure — e.g. a
@@ -111,6 +112,20 @@ func RunCommit(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []s
 	}
 
 	slices.Sort(toCommit)
+
+	// A published HEAD cannot take these fixes (#74). The run has already written
+	// them, so put them back first: a refused amend leaves the tree as it found
+	// it. Every toCommit path was clean before the run (preDirty excluded), so
+	// restoring it to HEAD discards nothing but this run's own edits.
+	if opts.Amend {
+		if pubErr := publishedHeadError(ctx, cfg.TreeRoot); pubErr != nil {
+			if restoreErr := git.RestorePaths(ctx, cfg.TreeRoot, toCommit); restoreErr != nil {
+				return fmt.Errorf("%w (and restoring the run's fixes failed: %w)", pubErr, restoreErr)
+			}
+
+			return pubErr
+		}
+	}
 
 	// Guard (#67): never let a fix commit carry leftover conflict markers. The
 	// commit takes its content from the working tree, so if any to-be-committed
@@ -175,8 +190,8 @@ func commitOrAmend(ctx context.Context, treeRoot string, opts CommitOptions, pat
 // paths that were already dirty before the run. Current policy: refuse on ANY
 // tracked staged/unstaged change unless --allow-dirty is passed (untracked
 // files are ignored throughout — they are never committed). With amend (#33),
-// it additionally refuses when HEAD has no commit to amend or is already
-// pushed.
+// it additionally refuses when HEAD has no commit to amend. (A HEAD that is
+// already pushed is refused later, and only when the run has fixes: #74.)
 //
 // NOTE(#24, agent-loop): this policy is deliberately isolated here. It is a
 // first cut optimized for the pre-merge-hook case, where the tree is clean by
@@ -208,8 +223,9 @@ func commitPreflight(ctx context.Context, cfg *config.Config, allowDirty, amend 
 	}
 
 	// amend rewrites HEAD: refuse if there is no HEAD to amend, or if HEAD is
-	// already published (amending would rewrite shared history). These run
-	// before any formatting, so a refused amend leaves the tree untouched.
+	// already published (amending would rewrite shared history). The first runs
+	// before any formatting; the published check waits until the run knows it has
+	// fixes to fold in (#74), and then puts them back if it refuses.
 	if amend {
 		if err := amendPreflight(ctx, cfg.TreeRoot); err != nil {
 			return nil, err
@@ -237,9 +253,9 @@ func commitPreflight(ctx context.Context, cfg *config.Config, allowDirty, amend 
 	return preDirty, nil
 }
 
-// amendPreflight rejects an --amend run that cannot safely rewrite HEAD: a repo
-// with no commit to amend, or a HEAD already pushed to a remote (amending would
-// rewrite published history).
+// amendPreflight rejects an --amend run with no commit to amend. Whether HEAD is
+// already pushed is checked later, and only if the run has fixes (see
+// publishedHeadError).
 func amendPreflight(ctx context.Context, treeRoot string) error {
 	headExists, err := git.HeadExists(ctx, treeRoot)
 	if err != nil {
@@ -250,6 +266,17 @@ func amendPreflight(ctx context.Context, treeRoot string) error {
 		return fmt.Errorf("%w: nothing to amend (no HEAD commit yet)", ErrCommitRefused)
 	}
 
+	return nil
+}
+
+// publishedHeadError reports an --amend that cannot fold fixes into HEAD because
+// HEAD is already pushed to a remote (amending would rewrite published history).
+// It is nil when HEAD is unpublished.
+//
+// It is checked AFTER the run and only when the run produced fixes
+// (conformist#74): a published HEAD with nothing to fold in has nothing to
+// rewrite, so a clean tree is a no-op success rather than a refusal.
+func publishedHeadError(ctx context.Context, treeRoot string) error {
 	remoteRefs, err := git.HeadRemoteRefs(ctx, treeRoot)
 	if err != nil {
 		return fmt.Errorf("failed to check whether HEAD is pushed: %w", err)

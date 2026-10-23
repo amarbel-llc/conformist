@@ -262,8 +262,21 @@ func TestCommitAmend(tt *testing.T) {
 	prePush, err := os.ReadFile(rubyPath)
 	as.NoError(err)
 
-	// --no-cache forces a reformat so a fix WOULD be produced; the pushed-HEAD
-	// refusal must still short-circuit before any formatting
+	// conformist#74: HEAD is published but the tree is already conformant (the
+	// cache says the formatter has nothing to do), so there is nothing to amend.
+	// That is a no-op success (exit 0), not a refusal: only a run that has fixes
+	// to fold into published history is refused.
+	//
+	// withNoError matters: the helper ignores a returned error unless an assertion
+	// is given, so without it this case passed before the fix for the wrong reason.
+	conformist(t, withArgs("--commit", "--amend"), withNoError(t))
+
+	as.Equal(headAmended, git("rev-parse", "HEAD"), "a no-op amend must not move HEAD")
+
+	// --no-cache forces a reformat so a fix WOULD be produced. With HEAD
+	// published that is refused (exit 2) AFTER the run discovered it had fixes,
+	// and the fixes it made are put back so a refused amend still leaves the
+	// tree exactly as it found it.
 	conformist(
 		t,
 		withArgs("--commit", "--amend", "--no-cache"),
@@ -278,7 +291,9 @@ func TestCommitAmend(tt *testing.T) {
 
 	postPush, err := os.ReadFile(rubyPath)
 	as.NoError(err)
-	as.Equal(string(prePush), string(postPush), "the pushed-HEAD refusal must happen before formatting")
+	as.Equal(string(prePush), string(postPush), "a refused amend must put the run's fixes back")
+	as.Empty(git("status", "--porcelain", "--untracked-files=no"),
+		"a refused amend must leave the tracked tree clean")
 }
 
 // TestCommitExitZeroOnFix covers --exit-zero-on-fix (#35): a successful repair

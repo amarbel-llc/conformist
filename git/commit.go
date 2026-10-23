@@ -104,6 +104,31 @@ func AddPaths(ctx context.Context, treeRoot string, paths []string) error {
 	return nil
 }
 
+// RestorePaths puts the given toplevel-relative paths back to their HEAD content
+// in both the index and the working tree (`git restore --source=HEAD --staged
+// --worktree`), anchored to the toplevel like AddPaths. It undoes a run's fixes to
+// files that were clean before it; use it only for such files, since it discards
+// any other change to them.
+func RestorePaths(ctx context.Context, treeRoot string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	args := make([]string, 0, 6+len(paths))
+	args = append(args, "-C", treeRoot, "restore", "--source=HEAD", "--staged", "--worktree", "--")
+
+	for _, p := range paths {
+		args = append(args, ":(top)"+p)
+	}
+
+	cmd := exec.CommandContext(ctx, Binary, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git restore failed: %w: %s", err, out)
+	}
+
+	return nil
+}
+
 // conflictMarkerMessage is the warning `git diff --check` prints for a line it
 // recognizes as a leftover merge-conflict marker (`<<<<<<<`, `|||||||`,
 // `=======`, `>>>>>>>`). git's --check also flags whitespace errors with

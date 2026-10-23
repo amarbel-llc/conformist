@@ -50,7 +50,10 @@ conformist has two modes of operation.
 	folds the run's changes into the existing HEAD commit via
 	_git commit --amend --no-edit_ (keeping HEAD's message), producing one clean
 	commit rather than a fixup; it additionally refuses when HEAD has no commit
-	to amend or has already been pushed to a remote. In any commit mode,
+	to amend (before any formatting), or when the run has fixes to fold in but
+	HEAD has already been pushed to a remote --- the fixes are then put back, so
+	the refused run leaves the tree as it found it. A tree that needs no fixes is
+	left alone and exits 0 even on a pushed HEAD (conformist#74). In any commit mode,
 	conformist also refuses (exit 2) when the content it is about to commit
 	carries leftover merge-conflict markers (_<<<<<<<_ / _=======_ / _>>>>>>>_,
 	or diff3 _|||||||_) — for example an autostash-pop conflict that left
