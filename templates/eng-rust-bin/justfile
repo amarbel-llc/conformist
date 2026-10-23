@@ -42,15 +42,15 @@ lint-impure: lint-worktree
 # The impure checks against the working tree, where .git and a real toolchain are
 # available: this repo's clippy linter (it compiles the crate, so it cannot run
 # in the sandboxed checks.formatting) plus the eng git-remotes, sweatfile and
-# agents-md checks. See conformist-impure.nix. Runs conformist from the devShell
-# (direnv `use flake`).
+# agents-md checks. See conformist-impure.nix. Runs the flake's pinned conformist
+# (`nix run '.#conformist'`), not whatever `conformist` PATH finds.
 #
 # run the impure clippy and eng checks against the working tree
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
-    conformist check --config-file "$cfg" --tree-root .
+    nix run '.#conformist' -- check --config-file "$cfg" --tree-root .
 
 # --- codemod ---
 

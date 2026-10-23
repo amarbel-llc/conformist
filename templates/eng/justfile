@@ -22,15 +22,15 @@ lint-impure: lint-worktree
 
 # The impure eng checks (git remotes, sweatfile, agents-md) against the working
 # tree, where .git is available. Needs SSH remotes + a sweatfile; add lint-impure
-# to the `lint` aggregate above once your repo has them. Runs conformist from the
-# devShell (direnv `use flake`).
+# to the `lint` aggregate above once your repo has them. Runs the flake's pinned
+# conformist (`nix run '.#conformist'`), not whatever `conformist` PATH finds.
 #
 # run the impure eng checks against the working tree
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
-    conformist check --config-file "$cfg" --tree-root .
+    nix run '.#conformist' -- check --config-file "$cfg" --tree-root .
 
 # --- codemod ---
 

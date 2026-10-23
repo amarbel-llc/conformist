@@ -226,6 +226,41 @@ func TestTemplatesShipNoEnvrc(t *testing.T) {
 	}
 }
 
+// TestLintWorktreeRunsThePinnedConformist pins conformist#131: every generated
+// lint-worktree recipe runs the flake's own pinned binary (`nix run
+// .#conformist`), never a bare `conformist` that PATH may resolve to eng's
+// home-profile wrapper, and every generated flake exports that package. The
+// scaffold files are read from disk; they are //go:embed-ed by the package.
+func TestLintWorktreeRunsThePinnedConformist(t *testing.T) {
+	const pinned = `nix run '.#conformist' -- check --config-file "$cfg" --tree-root .`
+
+	read := func(path string) string { //testui:allow // testify helper
+		t.Helper()
+
+		content, err := os.ReadFile(path)
+		require.NoError(t, err, path)
+
+		return string(content)
+	}
+
+	recipes := map[string]string{"scaffold/justfile": read("scaffold/justfile"), "scaffold/recipes.just": read("scaffold/recipes.just")}
+	flakes := map[string]string{"scaffold/flake.nix": read("scaffold/flake.nix"), "scaffold/flake-snippet.txt": read("scaffold/flake-snippet.txt")}
+
+	for _, id := range []string{"eng", "eng-go", "eng-rust", "eng-rust-bin", "eng-rust-lib"} {
+		recipes["templates/"+id+"/justfile"] = readTemplateFile(t, id, "justfile")
+		flakes["templates/"+id+"/flake.nix"] = readTemplateFile(t, id, "flake.nix")
+	}
+
+	for name, content := range recipes {
+		require.Contains(t, content, pinned, "%s: lint-worktree must run the pinned conformist", name)
+		require.NotRegexp(t, `(?m)^\s+conformist check`, content, "%s: bare conformist on PATH", name)
+	}
+
+	for name, content := range flakes {
+		require.Contains(t, content, "packages.conformist = conformistPkg;", "%s must export the pinned conformist", name)
+	}
+}
+
 // TestRustTemplatesShipManpageLane pins the Rust half of conformist#143: the
 // shared flake builds doc/*.scd when a template ships them and lints the NAME
 // lines, and the shared justfile aggregates the lane. The package templates ship

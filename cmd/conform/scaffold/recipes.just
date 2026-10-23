@@ -21,7 +21,7 @@ lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
-    conformist check --config-file "$cfg" --tree-root .
+    nix run '.#conformist' -- check --config-file "$cfg" --tree-root .
 
 # --- codemod ---
 

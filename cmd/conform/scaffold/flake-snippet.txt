@@ -48,6 +48,10 @@ Add conformist to flake.nix and wire it into your per-system outputs
         projectRootFile = "flake.nix";
       }).config.build.configFile;
 
+    # the pinned conformist, for `nix run '.#conformist'` in `lint-worktree`
+    # (a bare `conformist` on PATH may be eng's home-profile wrapper; #131):
+    packages.conformist = conformistPkg;
+
     # git pre-commit + (opt-in) merge-time repair hooks for THIS repo's config,
     # on the devShell PATH as `conformist-pre-commit` / `conformist-repair` (the
     # sweatfile names them). See conformist#47/#54 and conformist.7 PRE-COMMIT.

@@ -336,6 +336,16 @@ executed forms are one string (conformist#42).
 *conform* is idempotent overall: it exits 3 when it wrote, edited or repaired files
 (*ErrScaffolded*), and 0 when the tree is already conformant.
 
+The generated _lint-worktree_ recipe runs *nix run '.#conformist' -- check ...*, the
+flake's own pinned binary, and every generated _flake.nix_ exports it as
+_packages.conformist_. A bare *conformist* resolves through PATH, where eng's
+home-profile wrapper can win over the devShell's and fails on a repo with no
+checked-in config (conformist#131). A repo scaffolded before this carries the bare
+form, and *conform* does not rewrite an existing justfile. To adopt the fix, add
+_packages.conformist = conformistPkg;_ beside the other _packages.conformist-\*_
+outputs (conform does not splice it into an existing flake yet) and change the
+recipe's last line to the *nix run* form.
+
 # FLAKECLOBBER
 
 *flakeclobber* is a separate binary for fleet migration (RFC 0004,

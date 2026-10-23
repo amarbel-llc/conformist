@@ -90,6 +90,12 @@
         checks.formatting = eval.config.build.check self;
         packages.conformist-impure-config = impureEval.config.build.configFile;
 
+        # The pinned conformist binary, for `nix run '.#conformist'`. The
+        # lint-worktree recipe runs it by flake reference instead of trusting PATH,
+        # where eng's home-profile `conformist` wrapper (it gates on a checked-in
+        # config this repo does not have) can win over the devShell's (#131).
+        packages.conformist = conformistPkg;
+
         # A git pre-commit hook running THIS repo's config (conformist#47/#51):
         # `conformist --staged --exit-zero-on-fix` wrapped with the generated
         # store-path config, so it formats staged files with the SAME pinned
