@@ -22,12 +22,21 @@
     just-us.inputs.nixpkgs.follows = "nixpkgs";
     just-us.inputs.flake-utils.follows = "utils";
     just-us.inputs.conformist.follows = "conformist";
+
+    # doppelgang ships `lint-man`, the NAME-line check behind
+    # `checks.manpage-names`. It depends on conformist, so it is a consumer here
+    # the way this flake is; conformist itself does not take it (a cycle).
+    doppelgang.url = "https://code.linenisgreat.com/doppelgang/archive/master.tar.gz";
+    doppelgang.inputs.nixpkgs-master.follows = "nixpkgs";
+    doppelgang.inputs.utils.follows = "utils";
+    doppelgang.inputs.conformist.follows = "conformist";
   };
 
   outputs =
     {
       self,
       conformist,
+      doppelgang,
       just-us,
       nixpkgs,
       utils,
@@ -82,9 +91,41 @@
           package = conformistPkg;
           projectRootFile = "flake.nix";
         };
+
+        # Manpages: doc/<name>.<section>.scd compiled by scdoc into
+        # share/man/man<section>. cli.N.scd and lib.N.scd are installed under the
+        # crate's name (read from Cargo.toml), so no file is named after the repo.
+        # The package templates ship a page; the page-less base has no doc/, and
+        # this one flake is shared across all three (a drift test keeps them equal).
+        hasDocs = builtins.pathExists ./doc;
+        crateName = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.name;
+        manpages = pkgs.runCommand "${crateName}-manpages" { nativeBuildInputs = [ pkgs.scdoc ]; } ''
+          for src in ${./doc}/*.scd; do
+            base=$(basename "$src" .scd)
+            section=''${base##*.}
+            name=''${base%.*}
+            case "$name" in cli | lib) name=${crateName} ;; esac
+            mkdir -p "$out/share/man/man$section"
+            scdoc < "$src" > "$out/share/man/man$section/$name.$section"
+          done
+        '';
       in
       {
         formatter = eval.config.build.wrapper;
+
+        # Every installed page must satisfy the fleet NAME-line contract (one-line
+        # `name - summary`, short enough to render untruncated); doppelgang
+        # lint-man is the reference implementation. Trivially passes without doc/.
+        checks.manpage-names =
+          if hasDocs then
+            pkgs.runCommand "manpage-names" { nativeBuildInputs = [ doppelgang.packages.${system}.default ]; }
+              ''
+                doppelgang lint-man --format text --max 72 ${manpages}/share/man
+                touch $out
+              ''
+          else
+            pkgs.runCommand "manpage-names" { } "touch $out";
+        packages.manpages = if hasDocs then manpages else pkgs.runCommand "no-manpages" { } "mkdir $out";
         checks.formatting = eval.config.build.check self;
         packages.conformist-impure-config = impureEval.config.build.configFile;
 

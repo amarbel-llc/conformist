@@ -14,7 +14,18 @@ test-rust:
 
 # --- lint ---
 
-lint: lint-fmt lint-impure
+lint: lint-fmt lint-manpage-names lint-impure
+
+# Every installed page must satisfy the fleet NAME-line contract (one-line
+# `name - summary`, short enough to render untruncated); doppelgang lint-man is
+# the reference implementation. Passes trivially while the repo ships no doc/.
+#
+# lint the manpages against the NAME-line contract
+lint-manpage-names:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.manpage-names" --no-link --print-build-logs
 
 # Read-only formatting + the eng preset's file-based linters, via the sandboxed
 # checks.formatting derivation.

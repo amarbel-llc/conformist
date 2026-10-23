@@ -522,7 +522,7 @@ explore-template-eng-rust *ids:
           key=SCRATCH_VERSION
         else
           key=SCRATCH_VERSION
-          sed -i 's/EXAMPLE_CRATE/scratch/g' Cargo.toml AGENTS.md
+          sed -i 's/EXAMPLE_CRATE/scratch/g' Cargo.toml AGENTS.md doc/*.scd
         fi
         sed -i "s/EXAMPLE_VERSION/$key/g" version.env conformist.nix
         git init -q

@@ -226,6 +226,37 @@ func TestTemplatesShipNoEnvrc(t *testing.T) {
 	}
 }
 
+// TestRustTemplatesShipManpageLane pins the Rust half of conformist#143: the
+// shared flake builds doc/*.scd when a template ships them and lints the NAME
+// lines, and the shared justfile aggregates the lane. The package templates ship
+// the page (cli.1 for the binary, lib.7 for the library) carrying the crate-name
+// placeholder; the page-less base ships none.
+func TestRustTemplatesShipManpageLane(t *testing.T) {
+	for _, id := range []string{"eng-rust", "eng-rust-bin", "eng-rust-lib"} {
+		flake := readTemplateFile(t, id, "flake.nix")
+		for _, want := range []string{"doppelgang.url", "doppelgang lint-man", "checks.manpage-names", "packages.manpages"} {
+			require.Contains(t, flake, want, "templates/%s/flake.nix must wire %q", id, want)
+		}
+
+		for _, follows := range []string{"utils", "conformist", "nixpkgs-master"} {
+			require.Contains(t, flake, "doppelgang.inputs."+follows+".follows", "templates/%s: doppelgang must follow %s", id, follows)
+		}
+
+		justfile := readTemplateFile(t, id, "justfile")
+		require.Regexp(t, `(?m)^lint: .*\blint-manpage-names\b`, justfile)
+		require.Contains(t, justfile, "\nlint-manpage-names:")
+	}
+
+	for id, page := range map[string]string{"eng-rust-bin": "cli.1.scd", "eng-rust-lib": "lib.7.scd"} {
+		content := readTemplateFile(t, id, filepath.Join("doc", page))
+		require.Regexp(t, `(?m)^# NAME\n\nEXAMPLE_CRATE - \S`, content, "templates/%s/doc/%s: NAME line", id, page)
+		require.Contains(t, readTemplateFile(t, id, "AGENTS.md"), "lint-manpage-names")
+	}
+
+	_, err := os.Lstat(templatePath("eng-rust", "doc"))
+	require.ErrorIs(t, err, os.ErrNotExist, "the page-less base ships no doc/")
+}
+
 // TestRustPackageTemplatesShipAgentsStub verifies the package templates carry the
 // crate-name placeholder bootstrap substitutes, and that CLAUDE.md is a symlink to
 // AGENTS.md (what the agents-md linter requires of a CLAUDE.md).

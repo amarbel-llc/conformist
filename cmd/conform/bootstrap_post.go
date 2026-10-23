@@ -28,7 +28,7 @@ var keyedFiles = []string{"version.env", "conformist.nix"}
 const crateNamePlaceholder = "EXAMPLE_CRATE"
 
 // crateNamedFiles are the template files whose crateNamePlaceholder is replaced.
-var crateNamedFiles = []string{"Cargo.toml", "AGENTS.md"}
+var crateNamedFiles = []string{"Cargo.toml", "AGENTS.md", "doc/cli.1.scd", "doc/lib.7.scd"}
 
 // goNamePlaceholder is the literal the Go template ships as the module path's
 // last element, the package name and the binary's name; bootstrap replaces it

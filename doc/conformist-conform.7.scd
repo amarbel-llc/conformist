@@ -221,7 +221,12 @@ directory and one more entry.
 - *eng-rust*: a Rust cargo workspace. Adds rustfmt, an impure clippy lane
   (_conformist-impure.nix_, with the *gomod2nix* linter forced off since it needs a
   Go overlay a plain consumer lacks), a Rust _.gitignore_, and a justfile whose
-  *default* is *test lint* with *lint-impure* in the *lint* aggregate. The version key
+  *default* is *test lint* with *lint-impure* in the *lint* aggregate. All three
+  Rust flakes share a manpage lane: when _doc/_ exists, scdoc builds its pages into
+  _packages.manpages_ (a _cli.N.scd_ or _lib.N.scd_ is installed under the crate's
+  name) and _checks.manpage-names_ runs *doppelgang lint-man* (the _doppelgang_
+  input; *just lint-manpage-names*); without _doc/_ it passes trivially. There is no
+  dagnabit lane: it is Go-only. The version key
   in _conformist.nix_ ships as a placeholder to rename, or to drop once the root
   _Cargo.toml_ has a matching *[package]*.
 - *eng-rust-bin* and *eng-rust-lib*: *eng-rust* plus a minimal Cargo package (a
