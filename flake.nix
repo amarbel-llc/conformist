@@ -470,6 +470,22 @@
                 touch $out
               '';
 
+            # Regression for conformist#49: clang-format has no read-only mode, so
+            # check mode formats a SANDBOX copy, and the sandbox carries only the
+            # files a formatter declares in config-files. Without `.clang-format`
+            # there, the sandboxed clang-format falls back to its built-in LLVM style
+            # and reports every file of a non-LLVM repo as "would reformat". Asserts
+            # the evaluated stanza ships both spellings clang-format honours.
+            clang-format-config-files =
+              let
+                mod = conformistLib.evalModule pkgs { programs.clang-format.enable = true; };
+                shipped = mod.config.settings.formatter.clang-format.config-files or [ ];
+              in
+              assert pkgs.lib.assertMsg
+                (builtins.elem ".clang-format" shipped && builtins.elem "_clang-format" shipped)
+                "clang-format must declare config-files .clang-format and _clang-format (#49); got ${builtins.toJSON shipped}";
+              pkgs.runCommand "conformist-clang-format-config-files-test" { } "touch $out";
+
             # Regression for mkLayoutCheck (conformist#32): a STUB app whose
             # passthru.codegenCheck returns the generated command as an executable,
             # run against STUB dagnabits. Proves the three behaviors that matter:
