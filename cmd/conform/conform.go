@@ -277,7 +277,11 @@ func editFlake(path string, opts Options) ([]byte, flakeedit.EditReport, error) 
 		return nil, flakeedit.EditReport{}, fmt.Errorf("failed to read flake.nix: %w", err)
 	}
 
-	out, report, err := flakeedit.Apply(src, flakeedit.Options{ForceFormatter: opts.ForceFormatter})
+	out, report, err := flakeedit.Apply(src, flakeedit.Options{
+		ForceFormatter: opts.ForceFormatter,
+		// In the repo that IS conformist or just-us, that tool is not an input.
+		RepoName: repoName(filepath.Dir(path)),
+	})
 	if err != nil {
 		return nil, report, fmt.Errorf("editing flake.nix: %w", err)
 	}

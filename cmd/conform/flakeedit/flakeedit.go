@@ -10,7 +10,8 @@
 // conformist survey found to cover 95% of eng repos. Any other shape
 // (flake-parts, a raw forAllSystems/genAttrs flake, an `eachSystem`
 // variant, a foreign repo that already binds `eval`/`impureEval` to
-// something else) yields ErrUnrecognized, and the caller falls back to
+// something else, or one that already calls `lib.evalModule` under its own
+// names) yields ErrUnrecognized, and the caller falls back to
 // printing the wiring for the user to paste rather than risk corrupting
 // the file.
 //
@@ -31,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -62,7 +64,41 @@ type Options struct {
 	// conformist's wrapper instead of leaving it a conflict (#63). Off by
 	// default: a repo's own formatter is preserved unless the caller opts in.
 	ForceFormatter bool
+
+	// RepoName is the name of the repository being conformed. When it is the
+	// name of an input conform would add (`just-us`, `conformist`), the flake IS
+	// that tool: importing it would be a self-referential input, so the input is
+	// skipped and the generated bindings reach the flake through `self`
+	// (conformist#130). Empty or any other name changes nothing.
+	RepoName string
 }
+
+// wiring names how the generated bindings reach each tool: through its flake
+// input, or through `self` in the repository that is the tool.
+type wiring struct {
+	conformist string
+	justUs     string
+}
+
+// selfName is the name the generated bindings use for the flake itself.
+const selfName = "self"
+
+func wiringFor(repoName string) wiring {
+	w := wiring{conformist: conformistInput, justUs: justUsInput}
+
+	switch repoName {
+	case conformistInput:
+		w.conformist = selfName
+	case justUsInput:
+		w.justUs = selfName
+	}
+
+	return w
+}
+
+// reForeignEvalModule matches a call of some flake's `lib.evalModule`. `\b`
+// keeps nixpkgs' own `lib.evalModules` from matching.
+var reForeignEvalModule = regexp.MustCompile(`\.lib\.evalModule\b`)
 
 // The two top-level flake inputs conform wires in.
 const (
@@ -147,6 +183,15 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		}
 	}
 
+	// None of conformist's bindings, yet an evalModule call of its own: the repo
+	// hand-rolled its conformist wiring under other names (just-us's
+	// `conformistEval`). Splicing `eval`/`impureEval` beside it would add a second
+	// evalModule call that collides with the first, so stop and let the caller
+	// print what to wire by hand (conformist#130).
+	if have == 0 && reForeignEvalModule.Match(src) {
+		return src, EditReport{}, ErrUnrecognized
+	}
+
 	alreadyWired := have == len(conformistLetNames)
 	outdatedWiring := false
 
@@ -170,21 +215,23 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 		splices []flakeparse.Splice
 	)
 
+	w := wiringFor(opts.RepoName)
+
 	// 1. inputs
-	if s, labels, ok := inputsSplice(ins); ok {
+	if s, labels, ok := inputsSplice(ins, w, outs.UtilsName); ok {
 		splices = append(splices, s)
 		report.Added = append(report.Added, labels...)
 	}
 
 	// 2. outputs arguments
-	if s, labels, ok := argSplice(outs); ok {
+	if s, labels, ok := argSplice(outs, w); ok {
 		splices = append(splices, s)
 		report.Added = append(report.Added, labels...)
 	}
 
 	// 3. let bindings — only the ones missing, so an outdated-wiring flake
 	// gains just `justPkg` rather than a duplicate block.
-	if s, names, ok := letSplice(src, outs); ok {
+	if s, names, ok := letSplice(src, outs, w); ok {
 		splices = append(splices, s)
 		report.Added = append(report.Added, "let bindings ("+strings.Join(names, ", ")+")")
 	}
@@ -256,41 +303,64 @@ func Apply(src []byte, opts Options) ([]byte, EditReport, error) {
 // input, and no top-level nixpkgs is ever added. The just-us input
 // follows the same rule from the other direction: only existing top-level
 // inputs are followed.
-func inputsSplice(ins flakeparse.InputsAttrSet) (flakeparse.Splice, []string, bool) {
+//
+// utilsName is what the flake calls its flake-utils (the eachDefaultSystem
+// head). Everything that follows "utils" follows THAT input, and a `utils`
+// input is added only when the head really is `utils`, not on top of a
+// `flake-utils` the flake already uses (conformist#130). w says which tools the
+// repository is itself: those are not imported (conformist#130).
+func inputsSplice(ins flakeparse.InputsAttrSet, w wiring, utilsName string) (flakeparse.Splice, []string, bool) {
 	present := ins.TopLevelNames()
+
+	if utilsName == "" {
+		utilsName = "utils"
+	}
 
 	var lines, labels []string
 
-	if !present[conformistInput] {
+	if w.conformist != selfName && !present[conformistInput] {
 		lines = append(lines, `conformist.url = "git+https://code.linenisgreat.com/conformist.git";`)
 
 		for _, dep := range conformistDeps {
-			if present[dep] {
-				lines = append(lines, fmt.Sprintf("conformist.inputs.%s.follows = %q;", dep, dep))
+			target := dep
+			if dep == "utils" {
+				target = utilsName
+			}
+
+			if present[target] {
+				lines = append(lines, fmt.Sprintf("conformist.inputs.%s.follows = %q;", dep, target))
 			}
 		}
 
 		labels = append(labels, "input conformist")
 	}
 
-	if !present["utils"] {
+	// The only input conform may add on its own authority, because the
+	// recognized shape guarantees the outputs pattern names the head (#83). It
+	// follows conformist's, so a repo that is conformist has nothing to follow.
+	if w.conformist != selfName && utilsName == "utils" && !present["utils"] {
 		lines = append(lines, `utils.follows = "conformist/utils";`)
 		labels = append(labels, "input utils")
 	}
 
-	if !present[justUsInput] {
+	if w.justUs != selfName && !present[justUsInput] {
 		lines = append(lines, `just-us.url = "git+https://code.linenisgreat.com/just-us.git";`)
 
 		willExist := maps.Clone(present)
 		willExist[conformistInput] = true
-		willExist["utils"] = true
+		willExist[utilsName] = true
 
 		for _, f := range justUsFollows {
-			if !willExist[f.target] {
+			target := f.target
+			if target == "utils" {
+				target = utilsName
+			}
+
+			if !willExist[target] {
 				continue
 			}
 
-			lines = append(lines, fmt.Sprintf("just-us.inputs.%s.follows = %q;", f.dep, f.target))
+			lines = append(lines, fmt.Sprintf("just-us.inputs.%s.follows = %q;", f.dep, target))
 		}
 
 		labels = append(labels, "input just-us")
@@ -324,20 +394,18 @@ func inputsSplice(ins flakeparse.InputsAttrSet) (flakeparse.Splice, []string, bo
 	return flakeparse.Splice{Offset: ins.InsertOffset, Text: b.String()}, labels, true
 }
 
-// argNames are the inputs the spliced per-system body references by name.
-var argNames = []string{conformistInput, justUsInput}
-
 // argSplice builds the single insertion adding the missing outputs-pattern
-// arguments. One splice rather than one per name: equal-offset splices
-// have no defined order under Apply's sort, so rendering them together
-// keeps the result deterministic.
-func argSplice(outs flakeparse.ParsedOutputs) (flakeparse.Splice, []string, bool) {
+// arguments: the inputs the spliced per-system body references by name, or
+// `self` for a tool the repository is itself. One splice rather than one per
+// name: equal-offset splices have no defined order under Apply's sort, so
+// rendering them together keeps the result deterministic.
+func argSplice(outs flakeparse.ParsedOutputs, w wiring) (flakeparse.Splice, []string, bool) {
 	var (
 		b      strings.Builder
 		labels []string
 	)
 
-	for _, name := range argNames {
+	for _, name := range []string{w.conformist, w.justUs} {
 		if outs.ArgNames[name] {
 			continue
 		}
@@ -354,14 +422,18 @@ func argSplice(outs flakeparse.ParsedOutputs) (flakeparse.Splice, []string, bool
 }
 
 // conformistLetBindings returns the per-system `let` bindings conform wires
-// in, in render order.
-func conformistLetBindings() []letBinding {
+// in, in render order, for an ordinary repository (each tool through its input).
+func conformistLetBindings() []letBinding { return conformistLetBindingsFor(wiringFor("")) }
+
+// conformistLetBindingsFor is conformistLetBindings with each tool reached
+// through w: its flake input, or `self` in the repository that is the tool.
+func conformistLetBindingsFor(w wiring) []letBinding {
 	return []letBinding{
 		{conformistPkgName, func(i string) string {
-			return i + conformistPkgName + " = conformist.packages.${system}.default;\n"
+			return i + conformistPkgName + " = " + w.conformist + ".packages.${system}.default;\n"
 		}},
 		{"justPkg", func(i string) string {
-			return i + "justPkg = just-us.packages.${system}.default;\n"
+			return i + "justPkg = " + w.justUs + ".packages.${system}.default;\n"
 		}},
 		// The justfile-* convention linters ship from just-us, not conformist:
 		// they read the fork-only `just --dump --dump-format model`, and
@@ -371,10 +443,10 @@ func conformistLetBindings() []letBinding {
 		// the roster rather than the single orphan-summary module it used to.
 		{"eval", func(i string) string {
 			return "" +
-				i + "eval = conformist.lib.evalModule pkgs {\n" +
+				i + "eval = " + w.conformist + ".lib.evalModule pkgs {\n" +
 				i + "  imports = [\n" +
-				i + "    conformist.lib.presets.eng\n" +
-				i + "    just-us.lib.conformistPresets.justfile\n" +
+				i + "    " + w.conformist + ".lib.presets.eng\n" +
+				i + "    " + w.justUs + ".lib.conformistPresets.justfile\n" +
 				i + "    ./conformist.nix\n" +
 				i + "  ];\n" +
 				i + "  package = conformistPkg;\n" +
@@ -384,8 +456,8 @@ func conformistLetBindings() []letBinding {
 		}},
 		{"impureEval", func(i string) string {
 			return "" +
-				i + "impureEval = conformist.lib.evalModule pkgs {\n" +
-				i + "  imports = [ conformist.lib.presets.eng-impure ];\n" +
+				i + "impureEval = " + w.conformist + ".lib.evalModule pkgs {\n" +
+				i + "  imports = [ " + w.conformist + ".lib.presets.eng-impure ];\n" +
 				i + "  package = conformistPkg;\n" +
 				i + "  projectRootFile = \"flake.nix\";\n" +
 				i + "};\n"
@@ -397,12 +469,12 @@ func conformistLetBindings() []letBinding {
 // NOT already present, placed just before `in`, and names the ones it added.
 // On a clean flake that is all four; on a flake carrying an older
 // conformist's wiring it is only the ones added since (conformist#100).
-func letSplice(src []byte, outs flakeparse.ParsedOutputs) (flakeparse.Splice, []string, bool) {
+func letSplice(src []byte, outs flakeparse.ParsedOutputs, w wiring) (flakeparse.Splice, []string, bool) {
 	i := outs.LetIndent
 
 	var parts, names []string
 
-	for _, b := range conformistLetBindings() {
+	for _, b := range conformistLetBindingsFor(w) {
 		if outs.LetExisting[b.name] {
 			continue
 		}

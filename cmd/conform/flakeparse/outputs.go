@@ -11,6 +11,13 @@ import (
 // value that matched the eachDefaultSystem shape. All offsets are
 // ABSOLUTE in the original flake source.
 type ParsedOutputs struct {
+	// UtilsName is the name the flake gives its flake-utils: the first segment
+	// of the eachDefaultSystem head (`utils` in `utils.lib.eachDefaultSystem`,
+	// `flake-utils` in `flake-utils.lib.eachDefaultSystem`). Empty only when the
+	// head is not dotted. conform follows THIS input rather than assuming it is
+	// called `utils` (conformist#130).
+	UtilsName string
+
 	// ArgInsertOff is the byte offset just after the argset's opening
 	// brace; a new argument is spliced there. ArgIndent is the
 	// indentation of the existing arguments.
@@ -168,6 +175,13 @@ func parseOutputs(src []byte, base, end int) (ParsedOutputs, bool) {
 	outputs, ok := childNamed(tree, root, "Outputs")
 	if !ok {
 		return ParsedOutputs{}, false
+	}
+
+	if head, ok := childNamed(tree, outputs, "AppHead"); ok {
+		name, _, dotted := strings.Cut(strings.TrimSpace(tree.Text(head)), ".")
+		if dotted {
+			out.UtilsName = strings.TrimSpace(name)
+		}
 	}
 	sysLambda, ok := childNamed(tree, outputs, "SystemLambda")
 	if !ok {

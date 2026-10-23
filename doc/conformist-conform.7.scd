@@ -138,6 +138,24 @@ partial state is treated as a foreign name collision and falls back to print-onl
 A pre-existing *eval* body is opaque to this parser and is left alone, reported as a
 conflict.
 
+*Bespoke wiring is refused* (conformist#130). A flake with none of conformist's
+bindings but its own call of some flake's *lib.evalModule* --- just-us's hand-rolled
+*conformistEval* --- is conformist wired by hand under other names. Splicing *eval* and
+*impureEval* beside it would add a second evalModule call that collides with the first,
+so it falls back to print-only, like any unrecognized shape.
+
+*The utils flake keeps the name the flake gave it* (conformist#130). The name is read
+from the *eachDefaultSystem* head (*utils* in *utils.lib.eachDefaultSystem*,
+*flake-utils* in *flake-utils.lib.eachDefaultSystem*). conformist's and just-us's own
+*utils* are made to follow that input, and a *utils* input is added only when the head
+really is *utils* and no such input exists, never beside the flake's own *flake-utils*.
+
+*A repository is not its own input* (conformist#130). When the repository being
+conformed is *just-us* or *conformist* (the name comes from the git origin remote, else
+the directory), that tool is not added as a flake input; the spliced bindings reach it
+through *self* (*self.packages.${system}.default*, *self.lib.conformistPresets.justfile*)
+and *self* is added to the outputs arguments if missing.
+
 *Pre-existing outputs.* An existing *devShells.default* is merged into ---
 conformist's tools are spliced into its *packages* list. An existing *formatter* is
 replaced only under *--force-formatter*. Any other pre-existing attr is reported as
