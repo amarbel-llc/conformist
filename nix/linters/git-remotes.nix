@@ -140,6 +140,27 @@ let
         fi
       fi
 
+      # 3. Reachability (opt-in, conformist#98): rules 1 and 2 read only the
+      # scheme and host, never whether the remote EXISTS, so a remote left
+      # dangling by a forge rename (git@host:old-name.git) passes both. With
+      # `probe`, ask git whether origin answers. Origin only, like the host rule:
+      # another upstream may be down or private on purpose. Uses the EFFECTIVE
+      # URL (insteadOf applied) because reachability is about what git will
+      # really contact. `ls-remote` without --exit-code exits 0 for a reachable
+      # remote with no refs yet, so a fresh empty repo is not flagged.
+      #
+      # Needs the network and the operator's credentials, so it is off by
+      # default, and bounded so a hung connection cannot stall the lane.
+      probe=${if cfg.probe then "1" else "0"}
+      if [ "$probe" -eq 1 ] && git config --get remote.origin.url >/dev/null 2>&1; then
+        if ! probe_out=$(GIT_TERMINAL_PROMPT=0 timeout ${toString cfg.probe-timeout} git ls-remote origin 2>&1 >/dev/null); then
+          echo "git-remotes(#98): origin is unreachable (git ls-remote origin failed): $(git config --get remote.origin.url)" >&2
+          printf '%s\n' "$probe_out" | sed 's/^/  /' >&2
+          echo "  (a renamed or deleted repository passes the scheme and host rules but cannot be fetched or pushed)" >&2
+          findings=1
+        fi
+      fi
+
       if [ "$findings" -ne 0 ]; then
         exit 1
       fi
@@ -244,6 +265,30 @@ in
         `origin` from the SSH-transport rule, and repair still normalizes a
         non-SSH remote on an allowed host to SSH.
       '';
+    };
+
+    probe = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Also check that `origin` EXISTS, by running `git ls-remote origin`
+        (conformist#98). Without it a green result means scheme and host only: a
+        remote left dangling by a forge rename (`git@host:old-name.git`) satisfies
+        both rules and still fails every push. A reachable remote with no refs yet
+        passes. Origin only, like the host rule.
+
+        Off by default because it needs the network and the operator's
+        credentials, so it can fail for reasons unrelated to the repository. Run
+        it where that holds (the impure working-tree lane). A whole-tree check's
+        clean result may be cached (conformist#16), so pass `--no-cache` when the
+        probe must really run.
+      '';
+    };
+
+    probe-timeout = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 30;
+      description = "Seconds `probe` waits for `git ls-remote` before treating origin as unreachable.";
     };
   };
 

@@ -149,6 +149,24 @@ allowlist: the allowlist governs which *origin* host is acceptable, not which
 protocol is. A repo may legitimately remain on GitHub; it may not legitimately use
 an unauthenticated transport.
 
+*A green result means scheme and host only* (conformist#98). The check never examines
+the repository PATH, so a remote left dangling by a forge rename
+(_git@code.linenisgreat.com:old-name.git_) satisfies both rules and still fails every
+push; repair cannot fix it either, since the remote is already SSH. To also check that
+*origin* exists, enable the opt-in probe:
+
+```
+linters.git-remotes.probe = true;
+```
+
+It runs _git ls-remote origin_ (bounded by *probe-timeout*, 30 seconds by default) and
+fails with _origin is unreachable_ when git cannot read the remote. A reachable remote
+with no refs yet passes. It checks *origin* only, uses the effective URL (so
+_url.<base>.insteadOf_ applies, unlike the transport rule), and is off by default
+because it needs the network and the operator's credentials. A whole-tree check's clean
+result may be cached (see conformist(7), walking and caching), so pass *--no-cache* when
+the probe must really run.
+
 # DEFAULT BRANCH
 
 The *git-default-branch* linter checks the repository's default branch against the

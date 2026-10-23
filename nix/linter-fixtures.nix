@@ -535,6 +535,11 @@ let
       # which is local machine policy rather than repo state and so cannot be
       # expressed through `remotes` above.
       gitConfig ? { },
+      # Shell run in the fixture repo BEFORE the remotes are added. Exists so a
+      # probe fixture can create the local bare repository a remote points at
+      # (conformist#98); local paths are exempt from the SSH rules, so the probe
+      # is exercised offline.
+      setup ? "",
     }:
     let
       mod = lib.evalModule pkgs {
@@ -638,6 +643,7 @@ let
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
         mkdir fixture && cd fixture
         git init -q
+        ${setup}
         ${addRemotes}
         ${setGitConfig}
 
@@ -647,6 +653,40 @@ let
       '';
 
   gitRemotesFixtures = [
+    # conformist#98: the check validates scheme and host, never whether the remote
+    # EXISTS, so a remote left dangling by a forge rename lints green. The opt-in
+    # `probe` runs `git ls-remote` against origin. Local paths are exempt from the
+    # SSH rules, so a missing path is a dead remote the rules cannot see, and a
+    # local bare repo is a live one, with no network.
+    #
+    # The default-off case documents the limit: with no probe, green means
+    # scheme+host only.
+    (mkGitRemotesFixture {
+      label = "check-dead-remote-without-probe-pass";
+      remotes.origin = "../missing.git";
+    })
+    (mkGitRemotesFixture {
+      label = "check-dead-remote-probe-fail";
+      enableModule.probe = true;
+      remotes.origin = "../missing.git";
+      expectFail = true;
+      expectToken = "origin is unreachable";
+    })
+    (mkGitRemotesFixture {
+      label = "check-live-remote-probe-pass";
+      enableModule.probe = true;
+      setup = "git init -q --bare ../live.git";
+      remotes.origin = "../live.git";
+    })
+    # An empty remote (no refs yet) is reachable, not dead: ls-remote without
+    # --exit-code exits 0 on it, and a fresh forge repo must not be flagged.
+    (mkGitRemotesFixture {
+      label = "check-empty-remote-probe-pass";
+      enableModule.probe = true;
+      setup = "git init -q --bare ../empty.git";
+      remotes.origin = "../empty.git";
+    })
+
     # Check, transport rule: a non-SSH remote is flagged regardless of host —
     # use the canonical forge host here so this is unambiguously a transport
     # failure, not a host failure (the host fixtures below cover that rule).
