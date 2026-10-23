@@ -302,6 +302,12 @@ to add is printed. Greenfield, the scaffold and _templates/eng_ ship a
 _conformist-impure.nix_ stub that _flake.nix_ imports; when an existing flake does
 not import it, the allowlist would have no effect and conform says so.
 
+Every repository importing the *eng* preset gains the *scdoc* linter (conformist#128)
+after its next conformist bump: each of its _\*.scd_ files is then compiled at check
+and commit time, so a repository with man-page sources can start failing on a syntax
+error the *manpages* build would have caught at merge. The templates' own _doc/_ pages
+are checked from the first run.
+
 The templates pin conformist from the master tarball
 (_https://code.linenisgreat.com/conformist/archive/master.tar.gz_), the pin most of
 the fleet uses. The *explore-template-eng*, *explore-template-eng-rust* and

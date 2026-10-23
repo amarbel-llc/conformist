@@ -1,6 +1,7 @@
 package format_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"code.linenisgreat.com/conformist/stats"
 	"code.linenisgreat.com/conformist/walk"
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
+	"github.com/charmbracelet/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,6 +49,51 @@ func TestCompositeLinterRepair(tt *testing.T) {
 	got, err := os.ReadFile(filepath.Join(root, "a.sh"))
 	as.NoError(err)
 	as.Equal("echo GOOD\n", string(got))
+}
+
+// TestRepairStderrVisibleAtDefaultLevel pins conformist#127: a repair-command's
+// stderr is a complaint (the codegen-repair lane's soft failure says why it
+// skipped) and must reach the operator at the DEFAULT log level, while its stdout
+// is narration and stays at debug. Before the fix both were fused and logged at
+// debug, so the warning never appeared in a pre-commit or pre-merge hook.
+func TestRepairStderrVisibleAtDefaultLevel(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+	root := t.TempDir()
+
+	var logged bytes.Buffer
+
+	prevLevel := log.GetLevel()
+
+	log.SetOutput(&logged)
+	log.SetLevel(log.WarnLevel) // the CLI's default, cmd/root.go
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+		log.SetLevel(prevLevel)
+	})
+
+	fix := writeFile(t, root, "fix.sh",
+		"#!/usr/bin/env bash\necho NARRATION-ON-STDOUT\necho COMPLAINT-ON-STDERR >&2\n", 0o755)
+
+	writeFile(t, root, "a.sh", "echo hi\n", 0o644)
+
+	statz := stats.New()
+
+	cfg := &config.Config{
+		TreeRoot:    root,
+		OnUnmatched: "info",
+		LinterConfigs: map[string]*config.Linter{
+			"stub": {Command: "true", Includes: []string{"*.sh"}, RepairCommand: fix},
+		},
+	}
+
+	linter, err := format.NewCompositeLinter(cfg, &statz)
+	as.NoError(err)
+
+	as.NoError(linter.Repair(context.Background(), []*walk.File{walkFile(t, root, "a.sh")}))
+
+	as.Contains(logged.String(), "COMPLAINT-ON-STDERR", "stderr must be visible at the default level")
+	as.NotContains(logged.String(), "NARRATION-ON-STDOUT", "stdout stays at debug")
 }
 
 // TestCompositeLinterEmptyWithoutRepair verifies that check-only linters are

@@ -108,14 +108,17 @@ func (l *Linter) RepairMustSucceed() bool {
 // an unfixable remainder), and failing every run on that would be worse than
 // letting the matching check report it. A linter whose repair exists to leave the
 // tree consistent opts in, and then the exit becomes ErrRepairFailed carrying the
-// command's output — which also makes the reason visible, since repair output is
-// otherwise logged below the default level.
+// command's output. Otherwise a repair's stdout is logged at debug and its stderr
+// at warn, so a complaint is visible at the default level (conformist#127).
 func (l *Linter) Repair(ctx context.Context, files []*walk.File) error {
 	if l.config.RepairCommand == "" {
 		return nil
 	}
 
-	nonzero, output, err := l.run(ctx, l.repairInv, l.config.RepairOptions, files)
+	// The streams are kept apart (conformist#127): stderr is the tool
+	// complaining, stdout is it narrating, and only the complaint should reach an
+	// operator running at the default level (a pre-commit or pre-merge hook).
+	nonzero, stdout, stderr, err := l.runStreams(ctx, l.repairInv, l.config.RepairOptions, files, true)
 	if err != nil {
 		return err
 	}
@@ -123,22 +126,51 @@ func (l *Linter) Repair(ctx context.Context, files []*walk.File) error {
 	if nonzero && l.RepairMustSucceed() {
 		return fmt.Errorf(
 			"%w: %s exited non-zero and this linter requires its repair to succeed: %s",
-			ErrRepairFailed, l.config.RepairCommand, strings.TrimSpace(output),
+			ErrRepairFailed, l.config.RepairCommand, strings.TrimSpace(stdout+stderr),
 		)
 	}
 
-	if output != "" {
-		l.log.Debug(output)
+	if stdout != "" {
+		l.log.Debug(stdout)
+	}
+
+	if stderr != "" {
+		l.log.Warn(strings.TrimRight(stderr, "\n"))
 	}
 
 	return nil
 }
 
+// run executes inv with stdout and stderr fused in the order written: the check
+// path, and every formatter-shaped consumer of linter output, depend on it.
 func (l *Linter) run(
 	ctx context.Context, inv invocation, options []string, files []*walk.File,
 ) (nonzero bool, output string, err error) {
+	nonzero, output, _, err = l.runStreams(ctx, inv, options, files, false)
+
+	return nonzero, output, err
+}
+
+// runStreams is run with an optional split of the two streams. With split false,
+// stderr is empty and output is the fused stream (identical to the pre-#127
+// behavior). With split true, output is stdout only and stderr is returned
+// separately, so a repair can surface a complaint without echoing narration
+// (conformist#127).
+func (l *Linter) runStreams(
+	ctx context.Context, inv invocation, options []string, files []*walk.File, split bool,
+) (nonzero bool, output, stderr string, err error) {
 	if len(files) == 0 {
-		return false, "", nil
+		return false, "", "", nil
+	}
+
+	invoke := func(args []string) (bool, string, string, error) {
+		if split {
+			return inv.runSplit(ctx, l.workingDir, args)
+		}
+
+		nz, out, runErr := inv.run(ctx, l.workingDir, args)
+
+		return nz, out, "", runErr
 	}
 
 	start := time.Now()
@@ -152,14 +184,14 @@ func (l *Linter) run(
 
 		// inv.run maps a non-zero exit to nonzero=true (findings) and reserves
 		// err for an operational failure (RFC 0001 §4).
-		nonzero, output, err = inv.run(ctx, l.workingDir, args)
+		nonzero, output, stderr, err = invoke(args)
 		if err != nil {
-			return false, output, err
+			return false, output, stderr, err
 		}
 
 		l.log.Infof("whole-tree check completed in %v", time.Since(start))
 
-		return nonzero, output, nil
+		return nonzero, output, stderr, nil
 	}
 
 	// A no-positional-arg-support tool (e.g. statix) takes exactly one file per
@@ -171,7 +203,7 @@ func (l *Linter) run(
 		maxBatch = 1
 	}
 
-	var combined strings.Builder
+	var combined, combinedStderr strings.Builder
 
 	for chunk := range slices.Chunk(files, maxBatch) {
 		args := append([]string{}, options...)
@@ -181,11 +213,12 @@ func (l *Linter) run(
 
 		l.log.Debugf("executing: %s %v", inv.raw, args)
 
-		chunkNonzero, out, runErr := inv.run(ctx, l.workingDir, args)
+		chunkNonzero, out, errOut, runErr := invoke(args)
 		combined.WriteString(out)
+		combinedStderr.WriteString(errOut)
 
 		if runErr != nil {
-			return false, combined.String(), runErr
+			return false, combined.String(), combinedStderr.String(), runErr
 		}
 
 		nonzero = nonzero || chunkNonzero
@@ -193,7 +226,7 @@ func (l *Linter) run(
 
 	l.log.Infof("%v file(s) checked in %v", len(files), time.Since(start))
 
-	return nonzero, combined.String(), nil
+	return nonzero, combined.String(), combinedStderr.String(), nil
 }
 
 // newLinter creates a Linter, resolving its check (and optional repair)

@@ -251,7 +251,9 @@ plus:
 	merge it gates must not proceed as though it had.
 
 	The repair command's output is included in the returned error, so the reason
-	is reported even though repair output is otherwise logged at debug level.
+	is reported. Otherwise a repair command's stdout is logged at debug level and its
+	stderr at warn level, so a complaint is visible at the default level
+	(conformist#127).
 	Ignored on a linter with no *repair-command*.
 
 # GLOB PATTERNS

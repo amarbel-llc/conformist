@@ -132,11 +132,10 @@ _repair-command_'s exit status, most repairs being best-effort. With it set, the
 non-zero exit becomes an operational failure carrying the command's output, so the
 run stops at exit 2 and reports why.
 
-A soft failure still exits 0, and today does so silently: repair output is logged
-at debug level, below the default, so a discovery failure is indistinguishable
-from a clean no-op until the drift check catches it at the merge gate. Surfacing
-it needs conformist to stop merging a tool's stdout and stderr, which is a
-conformist-wide change rather than a property of this linter.
+A soft failure still exits 0 but is no longer silent (conformist#127): a repair
+command's stderr, where this linter's warnings go, is logged at warn level, so a
+discovery failure is visible at the default level instead of looking like a clean
+no-op until the drift check catches it at the merge gate. Its stdout stays at debug.
 
 Because a *codegenPatch* rewrites, creates and deletes generated files, the
 linter opts into all three staging tiers (*restage-repair-outputs*,

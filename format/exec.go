@@ -99,49 +99,78 @@ func singleLiteralWord(f *syntax.File) (string, bool) {
 // nonzero=true when the command exited non-zero (findings, for a linter) and a
 // non-nil err only for an operational failure (failure to exec/parse).
 func (inv invocation) run(ctx context.Context, dir string, args []string) (nonzero bool, output string, err error) {
+	// One writer for both streams: the same *bytes.Buffer is recognized by
+	// os/exec as a single destination, so the tool's stdout and stderr keep the
+	// order it wrote them (what CombinedOutput gave). Every formatter and every
+	// linter's check path relies on that fused, ordered output.
+	var buf bytes.Buffer
+
+	nonzero, err = inv.exec(ctx, dir, args, &buf, &buf)
+
+	return nonzero, buf.String(), err
+}
+
+// runSplit is run with the two streams kept apart, for a caller that treats them
+// differently: a repair-command's stderr is a complaint to surface, its stdout is
+// narration to keep quiet (conformist#127). The streams are not ordered relative
+// to each other; use run when the interleaving matters.
+func (inv invocation) runSplit(
+	ctx context.Context, dir string, args []string,
+) (nonzero bool, stdout, stderr string, err error) {
+	var out, errOut bytes.Buffer
+
+	nonzero, err = inv.exec(ctx, dir, args, &out, &errOut)
+
+	return nonzero, out.String(), errOut.String(), err
+}
+
+// exec runs the invocation writing the tool's stdout and stderr to the given
+// writers. It is the one place a command is started, shared by run and runSplit.
+func (inv invocation) exec(
+	ctx context.Context, dir string, args []string, stdout, stderr io.Writer,
+) (nonzero bool, err error) {
 	if !inv.isShell() {
 		cmd := exec.CommandContext(ctx, inv.exe, args...) //nolint:gosec
 		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 		cmd.Dir = dir
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
 
-		out, runErr := cmd.CombinedOutput()
-		if runErr != nil {
+		if runErr := cmd.Run(); runErr != nil {
 			var exitErr *exec.ExitError
 			if errors.As(runErr, &exitErr) {
-				return true, string(out), nil
+				return true, nil
 			}
 
-			return false, string(out), fmt.Errorf("'%s' failed to execute: %w", inv.name, runErr)
+			return false, fmt.Errorf("'%s' failed to execute: %w", inv.name, runErr)
 		}
 
-		return false, string(out), nil
+		return false, nil
 	}
-
-	var buf bytes.Buffer
 
 	// "--" terminates option parsing so args are taken as positional parameters
 	// ($1, $2, …, "$@"), never misread as shell flags.
 	runner, newErr := interp.New(
 		interp.Dir(dir),
 		interp.Env(inv.env),
-		interp.StdIO(nil, &buf, &buf),
+		interp.StdIO(nil, stdout, stderr),
 		interp.Params(append([]string{"--"}, args...)...),
 		interp.ExecHandlers(ruleJQExecHandler),
 	)
 	if newErr != nil {
-		return false, "", fmt.Errorf("'%s' failed to start: %w", inv.name, newErr)
+		return false, fmt.Errorf("'%s' failed to start: %w", inv.name, newErr)
 	}
 
 	if runErr := runner.Run(ctx, inv.program); runErr != nil {
 		var status interp.ExitStatus
 		if errors.As(runErr, &status) {
-			return status != 0, buf.String(), nil
+			return status != 0, nil
 		}
 
-		return false, buf.String(), fmt.Errorf("'%s' failed to execute: %w", inv.name, runErr)
+		return false, fmt.Errorf("'%s' failed to execute: %w", inv.name, runErr)
 	}
 
-	return false, buf.String(), nil
+	return false, nil
 }
 
 // ruleJQExecHandler serves rulejq.Command in-process, so a profile rule

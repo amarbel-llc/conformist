@@ -141,20 +141,20 @@ Repairing by hand, failing loudly rather than warning:
 **Repair-only.** `conformist check` does not run this. The repo's own drift check
 reports staleness; this only fixes it.
 
-**A soft failure is silent.** When discovery fails — nix unreachable, offline, an
-eval error in an unrelated check — the lane warns and exits 0 by design, but that
-warning does not reach the operator. `format.Linter.Repair` logs a repair command's
-captured output at `Debug` while the default log level is `Warn`, so it needs `-vv`,
-which no git hook passes. A silent soft failure is therefore indistinguishable from
-"ran fine, nothing to do", and the staleness surfaces later at the merge gate.
+**A soft failure is visible only since conformist#127.** When discovery fails — nix
+unreachable, offline, an eval error in an unrelated check — the lane warns and exits
+0 by design. That warning used to be invisible: `format.Linter.Repair` logged a repair
+command's fused output at `Debug` while the default log level is `Warn`, so it needed
+`-vv`, which no git hook passes, and a soft failure was indistinguishable from "ran
+fine, nothing to do" until the merge gate's drift check caught the staleness.
 
-Making it visible is not a matter of raising the log level: `Debug` and `Info` are
-both below the default, and `Warn` would be wrong for a *successful* repair's
-ordinary chatter. The real fix is to stop fusing the streams — `format/exec.go` uses
-`CombinedOutput()`, so conformist cannot tell "the tool is narrating" from "the tool
-is complaining" — which means changing `invocation.run`, shared by every formatter
-and every linter's check path. That is a conformist-wide change with fleet-wide
-output consequences, so it is tracked separately rather than ridden in here.
+It is visible now because `Repair` keeps the repair command's streams apart
+(`invocation.runSplit`): stderr, where the lane's warnings go, is logged at `Warn`;
+stdout, a successful repair's ordinary chatter, stays at `Debug`. The change is
+confined to the repair path. `invocation.run`, shared by every formatter and every
+linter's check, still returns stdout and stderr fused in write order. The cost: any
+repair-command that writes progress to stderr (`cargo clippy --fix` does) now shows it
+at the default level.
 
 A repair FAILURE is not affected: it travels as an error carrying the command's
 output, so its reason is reported (see `repair-must-succeed` under Interface).
