@@ -246,9 +246,11 @@ directory and one more entry.
   root with one test, an example level-0 package _internal/0/buildinfo_ that
   _main.go_ uses, _packages.{default,manpages}_ and
   _checks.{formatting,tests,layout,manpage-names}_, a justfile whose *default* is
-  *build test lint*, an _AGENTS.md_ stub and a _CLAUDE.md_ symlink. *layout* runs
-  *dagnabit -n internal* (purse-first's, as the _purse-first_ flake input) and
-  fails when a package under _internal/<level>/_ sits at the wrong level;
+  *build test lint*, an _AGENTS.md_ stub and a _CLAUDE.md_ symlink. *layout* is
+  *conformist.lib.mkLayoutCheck* (conformist-nix(7) MODULE LIBRARY) with
+  purse-first's *dagnabit* (the _purse-first_ flake input) and fails when a package
+  under _internal/<level>/_ sits at the wrong level; *conform* does not yet detect
+  a Go repository and scaffold it, so only this template carries it;
   _doc/cli.1.scd_ is the binary's section-1 page, built by *scdoc* into
   _packages.manpages_, installed under the package's name by _packages.default_
   and checked by *manpage-names* (*doppelgang lint-man*, the _doppelgang_ input).

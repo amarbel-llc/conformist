@@ -138,12 +138,16 @@ func TestGoTemplateShipsLayoutAndManpageLanes(t *testing.T) {
 	flake := readTemplateFile(t, "eng-go", "flake.nix")
 	for _, want := range []string{
 		"purse-first.url", "doppelgang.url",
-		"codegenCheck", "dagnabit -n internal",
+		"conformist.lib.mkLayoutCheck", "purse-first.packages.${system}.dagnabit",
 		"doppelgang lint-man", "checks.layout", "checks.manpage-names",
 		"packages.manpages",
 	} {
 		require.Contains(t, flake, want, "templates/eng-go/flake.nix must wire %q", want)
 	}
+
+	// The layout command lives in conformist.lib.mkLayoutCheck (conformist#32),
+	// not as an inline copy per repo.
+	require.NotContains(t, flake, "dagnabit -n", "templates/eng-go/flake.nix must use mkLayoutCheck, not an inline copy")
 
 	// Both new inputs follow the template's own pins; none floats on its own.
 	for _, input := range []string{"purse-first", "doppelgang"} {

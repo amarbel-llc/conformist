@@ -185,18 +185,11 @@
         # its imports (`just lint-layout`; AGENTS.md, LAYOUT). A dry run that
         # fails on any would-move line: applying a move needs `git mv`, and the
         # rendered tree is not a git checkout. Move the package by hand to the
-        # level shown and fix the import paths.
-        checks.layout = app.passthru.codegenCheck {
-          command = ''
-            # Not `out`: that is the derivation's output path.
-            moves=$(dagnabit -n internal)
-            if [ -n "$moves" ]; then
-              echo "$moves"
-              echo "FAIL: dagnabit would move packages (above); move them by hand to the level shown." >&2
-              exit 1
-            fi
-          '';
-          nativeBuildInputs = [ purse-first.packages.${system}.dagnabit ];
+        # level shown and fix the import paths. conformist.lib.mkLayoutCheck takes
+        # dagnabit as a parameter (conformist cannot depend on purse-first).
+        checks.layout = conformist.lib.mkLayoutCheck {
+          inherit app;
+          dagnabit = purse-first.packages.${system}.dagnabit;
         };
 
         # Every installed page must satisfy the fleet NAME-line contract: the

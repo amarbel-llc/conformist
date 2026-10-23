@@ -41,6 +41,12 @@ let
   # single wrapper. See ./mk-toolchain-hooks.nix.
   mkToolchainHooks = import ./mk-toolchain-hooks.nix;
 
+  # The dagnabit package-layout check for a godyn module (conformist#32).
+  # `mkLayoutCheck { app; dagnabit; root ? "internal"; }`; dagnabit is a
+  # parameter so conformist stays upstream of purse-first. See
+  # ./mk-layout-check.nix.
+  mkLayoutCheck = import ./mk-layout-check.nix;
+
   # Remarshal-free config generators (conformist#60). nixpkgs'
   # `pkgs.formats.{toml,yaml}` serialize via `remarshal` (a Python tool) whose
   # build/test closure drags `matplotlib` -> `ffmpeg-headless` in as a BUILD-TIME
@@ -397,6 +403,7 @@ in
     writeCheckScript
     wrapWithToolchain
     mkToolchainHooks
+    mkLayoutCheck
     mkTomlFormat
     mkYamlFormat
     all-modules

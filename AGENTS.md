@@ -169,7 +169,7 @@ conformist ships a Nix module like treefmt-nix, extended to cover linters. It is
 
 - **The module library is documented in `conformist-nix(7)` MODULE LIBRARY**
   (`doc/conformist-nix.7.scd`): `evalModule`, `mkFormatterModule`/`mkLinterModule`,
-  `writeCheckScript`, `wrapWithToolchain`, `mkToolchainHooks`, the freeform
+  `writeCheckScript`, `wrapWithToolchain`, `mkToolchainHooks`, `mkLayoutCheck`, the freeform
   per-tool submodule, the remarshal-free `mkTomlFormat`/`mkYamlFormat`, and the
   `presets.{eng,eng-go,eng-impure}` rosters.
 - `nix/programs/` + `programs.nix` — the formatter registry.

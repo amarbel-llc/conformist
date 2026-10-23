@@ -470,6 +470,53 @@
                 touch $out
               '';
 
+            # Regression for mkLayoutCheck (conformist#32): a STUB app whose
+            # passthru.codegenCheck returns the generated command as an executable,
+            # run against STUB dagnabits. Proves the three behaviors that matter:
+            # no moves passes; a would-move line fails AND is shown; and the
+            # `root` argument reaches dagnabit (-n <root>). The stubs stand in for
+            # purse-first's dagnabit, which conformist must not depend on.
+            mk-layout-check =
+              let
+                stubApp = {
+                  passthru.codegenCheck =
+                    { command, nativeBuildInputs }:
+                    pkgs.writeShellApplication {
+                      name = "layout";
+                      runtimeInputs = nativeBuildInputs;
+                      text = command;
+                    };
+                };
+                layout =
+                  stub: args:
+                  conformistLib.mkLayoutCheck (
+                    {
+                      app = stubApp;
+                      dagnabit = pkgs.writeShellScriptBin "dagnabit" stub;
+                    }
+                    // args
+                  );
+                clean = layout ''echo "args: $*" >> "$LAYOUT_LOG"'' { };
+                moving = layout ''echo "internal/0/a -> internal/alfa/a"'' { };
+                custom = layout ''echo "args: $*" >> "$LAYOUT_LOG"'' { root = "pkg/internal"; };
+              in
+              pkgs.runCommand "conformist-mk-layout-check-test" { } ''
+                export LAYOUT_LOG=$PWD/log
+                ${clean}/bin/layout || { echo "mk-layout-check: no moves must pass" >&2; exit 1; }
+                grep -qx 'args: -n internal' log || { echo "mk-layout-check: default root not passed" >&2; cat log >&2; exit 1; }
+                ${custom}/bin/layout
+                grep -qx 'args: -n pkg/internal' log || { echo "mk-layout-check: custom root not passed" >&2; cat log >&2; exit 1; }
+                if got=$(${moving}/bin/layout 2>&1); then
+                  echo "mk-layout-check: a would-move line must fail the check" >&2
+                  exit 1
+                fi
+                case "$got" in
+                  *"internal/0/a -> internal/alfa/a"*) ;;
+                  *) echo "mk-layout-check: the move was not shown: $got" >&2; exit 1 ;;
+                esac
+                touch $out
+              '';
+
             # Regression for the toolchain wrapper helper (conformist#51): wrap a
             # STUB conformist (which fails unless a stub formatter is on PATH)
             # with that formatter as a `tools` entry, then exec the wrapper with a

@@ -190,6 +190,21 @@ _nix/default.nix_ is the pure library:
 	(conformist#59). See *conformist*(7) MODES for how a hook uses them and why a
 	bare binary skips file types whose formatter is off PATH.
 
+*mkLayoutCheck* (_nix/mk-layout-check.nix_)
+	*mkLayoutCheck { app; dagnabit; root ? "internal"; }* returns a flake check that
+	fails when a package under _<root>/<level>/<leaf>_ sits at a level other than the
+	one *dagnabit* computes from its imports (conformist#32). It is
+	_app.passthru.codegenCheck_ (godyn, godyn(7)) running *dagnabit -n <root>* against
+	the rendered module, a dry run that fails on any would-move line and prints it;
+	apply a move by hand with *git mv* and fix the imports. *dagnabit* is a PARAMETER,
+	never a flake input here: it ships from purse-first, which takes conformist as an
+	input, so conformist depending on it would be a cycle. The consumer passes
+	_purse-first.packages.${system}.dagnabit_. It runs on the rendered module because
+	a go.nix repository has no go.mod in its tree, so a conformist linter over the raw
+	tree could not run it. It does not see a package with no import edges at all.
+	_templates/eng-go_ wires it as _checks.layout_ (*just lint-layout*).
+	*conform* does not yet detect a Go repository and scaffold it.
+
 *module-options.nix*
 	Declares the settings surface and the
 	*build.{devShell,configFile,wrapper,preCommit,repair,programs,check}* outputs.
