@@ -1135,7 +1135,23 @@ debug-flakeclobber-regression ref="master" root=env_var_or_default("ENG_REPOS", 
 
 # --- verify ---
 
-verify: verify-linter-fixtures verify-no-remarshal verify-flakeedit-parse verify-flakeclobber-parse
+verify: verify-linter-fixtures verify-helper-checks verify-no-remarshal verify-flakeedit-parse verify-flakeclobber-parse
+
+# The regression checks for conformist.lib's helpers (flake.nix `checks`): each
+# runs a helper against stubs in the build sandbox, so a helper that stops
+# working fails here. They are hand-written entries in `checks`, not part of the
+# `linter-fixtures` aggregate, so before this recipe no lane built them and a
+# broken helper reached consumers unnoticed. Builds them by name, NOT a full
+# `nix flake check`.
+#
+# build the lib helper regression checks (writeCheckScript, wrapWithToolchain, mkToolchainHooks, mkLayoutCheck)
+verify-helper-checks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    for check in write-check-script wrap-with-toolchain mk-toolchain-hooks mk-layout-check; do
+      nix build ".#checks.${system}.${check}" --no-link --print-build-logs
+    done
 
 # Behavioral fixture tests for the nix/linters/ whole-tree checks: build the
 # `linter-fixtures` aggregate, which runs each compiled linter against pass/fail
