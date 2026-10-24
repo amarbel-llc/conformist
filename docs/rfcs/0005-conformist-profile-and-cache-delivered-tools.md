@@ -462,7 +462,8 @@ In scope:
 Explicitly out of scope for v1: papi hosting, layer walking (§3), delegation and
 signature verification (§3.1, §3.2 — the v1 profile is local and hand-written, so
 it has no baseline to delegate to), the edit lane (§6), and the `oci`/`drv`
-forms (§2).
+forms (§2). This list is the historical v1 record; part of it has since been
+built, and §7.1 says which parts.
 
 Deferring signatures does not weaken v1: it exercises the artifact pin, which is
 the mechanism every other part depends on, and it answers the ergonomics question
@@ -484,6 +485,25 @@ POC increment is therefore REQUIRED, not optional:
 This specification MUST NOT advance beyond `experimental` until v2 succeeds. A
 green v1 authorizes continued development; it does not authorize production
 adoption, because the benefit that justifies the design would still be untested.
+
+**Status of v2 (2026-10-24).** Items 1 and 2 are built; the success criterion
+is not met.
+
+- Built: `check --profile` accepts an https profile served at a PAPI domain's
+  `/papi/conformist-profile`, verifies its `conformist-profile-sig-v1`
+  signature, and requires the verifying key to be both pinned by the consumer
+  (`--profile-key`) and published on that domain's `/papi/piggy-ids` (§3.2). The
+  signed-input construction passes papi's RFC-0001 §15 conformance vector
+  (`profile/signature_vector_internal_test.go`); rotation across several pinned
+  keys, and refusal of a pinned-but-unpublished key, are covered by
+  `profile/signature_internal_test.go`.
+- Not built: delegation (§3.1) — a profile `-` line other than the signature is
+  rejected as unsupported — and layer walking (§3). The unproven property is
+  unchanged: changing a baseline once does not yet change what a consuming
+  repository runs with no edit to that repository, because a consumer names the
+  signed profile directly rather than delegating to it.
+- Consequence: this specification still MUST NOT advance beyond `experimental`
+  on the strength of v2 as it stands.
 
 Splitting it this way keeps the first gate small enough to answer the ergonomics
 question quickly, while making it impossible to reach production having only ever
