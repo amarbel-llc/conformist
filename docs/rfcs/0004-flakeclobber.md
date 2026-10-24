@@ -243,9 +243,10 @@ The sweep script handles ALL four parts of the migration:
 1. **Destructive (flakeclobber):** `pkgs.just` → `justPkg` in packages list.
 2. **Additive (conform or manual):** `just-us` input, `justPkg` let binding,
    `just-us` outputs arg — these need to be applied to repos at 3-of-4 names
-   before or after flakeclobber. Currently tracked as a gap: flakeedit refuses
-   3-of-4 repos entirely. The sweep operator must apply additive edits by hand
-   or via a separate tool until that gap is closed (conformist#100).
+   before or after flakeclobber. When this was written flakeedit refused 3-of-4
+   repos entirely, so the operator applied additive edits by hand or via a
+   separate tool. That gap was tracked as conformist#100 (closed); see
+   `conformist-conform(7)` for how partial wiring is handled today.
 
 **Finding the element span in the source.** Given `ListSplice{CloseOff, Inner}`:
 
@@ -301,8 +302,8 @@ file is not written and the exit is 1.
 | `no-devshell.nix` | eachDefaultSystem | no devShells.default packages list | error → exit 1 → file unchanged |
 | `no-just.nix` | eachDefaultSystem | neither pkgs.just nor justPkg in packages | N/A → exit 0 → file unchanged |
 
-Note: `verify-flakeclobber-parse` is not yet implemented. It is tracked as
-conformist#99.
+Note: `verify-flakeclobber-parse` was not implemented when this was written; it
+now exists as a recipe in the `verify` lane (conformist#99, closed).
 
 ### 6. Sweep Invocation
 

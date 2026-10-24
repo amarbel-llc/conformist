@@ -185,8 +185,9 @@ MUST run it **once**, not once per file. Its `includes`/`excludes` gate *whether
 it runs (it runs when at least one matched file is present in the walk) but its
 matched files are otherwise not passed to it. The check still runs with the tree
 root as its working directory and reports findings via a non-zero exit, exactly
-like a per-file linter. (Whole-tree checks are not yet incrementally cached — they
-run on every `check` invocation; see the follow-up tracked separately.)
+like a per-file linter. (Whole-tree checks are incrementally cached since
+conformist#16: `check` skips one when nothing it matches has changed; see
+`conformist(7)`, walking and caching.)
 
 The top-level `excludes` list expresses a **formatter** concern — "no tool may
 rewrite these files" (e.g. lockfiles, `go.mod`). For a **per-file** linter
@@ -417,16 +418,12 @@ includes = ["*.x"]
 
 ## Conformance Testing
 
-Conformance tests for this specification live in
-`docs/rfcs/../../zz-tests_bats/` (the conformist repository's `zz-tests_bats/`
-directory).
-
-Tests use binary injection via `bats-emo`:
-
-    require_bin CONFORMIST conformist
-
-This keeps the suite portable across implementations of this specification (for
-example, a future rewrite can run the same tests by injecting its own binary).
+The planned home for conformance tests was a `zz-tests_bats/` directory using
+binary injection via `bats-emo` (`require_bin CONFORMIST conformist`), so an
+alternative implementation could run the same suite. That directory does not
+exist: the behavior is covered by Go tests in `cmd/` and `format/`, run under
+`just test-go`. The table below names the bats files the plan intended; treat its
+"Test File" column as the intended suite layout, not as files in the tree.
 
 ### Covered Requirements
 
@@ -454,11 +451,11 @@ example, a future rewrite can run the same tests by injecting its own binary).
   older binaries. Operators who share a configuration across both tools SHOULD
   be aware that linters will simply not run under treefmt.
 - **Config discovery names.** This document specifies the `conformist` command and
-  the `[linter.<name>]` / `[formatter.<name>]` tables. The config file names
-  (`treefmt.toml` / `.treefmt.toml`), the `TREEFMT_`-prefixed environment
-  variables, and the `conformist`-vs-`treefmt` binary name are governed by a
-  separate user-facing rename and are out of scope here; until that rename lands,
-  the treefmt-era names apply.
+  the `[linter.<name>]` / `[formatter.<name>]` tables. The config file names and
+  environment variables are out of scope here. The rename has since landed:
+  `conformist.toml` / `.conformist.toml` are searched first, with
+  `treelint.toml` / `.treelint.toml` kept as a legacy fallback, and
+  `CONFORMIST_CONFIG` names the file explicitly (`cmd/root.go`, `loadConfig`).
 - **Versioning.** Backwards-incompatible changes to the `[linter.<name>]` schema
   or the `check` exit codes MUST be introduced under a superseding RFC.
 

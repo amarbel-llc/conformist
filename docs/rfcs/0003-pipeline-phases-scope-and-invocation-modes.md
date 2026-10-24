@@ -308,6 +308,10 @@ whole-tree-repair consumer. Findings:
   cannot take conformist as a flake input (conformist MUST stay strictly upstream
   of purse-first; no cycle). The stage-mutation tiers and §5 Option A are thus
   *ahead of their consumers*, which is why §5/§6 defer rather than block.
+  (As of 2026-10-24 this has moved on: purse-first's flake publishes
+  `lib.conformistLinters` and `lib.conformistModules`, which downstream repos
+  import into their own conformist evaluation. The paragraph above records the
+  state on 2026-06-29.)
 
 This validation is both config-level (the wiring matches the model) and
 end-to-end empirical. The §3 INV-1/INV-2 *behavior* is exercised by
