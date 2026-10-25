@@ -1880,6 +1880,10 @@ release new_version:
     git add version.env
     git commit -m "$header"
 
+    # Push the bump commit BEFORE the tag, so a blocked push strands nothing and
+    # the tag never points at a commit origin lacks (conformist#97).
+    git push origin master
+
     just tag "$msg"
 
     # fj release create is MUST; artifact upload is MAY.
