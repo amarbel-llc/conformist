@@ -367,7 +367,7 @@ conformist's CLI surface is specified for alternative implementations.
 | §3 INV-1 / INV-2, `--staged` | `TestStagedFormatsRepairOutputsBeforeRestaging` | a whole-tree repair writing unformatted, formatter-matched output, run under `--staged`, lands formatted in the index (conformist#70) |
 | §4 matrix, `--staged` stage ⊆ format | `cmd/staged_repair_test.go` (RFC-0002 tier suite) | repair outputs enter the index only per the tiers, and as formatted content |
 | §3 INV-1, `--commit` (Option A, §5) | *(to add)* | a whole-tree repair's formatter-matched output committed by `--commit <explicit path>` lands formatted |
-| §4 matrix, `check` runs no repair/stage | *(to add)* | `check` over a tree with a repair-capable linter mutates nothing |
+| §4 matrix, `check` runs no repair/stage | `TestCheckRunsNoRepairOrStage` (`cmd/check_no_repair_test.go`) | `check` over a tree with a repair-capable linter mutates nothing |
 | §6 partially-staged carve-out | *(to add)* | a whole-tree codegen-repair linter has the specified (Option A: no) effect on a purely partially-staged commit |
 
 ## Compatibility
