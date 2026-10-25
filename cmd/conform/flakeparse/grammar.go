@@ -55,6 +55,10 @@ func compileMatcher(entry string, grammar []byte) (langlang.Matcher, error) {
 		return nil, err
 	}
 
+	if err := assertMirroredRules(entry, grammar); err != nil {
+		return nil, err
+	}
+
 	cfg := langlang.NewConfig()
 	cfg.SetBool("grammar.handle_spaces", false)
 	loader := langlang.NewInMemoryImportLoader()
@@ -138,4 +142,90 @@ func assertNoShadowedRules(entry string, grammar []byte) error {
 			"prevent (conformist#106). Edit the rule in %s instead",
 		entry, len(shadowed), sharedEntry, strings.Join(shadowed, ", "), sharedEntry,
 	)
+}
+
+// mirroredRule names a rule an entrypoint must keep textually identical to one
+// in shared.peg. It exists for the one case assertNoShadowedRules cannot cover:
+// outputs.peg needs AtName to be a capture node of its own, which a rule that
+// merely forwards to Identifier would not give it, so the character class is
+// written out twice and nothing but this guard keeps the copies in step
+// (conformist#108).
+type mirroredRule struct {
+	entry  string
+	local  string
+	shared string
+}
+
+var mirroredRules = []mirroredRule{
+	{entry: outputsEntry, local: "AtName", shared: "Identifier"},
+}
+
+// assertMirroredRules refuses an entrypoint whose mirrored rule has drifted
+// from its shared.peg original, or has gone missing (a rename would otherwise
+// make the comparison pass vacuously).
+func assertMirroredRules(entry string, grammar []byte) error {
+	for _, m := range mirroredRules {
+		if m.entry != entry {
+			continue
+		}
+
+		local, ok := ruleBody(grammar, m.local)
+		if !ok {
+			return fmt.Errorf("grammar %s no longer defines %s, which must mirror %s's %s (conformist#108)",
+				entry, m.local, sharedEntry, m.shared)
+		}
+
+		shared, ok := ruleBody(sharedGrammar, m.shared)
+		if !ok {
+			return fmt.Errorf("%s no longer defines %s, which %s's %s must mirror (conformist#108)",
+				sharedEntry, m.shared, entry, m.local)
+		}
+
+		if local != shared {
+			return fmt.Errorf("%s's %s <- %s has drifted from %s's %s <- %s; "+
+				"the two copies must stay identical, so edit them together (conformist#108)",
+				entry, m.local, local, sharedEntry, m.shared, shared)
+		}
+	}
+
+	return nil
+}
+
+// ruleBody returns the named rule's body with layout collapsed to single
+// spaces, so a multi-line alternation compares equal to the same text on one
+// line. The second result is false when the grammar does not define the rule.
+func ruleBody(grammar []byte, name string) (string, bool) {
+	var (
+		body  []string
+		found bool
+	)
+
+	for line := range strings.SplitSeq(string(grammar), "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		if found {
+			// A continuation is indented and is not a comment; anything else
+			// (a definition, a blank line, a comment) ends the rule.
+			if trimmed == "" || strings.HasPrefix(trimmed, "//") || line[0] != ' ' && line[0] != '\t' {
+				break
+			}
+
+			body = append(body, trimmed)
+
+			continue
+		}
+
+		if m := ruleDefinition.FindStringSubmatch(line); m != nil && m[1] == name {
+			found = true
+
+			_, rest, _ := strings.Cut(line, "<-")
+			body = append(body, strings.TrimSpace(rest))
+		}
+	}
+
+	if !found {
+		return "", false
+	}
+
+	return strings.Join(strings.Fields(strings.Join(body, " ")), " "), true
 }
