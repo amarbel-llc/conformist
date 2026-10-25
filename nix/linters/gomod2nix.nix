@@ -127,7 +127,7 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       gomod2nix
-      git
+      gitMinimal # core subcommands only; full git's closure drags in python3 (#62)
     ];
     text = ''
       # cwd is the tree root.

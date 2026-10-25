@@ -45,7 +45,7 @@ let
   check = pkgs.writeShellApplication {
     name = "conformist-git-remotes";
     runtimeInputs = with pkgs; [
-      git
+      gitMinimal # core subcommands only; full git's closure drags in python3 (#62)
       gawk
       coreutils
       gnused
@@ -171,7 +171,7 @@ let
   repair = pkgs.writeShellApplication {
     name = "conformist-git-remotes-repair";
     runtimeInputs = with pkgs; [
-      git
+      gitMinimal # core subcommands only; full git's closure drags in python3 (#62)
       coreutils
     ];
     text = ''

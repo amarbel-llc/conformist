@@ -75,7 +75,7 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       findutils
-      git
+      gitMinimal # core subcommands only; full git's closure drags in python3 (#62)
     ];
     text = ''
       # cwd is the tree root; this whole-tree check takes no file arguments.
@@ -164,7 +164,7 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       findutils
-      git
+      gitMinimal # core subcommands only; full git's closure drags in python3 (#62)
     ];
     text = ''
       conflicts=0
