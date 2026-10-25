@@ -42,9 +42,20 @@ let
       # A named version let-binding in flake.nix (e.g. `moxyVersion = "0.4.10";`)
       # is deprecated; extract the value into version.env and read it via the
       # builtins.match pattern. grep prints the offending line(s) to stderr.
-      if [ -f flake.nix ] && grep -nE '[A-Za-z][A-Za-z0-9_]*[Vv]ersion[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' flake.nix >&2; then
-        echo "eng-versioning(7) Deprecated alternatives: a named version let-binding in flake.nix is deprecated; move the value into version.env and read it via the builtins.match pattern" >&2
-        fail=1
+      # Output is captured, not piped into `grep -q`: a pipeline ending in a
+      # grep that exits 1 by design would trip pipefail.
+      if [ -f flake.nix ]; then
+        hits=$(grep -nE '[A-Za-z][A-Za-z0-9_]*[Vv]ersion[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' flake.nix || true)
+        ${lib.optionalString (cfg.allowed-names != [ ]) ''
+          # allowed-names: a sanctioned secondary lineage. Whole names only — the
+          # character before the name must not continue an identifier.
+          hits=$(printf '%s\n' "$hits" | grep -vE '(^|[^A-Za-z0-9_])(${lib.concatStringsSep "|" cfg.allowed-names})[[:space:]]*=' || true)
+        ''}
+        if [ -n "$hits" ]; then
+          printf '%s\n' "$hits" >&2
+          echo "eng-versioning(7) Deprecated alternatives: a named version let-binding in flake.nix is deprecated; move the value into version.env and read it via the builtins.match pattern" >&2
+          fail=1
+        fi
       fi
 
       if [ "$fail" -ne 0 ]; then
@@ -57,6 +68,18 @@ in
 {
   options.linters.eng-versioning-deprecated-file = {
     enable = lib.mkEnableOption "the eng-versioning(7) deprecated version-source whole-tree check";
+    allowed-names = lib.mkOption {
+      description = ''
+        Names of flake.nix version let-bindings that are NOT flagged: a sanctioned
+        secondary version lineage, e.g. a polyglot repo that vendors an upstream
+        project whose own version is tracked in flake.nix (`moshVersion`).
+        Matched against the whole binding name, never a suffix. The repo's own
+        version still belongs in version.env.
+      '';
+      type = lib.types.listOf (lib.types.strMatching "[A-Za-z][A-Za-z0-9_]*");
+      default = [ ];
+      example = [ "moshVersion" ];
+    };
   };
 
   config = lib.mkIf cfg.enable {

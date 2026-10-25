@@ -224,7 +224,10 @@ itself. Each names the page that is normative for the rule it checks:
 *eng-versioning*, *eng-versioning-deprecated-file*
 	_version.env_ declares the canonical version, and neither a _version.txt_ nor a
 	_flake.nix_ named version variable may reappear. See *eng-versioning*(7),
-	"Deprecated alternatives".
+	"Deprecated alternatives". A sanctioned secondary lineage (a polyglot repo that
+	tracks a vendored project's own version in _flake.nix_) is exempted by whole
+	binding name with *linters.eng-versioning-deprecated-file.allowed-names*
+	(conformist#50).
 
 *flake-outputs*, *flake-lock*
 	FLAKE OUTPUTS and FLAKE HYGIENE above (conformist#9/#11).

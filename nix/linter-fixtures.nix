@@ -1534,6 +1534,73 @@ let
       expectToken = "doc/b.7.scd: Error at";
     })
 
+    # eng-versioning-deprecated-file: the two deprecated sources, and the
+    # allowed-names escape hatch for a sanctioned secondary version lineage in a
+    # polyglot repo (conformist#50). The allowlist matches a binding's WHOLE
+    # name: a partial match must not whitelist an unrelated variable.
+    (mkLinterFixtureCheck {
+      name = "eng-versioning-deprecated-file";
+      label = "clean-pass";
+      files."flake.nix" = "{ outputs = { ... }: { }; }\n";
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning-deprecated-file";
+      label = "version-txt-fail";
+      expectFail = true;
+      expectToken = "version.txt at the repo root is deprecated";
+      files."version.txt" = "1.2.3\n";
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning-deprecated-file";
+      label = "named-binding-fail";
+      expectFail = true;
+      expectToken = "moshVersion";
+      files."flake.nix" = ''
+        let
+          moshVersion = "1.4.0";
+        in
+        { }
+      '';
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning-deprecated-file";
+      label = "allowed-name-pass";
+      enableModule.allowed-names = [ "moshVersion" ];
+      files."flake.nix" = ''
+        let
+          moshVersion = "1.4.0";
+        in
+        { }
+      '';
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning-deprecated-file";
+      label = "allowed-name-other-binding-fail";
+      enableModule.allowed-names = [ "moshVersion" ];
+      expectFail = true;
+      expectToken = "fooVersion";
+      files."flake.nix" = ''
+        let
+          moshVersion = "1.4.0";
+          fooVersion = "2.0.0";
+        in
+        { }
+      '';
+    })
+    (mkLinterFixtureCheck {
+      name = "eng-versioning-deprecated-file";
+      label = "allowed-name-is-whole-name-fail";
+      enableModule.allowed-names = [ "shVersion" ];
+      expectFail = true;
+      expectToken = "moshVersion";
+      files."flake.nix" = ''
+        let
+          moshVersion = "1.4.0";
+        in
+        { }
+      '';
+    })
+
     # eng-versioning: key derivation across go.mod / Cargo.toml / explicit key,
     # plus the rejection paths (conformist#29).
     (mkLinterFixtureCheck {
