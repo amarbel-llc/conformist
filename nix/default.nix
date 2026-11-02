@@ -47,6 +47,12 @@ let
   # ./mk-layout-check.nix.
   mkLayoutCheck = import ./mk-layout-check.nix;
 
+  # The rendered-page manpage NAME-line check (conformist#114).
+  # `mkManpageNamesCheck pkgs { manpages; max ? 72; doppelgang ? <released>; }`
+  # runs `doppelgang lint-man` over `${manpages}/share/man`: the generated-page
+  # half of the profile's `manpage-names` linter. See ./mk-manpage-names-check.nix.
+  mkManpageNamesCheck = import ./mk-manpage-names-check.nix;
+
   # Remarshal-free config generators (conformist#60). nixpkgs'
   # `pkgs.formats.{toml,yaml}` serialize via `remarshal` (a Python tool) whose
   # build/test closure drags `matplotlib` -> `ffmpeg-headless` in as a BUILD-TIME
@@ -404,6 +410,7 @@ in
     wrapWithToolchain
     mkToolchainHooks
     mkLayoutCheck
+    mkManpageNamesCheck
     mkTomlFormat
     mkYamlFormat
     all-modules

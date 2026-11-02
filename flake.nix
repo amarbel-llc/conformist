@@ -486,6 +486,53 @@
                 "clang-format must declare config-files .clang-format and _clang-format (#49); got ${builtins.toJSON shipped}";
               pkgs.runCommand "conformist-clang-format-config-files-test" { } "touch $out";
 
+            # conformist's own rendered pages (the `manpages` derivation, which
+            # includes the gen-man section-1 reference) against the released
+            # doppelgang: the dogfood for mkManpageNamesCheck (conformist#114).
+            manpage-names = conformistLib.mkManpageNamesCheck pkgs { inherit manpages; };
+
+            # Regression for mkManpageNamesCheck (conformist#114): STUB doppelgangs
+            # prove the check passes on exit 0, fails on a non-zero exit, and hands
+            # lint-man the `--max` value and the `share/man` root of the pages.
+            mk-manpage-names-check =
+              let
+                fakePages = pkgs.runCommand "fake-pages" { } "mkdir -p $out/share/man/man1";
+                stub =
+                  body:
+                  pkgs.writeShellScriptBin "doppelgang" ''
+                    echo "args: $*" >> "$STUB_LOG"
+                    ${body}
+                  '';
+                check =
+                  body: args:
+                  conformistLib.mkManpageNamesCheck pkgs (
+                    {
+                      manpages = fakePages;
+                      doppelgang = stub body;
+                    }
+                    // args
+                  );
+                ok = check "exit 0" { };
+                bad = check "echo 'bad.1: NAME too long' >&2; exit 1" { max = 60; };
+              in
+              pkgs.runCommand "conformist-mk-manpage-names-check-test" { } ''
+                export STUB_LOG=$PWD/log
+                ${ok.script} || { echo "mk-manpage-names-check: exit 0 must pass" >&2; exit 1; }
+                grep -qx 'args: lint-man --max 72 ${fakePages}/share/man' log \
+                  || { echo "mk-manpage-names-check: default max/root not passed" >&2; cat log >&2; exit 1; }
+                if got=$(${bad.script} 2>&1); then
+                  echo "mk-manpage-names-check: a failing lint-man must fail the check" >&2
+                  exit 1
+                fi
+                case "$got" in
+                  *"bad.1: NAME too long"*) ;;
+                  *) echo "mk-manpage-names-check: the finding was not shown: $got" >&2; exit 1 ;;
+                esac
+                grep -qx 'args: lint-man --max 60 ${fakePages}/share/man' log \
+                  || { echo "mk-manpage-names-check: custom max not passed" >&2; cat log >&2; exit 1; }
+                touch $out
+              '';
+
             # Regression for mkLayoutCheck (conformist#32): a STUB app whose
             # passthru.codegenCheck returns the generated command as an executable,
             # run against STUB dagnabits. Proves the three behaviors that matter:

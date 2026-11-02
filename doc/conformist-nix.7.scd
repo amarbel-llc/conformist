@@ -204,6 +204,21 @@ _nix/default.nix_ is the pure library:
 	_templates/eng-go_ wires it as _checks.layout_ (*just lint-layout*).
 	*conform* does not yet detect a Go repository and scaffold it.
 
+*mkManpageNamesCheck* (_nix/mk-manpage-names-check.nix_)
+	*mkManpageNamesCheck pkgs { manpages; max ? 72; doppelgang ? <released>; }*
+	returns a flake check running *doppelgang lint-man --max* _max_ over
+	_${manpages}/share/man_, the BUILT pages (conformist#114). It is the
+	rendered-page half of the profile's *manpage-names* linter: that linter sees only
+	_.scd_ sources, and a profile cannot depend on a build output, so a repository
+	whose pages are generated (Go man-page codegen, one page per tool) uses this
+	instead. The NAME-line contract is spinclass FDR 0030: *name - description*,
+	non-empty, one physical line, at most 72 characters. *doppelgang* defaults to the
+	released static binary fetched as a fixed-output derivation
+	(_nix/doppelgang-static.nix_, the sha256 _conformist.profile_ pins), so conformist
+	takes no flake input on doppelgang; bump the two together. Only an x86_64-linux
+	asset is published (v0.2.0), so another system passes *doppelgang* itself. conformist wires it
+	over its own _manpages_ as _checks.manpage-names_.
+
 *module-options.nix*
 	Declares the settings surface and the
 	*build.{devShell,configFile,wrapper,preCommit,repair,programs,check}* outputs.

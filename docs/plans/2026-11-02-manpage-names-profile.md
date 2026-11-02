@@ -11,6 +11,14 @@ is the state before the release. Trap found while wiring: a profile command is
 always a shell line (the resolver appends a pin comment), so a `passes-files`
 stanza must write `"$@"` or the matched files are silently dropped.
 
+Rendered-page check (section 3): done as `lib.mkManpageNamesCheck`
+(`nix/mk-manpage-names-check.nix`), the fixed-output-derivation option. conformist
+runs it over its own `manpages` as `checks.<sys>.manpage-names`; the regression is
+`checks.<sys>.mk-manpage-names-check`. The Go template already carries a
+`manpage-names` check using a doppelgang flake input; the helper is the
+input-free form. aarch64-linux: v0.2.0 ships no such asset; doppelgang was asked whether a later
+release does.
+
 ## Why now
 
 eng's pre-merge gate ran `doppelgang lint-man` over the aggregated first-party
