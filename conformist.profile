@@ -41,6 +41,18 @@ executable = false
 url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.2/recipe-model-v1.jq"
 markl = "conformist-artifact-digest-v1@sha256-a4kk3vqnc76j7m4xhlp49ww7wl2ypyn74pa46jx2fakty5msd3fq0jp2xs"
 
+# doppelgang (v0.2.0), the manpage NAME-line linter (conformist#114): one static
+# build per system, published by `just deploy-release-assets` in doppelgang. The
+# url is the public vanity host (as for just-us above); releases are written via
+# the tailnet forge host, which a consumer never needs. x86_64-linux only until
+# an aarch64 static build exists (unverified for Go cross here).
+[artifact.doppelgang]
+form = "static"
+
+[artifact.doppelgang.system.x86_64-linux]
+url = "https://code.linenisgreat.com/doppelgang/releases/download/v0.2.0/doppelgang-static-x86_64-linux"
+markl = "conformist-artifact-digest-v1@sha256-ugjczsa32u958sy5dfs2t0h0882hz33nv0u59l2e3w3sj07gxyjqcfz7x6"
+
 # NOTE: the rule logic is NOT an artifact here. It is authored alongside this
 # profile, so it travels inline on the stanza below and inherits this document's
 # integrity — no second pin to keep correct. A data artifact remains the right
@@ -130,6 +142,19 @@ rule = '''
   | select((.doc_prelude | length) > 0)
   | "recipe '\(.namepath)' has comment lines above its doc comment; `just --list` shows ONLY the last comment line, so the rest is invisible and the description reads as a truncated fragment - separate the prose from the one-line summary with a bare `#` line (or a blank line), and make that summary a whole sentence fragment that stands alone (conformist-justfile(7) RECIPE DESCRIPTIONS)"
 '''
+
+# spinclass FDR 0030 renders each page's NAME line into the agent's system
+# prompt, so a NAME line must be `name - description`, non-empty, on one
+# physical line, at most 72 characters. Source level: every scdoc file. Rendered
+# pages (Go-codegen repos have no .scd for their long descriptions) are checked
+# by a build-output flake check instead, which a profile cannot express. Read
+# only; the fix is editorial. Like the scdoc linter, `*.scd` matches at any depth.
+[linter.manpage-names]
+# `"$@"` is required: the resolver appends the pins as a trailing comment line
+# (RFC 0005 §4.2), which makes every profile command a shell line, and a shell
+# line receives the matched files as positional parameters, not appended argv.
+command = 'doppelgang lint-man --max 72 "$@"'
+includes = ["*.scd"]
 
 # ---------------------------------------------------------------------------
 # WHAT WRITING THIS FILE SETTLED

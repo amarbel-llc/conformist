@@ -466,6 +466,64 @@ explore-profile-check:
     fi
     echo "OK: orphan-summary flagged the orphaned prelude, so doc_prelude is really read"
 
+    echo "--- manpage-names: a conformant NAME passes, an over-long one MUST be flagged ---"
+    # Both pages live in ONE scratch tree so a pass cannot come from the linter
+    # never running: the bad page must fail while the good page stays unflagged.
+    mkdir -p "$d/names/doc/nested"
+    : > "$d/names/conformist.toml"
+    printf 'good(1)\n\n# NAME\n\ngood - a short conformant description\n' > "$d/names/doc/nested/good.1.scd"
+    set +e
+    out=$(PATH="$d/bare-path" "$bin" check --config-file "$d/names/conformist.toml" \
+      --tree-root "$d/names" --walk filesystem --no-cache --profile "$PWD/conformist.profile" 2>&1)
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
+      printf 'CONTROL FAILED (exit %s): a conformant NAME was flagged\n%s\n' "$rc" "$out" >&2
+      exit 1
+    fi
+    long=$(printf 'x%.0s' $(seq 1 80))
+    printf 'bad(1)\n\n# NAME\n\nbad - %s\n' "$long" > "$d/names/doc/nested/bad.1.scd"
+    set +e
+    out=$(PATH="$d/bare-path" "$bin" check --config-file "$d/names/conformist.toml" \
+      --tree-root "$d/names" --walk filesystem --no-cache --profile "$PWD/conformist.profile" 2>&1)
+    rc=$?
+    set -e
+    if [ "$rc" -ne 1 ] || ! grep -q 'bad.1.scd' <<<"$out" || grep -q 'good.1.scd' <<<"$out"; then
+      printf 'CONTROL FAILED (exit %s): manpage-names did not flag exactly the over-long NAME\n%s\n' "$rc" "$out" >&2
+      exit 1
+    fi
+    echo "OK: manpage-names flagged the 80-char NAME (nested doc/) and left the good page alone"
+
+# Fetch a published doppelgang asset and check it is a static ELF that behaves
+# as the manpage-names linter needs: an ELF with no dynamic interpreter, exit 0
+# for a conformant .scd and non-zero for an over-long NAME (conformist#114). The
+# interpreter check greps for the loader path, a proxy for "no PT_INTERP".
+#
+# check a published doppelgang binary is static and lints NAME lines
+[group("explore")]
+explore-doppelgang-binary url="https://code.linenisgreat.com/doppelgang/releases/download/v0.2.0/doppelgang-static-x86_64-linux":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    curl -fsSL -o "$d/doppelgang" "{{ url }}"
+    chmod +x "$d/doppelgang"
+    magic=$(od -An -tx1 -N4 "$d/doppelgang" | tr -d ' \n')
+    [ "$magic" = 7f454c46 ] || { echo "not an ELF (magic $magic)" >&2; exit 1; }
+    if grep -qa '/lib64/ld-linux\|ld-linux-x86-64' "$d/doppelgang"; then
+      echo "dynamic loader path present: not static" >&2; exit 1
+    fi
+    if grep -qa '/nix/store/' "$d/doppelgang"; then
+      echo "WARNING: /nix/store path strings survive in the binary" >&2
+    fi
+    printf 'good(1)\n\n# NAME\n\ngood - a short conformant description\n' > "$d/good.1.scd"
+    printf 'bad(1)\n\n# NAME\n\nbad - %s\n' "$(printf 'x%.0s' $(seq 1 80))" > "$d/bad.1.scd"
+    "$d/doppelgang" lint-man --max 72 "$d/good.1.scd"
+    if "$d/doppelgang" lint-man --max 72 "$d/bad.1.scd"; then
+      echo "over-long NAME was NOT flagged" >&2; exit 1
+    fi
+    echo "OK: static ELF; good .scd passes, over-long NAME fails"
+
 # Smoke-test the eng template end-to-end: instantiate it into a temp dir, lock +
 # commit it, and run the sandboxed formatting check — the adopter's `nix flake
 # init -t .#eng` path (templates/eng/, #17). Fetches conformist from github, so

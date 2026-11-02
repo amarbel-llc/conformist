@@ -1,7 +1,15 @@
 # Plan: the manpage NAME-line lint in the conformist profile (conformist#114)
 
-Date: 2026-11-02. Status: plan only; the conformist side is blocked (see
-Blocker). Tracker: conformist#114.
+Date: 2026-11-02. Tracker: conformist#114.
+
+Update, same day: doppelgang v0.2.0 published `doppelgang-static-x86_64-linux`.
+`conformist.profile` now pins it and carries `[linter.manpage-names]`, with a
+pass/fail control in `just explore-profile-check` and `just
+explore-doppelgang-binary`. Remaining: re-sign and serve the profile (circus),
+the per-repo work below, and the rendered-page check. The Blocker section below
+is the state before the release. Trap found while wiring: a profile command is
+always a shell line (the resolver appends a pin comment), so a `passes-files`
+stanza must write `"$@"` or the matched files are silently dropped.
 
 ## Why now
 
