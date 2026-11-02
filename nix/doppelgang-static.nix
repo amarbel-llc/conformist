@@ -8,8 +8,8 @@ assert
 let
   asset = pkgs.fetchurl {
     name = "doppelgang-static-x86_64-linux";
-    url = "https://code.linenisgreat.com/doppelgang/releases/download/v0.2.0/doppelgang-static-x86_64-linux";
-    sha256 = "e2258143b1570b43c0946a60a5beef39d571463363f942fd598ba3093fc83124";
+    url = "https://code.linenisgreat.com/doppelgang/releases/download/v0.2.1/doppelgang-static-x86_64-linux";
+    sha256 = "f9b3b898d3d05527fcbf58f8b199e3eb4cebaf85c9eb87eb6cfbc0dcb8e01a73";
   };
 in
 pkgs.runCommand "doppelgang-static" { } ''

@@ -41,17 +41,21 @@ executable = false
 url = "https://code.linenisgreat.com/just-us/releases/download/v0.1.2/recipe-model-v1.jq"
 markl = "conformist-artifact-digest-v1@sha256-a4kk3vqnc76j7m4xhlp49ww7wl2ypyn74pa46jx2fakty5msd3fq0jp2xs"
 
-# doppelgang (v0.2.0), the manpage NAME-line linter (conformist#114): one static
+# doppelgang (v0.2.1), the manpage NAME-line linter (conformist#114): one static
 # build per system, published by `just deploy-release-assets` in doppelgang. The
 # url is the public vanity host (as for just-us above); releases are written via
-# the tailnet forge host, which a consumer never needs. x86_64-linux only until
-# an aarch64 static build exists (unverified for Go cross here).
+# the tailnet forge host, which a consumer never needs.
 [artifact.doppelgang]
 form = "static"
 
 [artifact.doppelgang.system.x86_64-linux]
-url = "https://code.linenisgreat.com/doppelgang/releases/download/v0.2.0/doppelgang-static-x86_64-linux"
-markl = "conformist-artifact-digest-v1@sha256-ugjczsa32u958sy5dfs2t0h0882hz33nv0u59l2e3w3sj07gxyjqcfz7x6"
+url = "https://code.linenisgreat.com/doppelgang/releases/download/v0.2.1/doppelgang-static-x86_64-linux"
+markl = "conformist-artifact-digest-v1@sha256-lxem3xxn6p2j0l9ltrutrx0radxwhtu9e84c06mvl0qdew8qrfes2z2t3q"
+
+# Cross-built (CGO off); not run on an ARM host by its publisher or by us.
+[artifact.doppelgang.system.aarch64-linux]
+url = "https://code.linenisgreat.com/doppelgang/releases/download/v0.2.1/doppelgang-static-aarch64-linux"
+markl = "conformist-artifact-digest-v1@sha256-gcr5jzzdshd43tzmz72x98c9pd2pyw8ckf2vtaa8nuevgm89z3jsu9n6tj"
 
 # NOTE: the rule logic is NOT an artifact here. It is authored alongside this
 # profile, so it travels inline on the stanza below and inherits this document's
