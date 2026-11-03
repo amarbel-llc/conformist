@@ -1746,6 +1746,150 @@ let
       expectToken = "flake.lock missing";
     })
 
+    # flake-first-party-inputs (conformist#150): R1 forms in flake.nix, R2 lock.
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "forge-pass";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "https://code.linenisgreat.com/x/archive/master.tar.gz";
+            inputs.nixpkgs.url = "github:NixOS/nixpkgs";
+            outputs = { ... }: { };
+          }
+        '';
+        "flake.lock" =
+          ''{"nodes":{"root":{"inputs":{"nixpkgs":"nixpkgs"}},"nixpkgs":{"original":{"type":"github","owner":"NixOS","repo":"nixpkgs"}}},"root":"root","version":7}'';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "planted-github-fail";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:amarbel-llc/x";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "input 'x' is first-party";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "canonical-url-in-message";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:amarbel-llc/x/v1";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "https://code.linenisgreat.com/x/archive/v1.tar.gz";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "https-form-fail";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs = {
+              y = {
+                url = "git+https://github.com/linenisgreat/y";
+              };
+            };
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "input 'y' is first-party";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "ssh-form-fail";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.z.url = "git+ssh://git@github.com/friedenberg/z";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "input 'z' is first-party";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "archive-form-fail";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.w.url = "https://github.com/amarbel-llc/w/archive/master.tar.gz";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "input 'w' is first-party";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "lock-direct-fail";
+      files = {
+        "flake.nix" = "{ outputs = { ... }: { }; }\n";
+        "flake.lock" =
+          ''{"nodes":{"root":{"inputs":{"x":"x"}},"x":{"original":{"type":"github","owner":"amarbel-llc","repo":"x"}}},"root":"root","version":7}'';
+      };
+      expectFail = true;
+      expectToken = "flake.lock: input 'x' is first-party";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "lock-transitive-warn";
+      files = {
+        "flake.nix" = "{ outputs = { ... }: { }; }\n";
+        "flake.lock" =
+          ''{"nodes":{"root":{"inputs":{"a":"a"}},"a":{"inputs":{"t":"t"},"original":{"type":"tarball","url":"https://code.linenisgreat.com/a/archive/master.tar.gz"}},"t":{"original":{"type":"github","owner":"amarbel-llc","repo":"t"}}},"root":"root","version":7}'';
+      };
+      expectToken = "transitive first-party GitHub input t reached via direct input 'a'";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "exempt-input-warns";
+      enableModule = {
+        exempt-inputs = [ "x" ];
+      };
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:amarbel-llc/x";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectToken = "warning:";
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "warn-only-warns";
+      enableModule = {
+        warn-only = true;
+      };
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:amarbel-llc/x";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectToken = "warning:";
+    })
+
   ];
 
   # ---- go.nix modules (igloo FDR 0008): no go.mod in the tree -------------

@@ -55,6 +55,26 @@ Enforced by the *flake-outputs* linter (conformist#9), which reads the declared
 inputs from _flake.lock_ and fails when the _outputs_ formal is a closed set
 that omits one.
 
+# FIRST-PARTY FLAKE INPUTS
+
+A flake input whose owner is first-party (_amarbel-llc_, _linenisgreat_,
+_friedenberg_) MUST be fetched from the forge, as
+_https://code.linenisgreat.com/<repo>/archive/<ref>.tar.gz_, not from GitHub.
+*nix flake update* makes one api.github.com call per floating _github:_ input,
+and GitHub's rate limit has halted the fleet's update cascade.
+
+The forbidden spellings are _github:O/R_, _git+https://github.com/O/R_, a
+_git+ssh_ or _ssh_ URL for the _git_ user on github.com, and a
+_github.com/O/R/archive/..._ tarball.
+
+Enforced by the *flake-first-party-inputs* linter (conformist#150). It scans
+_flake.nix_ for the declared URL (an error naming the input and the canonical
+URL) and _flake.lock_ for every node's _original_: a direct input is an error, a
+transitive first-party GitHub node is a warning reported against the direct input
+that brought it in. *exempt-inputs* downgrades named direct inputs to warnings and
+*warn-only* downgrades the whole check, for a repo whose migration is ruled to
+wait. The linter is not in the *eng* preset, so enabling it is a per-repo choice.
+
 # GO MODULE LOCK
 
 A repo that builds with *gomod2nix* MUST keep _gomod2nix.toml_ in sync with
@@ -246,6 +266,9 @@ itself. Each names the page that is normative for the rule it checks:
 
 *flake-outputs*, *flake-lock*
 	FLAKE OUTPUTS and FLAKE HYGIENE above (conformist#9/#11).
+
+*flake-first-party-inputs*
+	FIRST-PARTY FLAKE INPUTS above (conformist#150). Opt-in; not in a preset.
 
 *git-merge-drivers*, *git-remotes*, *git-default-branch*
 	*conformist-git*(7) MERGE DRIVERS, REMOTES and DEFAULT BRANCH
