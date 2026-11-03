@@ -41,11 +41,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790898470,
-        "narHash": "sha256-zTwuwezD0w3hpga6a6P8emidzAZFyWqlNeRBlpWOOl8=",
+        "lastModified": 1793576659,
+        "narHash": "sha256-V1h85lUaJBQoHFrB2vpXZOE0Ju1MYSnIpsehoVZYlDo=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "024633cd702b10285db5cb19b40ad48d2399ba60",
+        "rev": "ea2630b7470978622c7689a1ff75d2b389175399",
         "type": "github"
       },
       "original": {
@@ -65,11 +65,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1793030390,
-        "narHash": "sha256-Yg7qep1TjWlRiKFk0JwC53bVKfQJSyG0Alb9RvmCWrI=",
-        "rev": "e156e3922bf1d0e76586530eea15ff4042fa8fed",
+        "lastModified": 1793673406,
+        "narHash": "sha256-SDLEP2x7YxJfIjw9DmciSnuD577hCuDJWHW9UO8fSjk=",
+        "rev": "e7b88901e960f9bf29d0d84024c3bbc8591e7058",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/igloo/archive/e156e3922bf1d0e76586530eea15ff4042fa8fed.tar.gz"
+        "url": "https://code.linenisgreat.com/igloo/archive/e7b88901e960f9bf29d0d84024c3bbc8591e7058.tar.gz"
       },
       "original": {
         "type": "tarball",
