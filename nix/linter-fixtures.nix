@@ -1873,6 +1873,56 @@ let
       };
       expectToken = "warning:";
     })
+    # The default owners come from the signed profile (conformist.profile),
+    # not a literal in the module: the last profile owner must be enforced.
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "profile-owner-fail";
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:friedenberg/x";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "input 'x' is first-party";
+    })
+    # A repo override replaces the profile list: amarbel-llc stops being
+    # first-party here (positive control for the next case).
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "owners-override-pass";
+      enableModule = {
+        owners = [ "acme" ];
+      };
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:amarbel-llc/x";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+    })
+    (mkLinterFixtureCheck {
+      name = "flake-first-party-inputs";
+      label = "owners-override-fail";
+      enableModule = {
+        owners = [ "acme" ];
+      };
+      files = {
+        "flake.nix" = ''
+          {
+            inputs.x.url = "github:acme/x";
+            outputs = { ... }: { };
+          }
+        '';
+      };
+      expectFail = true;
+      expectToken = "input 'x' is first-party";
+    })
     (mkLinterFixtureCheck {
       name = "flake-first-party-inputs";
       label = "warn-only-warns";

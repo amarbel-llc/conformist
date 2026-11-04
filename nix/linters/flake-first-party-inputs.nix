@@ -28,6 +28,22 @@
 let
   cfg = config.linters.flake-first-party-inputs;
 
+  # The first-party owners, burned into the signed profile (conformist.profile,
+  # [prelude.first-party-owners]) and read here at eval time: a pure read of a
+  # committed file, so the sandboxed check stays offline. Matches the prelude's
+  # one-line `def`; a profile edit that breaks the shape fails eval loudly.
+  profileOwners =
+    let
+      def = builtins.split "def first_party_owners: ([^;]*);" (
+        builtins.readFile ../../conformist.profile
+      );
+      quoted = builtins.split "\"([^\"]*)\"" (builtins.elemAt (builtins.elemAt def 1) 0);
+    in
+    if builtins.length def != 3 then
+      throw "flake-first-party-inputs: conformist.profile has no one-line `def first_party_owners: [...]` prelude"
+    else
+      map (m: builtins.elemAt m 0) (builtins.filter builtins.isList quoted);
+
   check = pkgs.writeShellApplication {
     name = "conformist-flake-first-party-inputs";
     runtimeInputs = with pkgs; [
@@ -138,12 +154,9 @@ in
 
     owners = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [
-        "amarbel-llc"
-        "linenisgreat"
-        "friedenberg"
-      ];
-      description = "GitHub owners whose repos are first-party; their inputs must come from the forge.";
+      default = profileOwners;
+      defaultText = lib.literalMD "the `first_party_owners` prelude of `conformist.profile`";
+      description = "GitHub owners whose repos are first-party; their inputs must come from the forge. Defaults to the list signed into the conformist profile; set it to override per repo.";
     };
 
     forge-url = lib.mkOption {

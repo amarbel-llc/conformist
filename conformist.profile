@@ -100,6 +100,20 @@ rule = '''
   def verb: .name | split("-") | .[0];
 '''
 
+# The GitHub owners whose repos are first-party (conformist#150): their flake
+# inputs must be fetched from the forge. Burned in here so the list is signed
+# with the profile. The `flake-first-party-inputs` Nix linter reads it from this
+# file at eval time (nix/linters/flake-first-party-inputs.nix), so the sandboxed
+# check stays offline; no profile linter lists this prelude yet. It stays a
+# prelude, one `def` on ONE line, because that needs no new profile field (an
+# older resolver rejects any field it predates) and the Nix reader matches that
+# exact line. Edit it only through a release.
+[prelude.first-party-owners]
+rule-tool = "jq"
+rule = '''
+  def first_party_owners: ["amarbel-llc", "linenisgreat", "friedenberg"];
+'''
+
 # ---------------------------------------------------------------------------
 # LINTERS
 # ---------------------------------------------------------------------------

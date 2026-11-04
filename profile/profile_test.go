@@ -11,6 +11,7 @@ import (
 
 	"code.linenisgreat.com/conformist/profile"
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
+	"github.com/itchyny/gojq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -109,6 +110,37 @@ func TestParseCommittedProfile(t *testing.T) {
 
 	_, err = profile.Parse("conformist.profile", data)
 	require.NoError(t, err)
+}
+
+// TestCommittedProfileFirstPartyOwners pins the owners list the Nix linter
+// flake-first-party-inputs reads out of conformist.profile (conformist#150). The
+// prelude must evaluate to the expected list, and sit on the ONE line the Nix
+// reader matches.
+func TestCommittedProfileFirstPartyOwners(t *testing.T) {
+	as := require.New(t)
+
+	data, err := os.ReadFile(filepath.Join("..", "conformist.profile"))
+	as.NoError(err)
+
+	doc, err := profile.Parse("conformist.profile", data)
+	as.NoError(err)
+
+	prelude, ok := doc.Preludes["first-party-owners"]
+	as.True(ok, "profile must carry [prelude.first-party-owners]")
+	as.Equal("jq", prelude.RuleTool)
+
+	query, err := gojq.Parse(prelude.Rule + "\nfirst_party_owners")
+	as.NoError(err)
+
+	code, err := gojq.Compile(query)
+	as.NoError(err)
+
+	got, ok := code.Run(nil).Next()
+	as.True(ok)
+	as.Equal([]any{"amarbel-llc", "linenisgreat", "friedenberg"}, got)
+
+	as.Contains(string(data), `def first_party_owners: ["amarbel-llc", "linenisgreat", "friedenberg"];`,
+		"the Nix linter matches this exact one-line def")
 }
 
 func TestParseRejections(t *testing.T) {

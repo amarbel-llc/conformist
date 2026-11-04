@@ -71,7 +71,10 @@ Enforced by the *flake-first-party-inputs* linter (conformist#150). It scans
 _flake.nix_ for the declared URL (an error naming the input and the canonical
 URL) and _flake.lock_ for every node's _original_: a direct input is an error, a
 transitive first-party GitHub node is a warning reported against the direct input
-that brought it in. *exempt-inputs* downgrades named direct inputs to warnings and
+that brought it in. The owner list is the *owners* option, defaulting to the
+list burned into _conformist.profile_ (its _first-party-owners_ prelude, signed
+with the profile) and read at eval time, so the check stays offline; setting
+*owners* replaces it for a repo. *exempt-inputs* downgrades named direct inputs to warnings and
 *warn-only* downgrades the whole check, for a repo whose migration is ruled to
 wait. The linter is not in the *eng* preset, so enabling it is a per-repo choice.
 
