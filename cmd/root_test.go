@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/conformist/stats"
 	"code.linenisgreat.com/conformist/test"
 	"code.linenisgreat.com/conformist/walk"
+	"code.linenisgreat.com/conformist/walk/cache"
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/test_ui"
 	"github.com/charmbracelet/log"
 	cp "github.com/otiai10/copy"
@@ -2661,6 +2662,9 @@ func TestConcurrentInvocation(tt *testing.T) {
 	configPath := filepath.Join(tempDir, "/conformist.toml")
 
 	test.ChangeWorkDir(t, tempDir)
+
+	// the production default waits much longer (conformist#153)
+	t.Setenv(cache.OpenTimeoutEnv, "1s")
 
 	cfg := &config.Config{
 		FormatterConfigs: map[string]*config.Formatter{

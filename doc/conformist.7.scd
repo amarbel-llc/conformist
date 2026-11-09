@@ -143,6 +143,15 @@ the sequence of tools applied to it — and skips files whose signature is
 unchanged since the previous run. The cache is bypassed in check mode and by
 the *--no-cache* and *--clear-cache* flags.
 
+The cache is one database file per tree root, locked exclusively by the
+process using it for its whole run. A second conformist over the same tree
+root waits for the lock, 60 seconds by default; set
+*CONFORMIST_CACHE_OPEN_TIMEOUT* (a Go duration such as _120s_) to change that.
+If the wait runs out, repair and format runs fail with a nonzero exit and a
+"failed to open cache" error rather than continuing with a partial result;
+*conformist check*, which never writes the tree, logs a warning and runs
+uncached.
+
 # TREE ROOT AND SCOPE
 
 Every path conformist matches is relative to the *tree root*. That root is

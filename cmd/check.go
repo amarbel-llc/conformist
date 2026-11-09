@@ -156,7 +156,11 @@ func runCheck(v *viper.Viper, statz *stats.Stats, cmd *cobra.Command, paths []st
 
 	if !cfg.NoCache {
 		opened, openErr := cache.Open(cfg.TreeRoot)
-		if openErr != nil {
+		if errors.Is(openErr, cache.ErrBusy) {
+			// contention is not "no cache dir": say so, but a read-only check
+			// can safely run uncached (conformist#153)
+			log.Warnf("whole-tree check caching disabled: %v", openErr)
+		} else if openErr != nil {
 			log.Debugf("whole-tree check caching disabled (cache unavailable): %v", openErr)
 		} else {
 			db = opened

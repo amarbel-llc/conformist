@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/adrg/xdg"
 	bolt "go.etcd.io/bbolt"
@@ -52,9 +51,9 @@ func Open(root string) (*bolt.DB, error) {
 	}
 
 	// open db
-	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 1 * time.Second})
+	db, err := openDB(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open cache db at %s: %w", path, err)
+		return nil, err
 	}
 
 	// ensure buckets exist
