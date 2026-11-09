@@ -7,6 +7,7 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+	berrors "go.etcd.io/bbolt/errors"
 )
 
 // OpenTimeoutEnv overrides how long Open waits for another process to release
@@ -46,7 +47,7 @@ func openDB(path string) (*bolt.DB, error) {
 
 	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: timeout})
 	if err != nil {
-		if errors.Is(err, bolt.ErrTimeout) {
+		if errors.Is(err, berrors.ErrTimeout) {
 			return nil, fmt.Errorf(
 				"failed to open cache db at %s after waiting %s: %w (%w); set %s to wait longer",
 				path, timeout, ErrBusy, err, OpenTimeoutEnv,
