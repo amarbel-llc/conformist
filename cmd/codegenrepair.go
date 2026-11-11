@@ -31,12 +31,15 @@ func newCodegenRepairCmd() *cobra.Command {
 			"(from PATH, so the host's store and eval cache are used) and git. It is also " +
 			"repair-only — the drift check that carries the passthru stays the gate, and " +
 			"`conformist check` does not run this.\n\n" +
-			"Discovery and per-check build failures, and running outside a git worktree (nothing " +
+			"A discovery failure, and running outside a git worktree (nothing " +
 			"to apply a patch to), WARN and exit 0, because this runs in a git " +
 			"pre-commit hook where a non-zero exit blocks the commit and an unreachable nix must " +
 			"not block a whole repo; the drift check still catches any staleness that results. A " +
-			"patch that was built but will not apply exits 2 — it was generated from this very " +
-			"tree, so a refusal is a real inconsistency. --strict makes the warnings fatal too.",
+			"check whose patch will not build (discovery having succeeded) exits 2 naming the " +
+			"check, after the other checks are repaired, since its generated files are known " +
+			"stale. A patch that was built but will not apply also exits 2 — it was generated " +
+			"from this very tree, so a refusal is a real inconsistency. --strict makes the " +
+			"remaining warnings fatal too.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true

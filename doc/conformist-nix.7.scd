@@ -139,15 +139,19 @@ a null prefix the tree root is the only candidate, so the patch is applied there
 when its paths resolve and REFUSED otherwise, rather than written at a prefix
 nobody confirmed.
 
-Discovery and per-check build failures WARN and exit 0, because the lane runs in
+A discovery failure WARNs and exits 0, because the lane runs in
 a git pre-commit hook where a non-zero exit blocks the commit: an unreachable
 _nix_ must not stop a repo from committing, and the drift check still catches
 whatever staleness results. Running outside a git worktree (a _nix_ sandbox, for
 instance) is the same kind of no-op as a missing _flake.nix_: there is no tree to
-apply a patch to, so it too warns and exits 0 (conformist#132). A patch that was
-built but will not APPLY exits 2 ---
+apply a patch to, so it too warns and exits 0 (conformist#132). A check whose
+patch will not BUILD, with discovery having succeeded, exits 2 naming the check
+(conformist#153): _nix_ is reachable, so that lane's generated files are known to
+be stale, and exiting 0 would let *--staged* restage the other lanes' output and
+commit a half-repaired tree. The remaining checks are still repaired first. A
+patch that was built but will not APPLY also exits 2 ---
 it was generated from this very tree, so a refusal is a real inconsistency. The
-*strict* option promotes the warnings.
+*strict* option promotes the remaining warnings.
 
 A FAILURE blocks the commit or merge it gates, because the linter sets
 *repair-must-succeed* (see *conformist.toml*(5)): conformist otherwise discards a

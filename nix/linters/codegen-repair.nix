@@ -20,8 +20,8 @@
 # and a repo whose checks carry no codegenPatch gets a no-op. The only host
 # requirements are nix and git.
 #
-# FAIL-SOFT. `conformist codegen-repair` warns and exits 0 when discovery or a
-# per-check build fails, or when there is no git worktree (conformist#132), because this runs in a git pre-commit hook where a
+# FAIL-SOFT ON DISCOVERY. `conformist codegen-repair` warns and exits 0 when discovery
+# fails, or when there is no git worktree (conformist#132), because this runs in a git pre-commit hook where a
 # non-zero exit blocks the commit — an unreachable nix must not stop a repo from
 # committing, and the drift check still catches whatever staleness results. Set
 # `strict = true` for a lane that would rather stop.
@@ -104,15 +104,18 @@ in
       type = lib.types.bool;
       default = false;
       description = ''
-        Fail the repair when discovery or a per-check patch build fails, or when
+        Fail the repair when discovery fails, or when
         it runs outside a git worktree, instead of warning and proceeding. The default is lenient because this lane runs
         inside a git pre-commit hook, where a non-zero exit blocks the commit and
         an unreachable nix would block every commit in the repo; the drift check
         still catches any staleness that results. Turn it on for a lane that would
         rather stop than let a possibly-stale output through.
 
-        A patch that was BUILT but will not apply fails the repair either way — it
-        was generated from this very tree, so a refusal is a real inconsistency.
+        A check whose patch cannot be BUILT (with discovery working) also fails
+        the repair either way, naming the check, so a half-repaired tree is never
+        restaged (conformist#153). So does a patch that was BUILT but will not
+        apply — it was generated from this very tree, so a refusal is a real
+        inconsistency.
         Both that refusal and this option reach the caller because the linter sets
         `repair-must-succeed` (below), without which conformist discards a
         repair-command's exit status entirely.

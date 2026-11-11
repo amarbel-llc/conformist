@@ -35,12 +35,16 @@
 // FAIL-SOFT ON DISCOVERY, FAIL-LOUD ON APPLY. This runs inside a git pre-commit
 // hook, where a non-zero exit blocks the commit. A flaky or unavailable nix (no
 // flake, offline, an eval error in an unrelated check) must therefore NOT block
-// every commit in the repo: discovery and per-check build failures, and a run with
-// no git worktree to apply to (conformist#132), warn and return success, leaving the drift check to catch any resulting staleness. A patch that
-// was built but will not APPLY is different — the contract says it was generated
-// from this very tree, so a refusal means something is genuinely inconsistent —
-// and that exits non-zero. `--strict` promotes the soft failures to hard ones for
-// a gate that would rather stop than proceed uncertain.
+// every commit in the repo: a discovery failure, and a run with no git worktree
+// to apply to (conformist#132), warn and return success, leaving the drift check
+// to catch any resulting staleness. A check whose patch will not BUILD, though,
+// is a known-stale lane with nix reachable (conformist#153): the other checks are
+// still repaired, then the run exits non-zero naming the lane, so --staged cannot
+// restage a partial result. A patch that was built but will not APPLY is likewise
+// genuinely inconsistent — the contract says it was generated from this very tree
+// — and exits non-zero. `--strict` promotes the remaining soft failures
+// (discovery, no worktree) to hard ones for a gate that would rather stop than
+// proceed uncertain.
 //
 // THE FAILURE REACHES THE CALLER ONLY BECAUSE THE LINTER OPTS IN. conformist
 // discards a `repair-command`'s exit status by default — most repairs are
@@ -599,19 +603,21 @@ func (s *session) pass(ctx context.Context, checks []Check) (bool, error) {
 	return false, nil
 }
 
-// giveUp records a check this run will not repair and says so. It is a warning
-// rather than a failure for the same reason discovery fails soft: the drift check
-// is the gate, and a commit hook that stops the world over one unbuildable check
-// is worse than one that lets the gate catch it.
+// giveUp records a check this run will not repair and says so. The other checks
+// are still attempted, but result() fails the run naming every lane given up on
+// (conformist#153): discovery succeeded, so nix is reachable and this lane's
+// generated files are known to be stale. Reporting success would let --staged
+// restage the other lanes' output and commit a half-repaired tree.
 func (s *session) giveUp(name string, err error) {
 	s.unrepaired = append(s.unrepaired, name)
 
 	log.Warnf("codegen-repair: %s not repaired, so its generated files may land stale: %v", name, err)
 }
 
-// result is the verdict once the tree has converged.
+// result is the verdict once the tree has converged. A check that was given up
+// on fails the run even without --strict (conformist#153).
 func (s *session) result(total int) error {
-	if len(s.unrepaired) > 0 && s.opts.Strict {
+	if len(s.unrepaired) > 0 {
 		return fmt.Errorf(
 			"%w: %d of %d codegen check(s) could not be repaired: %s",
 			ErrRepairFailed, len(s.unrepaired), total, strings.Join(s.unrepaired, ", "),

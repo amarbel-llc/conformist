@@ -57,17 +57,21 @@ static artifact.
 | Exit | Meaning |
 |---|---|
 | 0 | Converged, or nothing to do, or a soft failure was warned about |
-| 2 | A built patch would not apply; the run would not converge; or, under `--strict`, a discovery or build failure, or no git worktree |
+| 2 | A check's patch would not build; a built patch would not apply; the run would not converge; or, under `--strict`, a discovery failure or no git worktree |
 
-Discovery and per-check build failures WARN and exit 0, and so does running
+A discovery failure WARNs and exits 0, and so does running
 outside a git worktree — a nix sandbox, where `dagnabit export` runs conformist's
 repair — since there is no tree to apply a patch to (conformist#132). This runs inside a git
 pre-commit hook, where a non-zero exit blocks the commit, so an unreachable or
 flaky nix must not stop a repo from committing — the drift check is still the gate,
-and the worst case is the staleness the lane was trying to pre-empt. A patch that
-was BUILT but will not apply is different: the contract says it was generated from
-this very tree, so a refusal means something is genuinely inconsistent, and that
-fails. `--strict` promotes the soft failures for a lane that would rather stop.
+and the worst case is the staleness the lane was trying to pre-empt. A check whose
+patch will not BUILD while discovery succeeded is different (conformist#153): nix
+is reachable, so that lane's output is known stale, and reporting success let
+`--staged` restage the other lanes' output and commit a half-repaired tree. The
+other checks are still repaired, then the run fails naming the lane. A patch that
+was BUILT but will not apply likewise means something is genuinely inconsistent
+(the contract says it was generated from this very tree), and fails. `--strict`
+promotes the remaining soft failures for a lane that would rather stop.
 
 Run as a linter's `repair-command`, a failure reaches the caller because the linter
 sets `repair-must-succeed`: conformist otherwise discards a repair command's exit

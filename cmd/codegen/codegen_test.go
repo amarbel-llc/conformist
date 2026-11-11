@@ -462,6 +462,34 @@ func TestDiscoveryFailsSoftUnlessStrict(tt *testing.T) {
 	as.ErrorIs(Run(context.Background(), listing), ErrRepairFailed)
 }
 
+// TestUnbuildableCheckFailsLoudWithoutStrict pins conformist#153. Discovery
+// worked (nix is reachable) but one check's patch would not build: that lane's
+// generated files are now known to be stale, so a non-strict run must NOT report
+// success — it would let --staged restage the other lanes' output and commit a
+// half-repaired tree. The failure names the lane, and the lanes that CAN be
+// repaired are still repaired first.
+func TestUnbuildableCheckFailsLoudWithoutStrict(tt *testing.T) {
+	t := &test_ui.T{T: tt}
+	as := require.New(t)
+
+	dir := t.TempDir()
+	aux := t.TempDir()
+
+	initRepo(t, dir, map[string]string{"gen.txt": "stale\n"})
+
+	// "broken" has no stub spec, so the stand-in nix exits 1 building its patch.
+	nix, _ := nixStub(t, aux,
+		[]Check{{Name: "alpha"}, {Name: "broken"}},
+		[]stubSpec{{name: "alpha", file: "gen.txt", gen: rewriteLine(1, "alpha")}},
+	)
+
+	err := Run(context.Background(), options(nix, dir))
+
+	as.ErrorIs(err, ErrRepairFailed)
+	as.Contains(err.Error(), "broken")
+	as.Equal("alpha\n", readFile(t, filepath.Join(dir, "gen.txt")), "repairable lanes are still repaired")
+}
+
 // TestDiscoverParsesContractFields pins the shape of the discovery result: the
 // engine reads name, prefix and includes, and sorts by name so a run's order and
 // log are deterministic.
